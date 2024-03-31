@@ -1,4 +1,4 @@
-> **_NOTE:_**: While the tools works, there is a need to needs to be rewamped to provide more consistency and larger set of features and coverage.
+> **_NOTE:_**: While the tools works, there is a need to needs to be revamped to provide more consistency and larger set of features and coverage.
 
 # cross-cloud
 
