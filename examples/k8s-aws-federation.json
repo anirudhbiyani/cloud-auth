@@ -1,0 +1,21 @@
+{
+  "type": "k8s_service_account_federation",
+  "cluster_name": "my-eks-cluster",
+  "namespace": "default",
+  "service_account_name": "my-app-sa",
+  "create_service_account": false,
+  "oidc_issuer_url": "https://oidc.eks.us-west-2.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E",
+  "target_cloud": "aws",
+  "aws_config": {
+    "role_name": "k8s-workload-role",
+    "account_id": "123456789012",
+    "policy_arns": [
+      "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
+    ],
+    "tags": {
+      "Environment": "production",
+      "Cluster": "my-eks-cluster"
+    }
+  }
+}
+

@@ -1,0 +1,22 @@
+{
+  "type": "aws_role_trust_oidc",
+  "role_name": "github-actions-deploy",
+  "account_id": "123456789012",
+  "oidc_provider_url": "https://token.actions.githubusercontent.com",
+  "audience": "sts.amazonaws.com",
+  "subject": "repo:myorg/myrepo:ref:refs/heads/main",
+  "subject_condition": "StringLike",
+  "source": "github_oidc",
+  "policy_arns": [
+    "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess",
+    "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+  ],
+  "max_session_duration": 3600,
+  "description": "GitHub Actions deployment role for myorg/myrepo",
+  "tags": {
+    "Environment": "production",
+    "ManagedBy": "cloud-auth",
+    "Repository": "myorg/myrepo"
+  }
+}
+
