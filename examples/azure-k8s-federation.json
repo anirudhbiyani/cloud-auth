@@ -1,0 +1,21 @@
+{
+  "type": "azure_federated_credential",
+  "tenant_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+  "subscription_id": "yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy",
+  "identity_type": "managed_identity",
+  "resource_group": "my-resource-group",
+  "managed_identity_name": "k8s-workload-identity",
+  "create_managed_identity": true,
+  "federated_credential_name": "eks-cluster-federation",
+  "issuer": "https://oidc.eks.us-west-2.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E",
+  "subject": "system:serviceaccount:default:my-service-account",
+  "audiences": ["api://AzureADTokenExchange"],
+  "role_assignments": [
+    {
+      "role_definition_id": "acdd72a7-3385-48ef-bd42-f606fba81ae7",
+      "scope": "/subscriptions/yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy/resourceGroups/my-resource-group"
+    }
+  ],
+  "source": "kubernetes"
+}
+

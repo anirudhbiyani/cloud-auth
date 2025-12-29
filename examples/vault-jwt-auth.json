@@ -1,0 +1,26 @@
+{
+  "type": "vault_broker",
+  "vault_address": "https://vault.example.com:8200",
+  "auth_method_path": "jwt-github",
+  "auth_method_type": "jwt",
+  "role_name": "github-actions",
+  "jwt_config": {
+    "oidc_discovery_url": "https://token.actions.githubusercontent.com",
+    "bound_issuer": "https://token.actions.githubusercontent.com"
+  },
+  "jwt_role": {
+    "role_type": "jwt",
+    "bound_audiences": ["https://github.com/myorg"],
+    "bound_claims": {
+      "repository": "myorg/myrepo",
+      "ref": "refs/heads/main"
+    },
+    "user_claim": "actor",
+    "token_policies": ["github-deploy"],
+    "token_ttl": 3600,
+    "token_max_ttl": 7200
+  },
+  "policy_document": "path \"secret/data/deploy/*\" {\n  capabilities = [\"read\"]\n}\n\npath \"aws/creds/deploy-role\" {\n  capabilities = [\"read\"]\n}",
+  "source": "github_oidc"
+}
+

@@ -1,0 +1,24 @@
+{
+    "type": "gcp_workload_identity_pool",
+    "project_id": "my-gcp-project",
+    "project_number": "123456789012",
+    "pool_id": "aws-federation-pool",
+    "pool_display_name": "AWS Federation Pool",
+    "provider_id": "aws-provider",
+    "provider_display_name": "AWS Provider",
+    "provider_type": "aws",
+    "aws_account_id": "987654321098",
+    "service_account_email": "aws-workload@my-gcp-project.iam.gserviceaccount.com",
+    "create_service_account": true,
+    "service_account_roles": [
+        "roles/storage.objectViewer",
+        "roles/bigquery.dataViewer"
+    ],
+    "attribute_mapping": {
+        "google.subject": "assertion.arn",
+        "attribute.aws_account": "assertion.account",
+        "attribute.aws_role": "assertion.arn.extract('/assumed-role/{role}/')"
+    },
+    "attribute_condition": "assertion.arn.startsWith('arn:aws:sts::987654321098:assumed-role/AllowedRole')",
+    "source": "aws"
+}
