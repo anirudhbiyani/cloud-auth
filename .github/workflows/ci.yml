@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    name: Lint, Test, Build & Security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+
+      - name: Download dependencies
+        run: go mod download
+
+      # Lint
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        continue-on-error: true
+        with:
+          version: latest
+          args: --timeout=5m
+
+      # Test
+      - name: Run tests
+        run: go test -v ./...
+
+      - name: Run tests with race detector
+        run: go test -race -v ./...
+
+      # Coverage
+      - name: Run tests with coverage
+        run: go test -coverprofile=coverage.out -covermode=atomic ./...
+
+      # Build
+      - name: Build
+        run: go build -v ./...
+
+      - name: Build examples
+        run: |
+          cd examples/basic && go build -v .
+          cd ../aws && go build -v .
+          cd ../azure && go build -v .
+          cd ../gcp && go build -v .
+
+      # Security
+      - name: Run Gosec Security Scanner
+        uses: securego/gosec@master
+        with:
+          args: -exclude-dir=examples ./...
