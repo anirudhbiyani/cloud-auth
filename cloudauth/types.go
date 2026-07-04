@@ -31,19 +31,9 @@ const (
 	CapabilityFederationSAML Capability = "federation_saml"
 )
 
-// CloudProvider identifies a cloud service provider.
-type CloudProvider string
-
-const (
-	ProviderAWS        CloudProvider = "aws"
-	ProviderGCP        CloudProvider = "gcp"
-	ProviderAzure      CloudProvider = "azure"
-	ProviderCloudflare CloudProvider = "cloudflare"
-	ProviderVault      CloudProvider = "vault"
-	ProviderOkta       CloudProvider = "okta"
-	ProviderGitHubOIDC CloudProvider = "github_oidc"
-	ProviderKubernetes CloudProvider = "kubernetes"
-)
+// Cloud (aws/gcp/azure/cloudflare/vault/okta/github_oidc/kubernetes) and its
+// constants are defined in federation.go — the single provider enum for the
+// whole module.
 
 // MechanismType identifies the type of cross-cloud auth mechanism.
 type MechanismType string
@@ -69,7 +59,7 @@ type MechanismRef struct {
 	Type MechanismType `json:"type"`
 
 	// Provider is the cloud provider managing this mechanism.
-	Provider CloudProvider `json:"provider"`
+	Provider Cloud `json:"provider"`
 
 	// ResourceIDs contains cloud-specific resource identifiers.
 	// Keys are resource types (e.g., "role_arn", "pool_id"), values are IDs.

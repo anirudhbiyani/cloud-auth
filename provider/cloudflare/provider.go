@@ -119,7 +119,7 @@ type CloudflareAccessSpec struct {
 	ApplicationDomain string `json:"application_domain,omitempty" yaml:"application_domain,omitempty"`
 
 	// Source identifies where this token will be used from.
-	Source cloudauth.CloudProvider `json:"source" yaml:"source"`
+	Source cloudauth.Cloud `json:"source" yaml:"source"`
 }
 
 // Type implements cloudauth.MechanismSpec.
@@ -142,13 +142,13 @@ func (s *CloudflareAccessSpec) Validate() error {
 }
 
 // SourceProvider implements cloudauth.MechanismSpec.
-func (s *CloudflareAccessSpec) SourceProvider() cloudauth.CloudProvider {
+func (s *CloudflareAccessSpec) SourceProvider() cloudauth.Cloud {
 	return s.Source
 }
 
 // TargetProvider implements cloudauth.MechanismSpec.
-func (s *CloudflareAccessSpec) TargetProvider() cloudauth.CloudProvider {
-	return cloudauth.ProviderCloudflare
+func (s *CloudflareAccessSpec) TargetProvider() cloudauth.Cloud {
+	return cloudauth.Cloudflare
 }
 
 // ProviderOption configures the Provider.
@@ -171,8 +171,8 @@ func New(opts ...ProviderOption) *Provider {
 }
 
 // Name implements cloudauth.Provider.
-func (p *Provider) Name() cloudauth.CloudProvider {
-	return cloudauth.ProviderCloudflare
+func (p *Provider) Name() cloudauth.Cloud {
+	return cloudauth.Cloudflare
 }
 
 // Capabilities implements cloudauth.Provider.
@@ -201,7 +201,7 @@ func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts
 	cfSpec, ok := spec.(*CloudflareAccessSpec)
 	if !ok {
 		return nil, cloudauth.ErrValidation(fmt.Sprintf("unsupported spec type: %T", spec)).
-			WithProvider(cloudauth.ProviderCloudflare)
+			WithProvider(cloudauth.Cloudflare)
 	}
 
 	var plan cloudauth.Plan
@@ -230,7 +230,7 @@ func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts
 		token, err = p.client.CreateAccessServiceToken(ctx, cfSpec.AccountID, cfSpec.TokenName, duration)
 		if err != nil {
 			return nil, cloudauth.ErrPermission("failed to create service token").
-				WithCause(err).WithProvider(cloudauth.ProviderCloudflare)
+				WithCause(err).WithProvider(cloudauth.Cloudflare)
 		}
 		resourceIDs["token_id"] = token.ID
 		resourceIDs["account_id"] = cfSpec.AccountID
@@ -271,7 +271,7 @@ func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts
 				// Cleanup token
 				_ = p.client.DeleteAccessServiceToken(ctx, cfSpec.AccountID, token.ID)
 				return nil, cloudauth.ErrPermission("failed to create application").
-					WithCause(err).WithProvider(cloudauth.ProviderCloudflare)
+					WithCause(err).WithProvider(cloudauth.Cloudflare)
 			}
 			appID = app.ID
 			resourceIDs["application_id"] = appID
@@ -290,12 +290,12 @@ func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts
 				_ = p.client.DeleteAccessApplication(ctx, cfSpec.AccountID, appID)
 				_ = p.client.DeleteAccessServiceToken(ctx, cfSpec.AccountID, token.ID)
 				return nil, cloudauth.ErrPermission("failed to create policy").
-					WithCause(err).WithProvider(cloudauth.ProviderCloudflare)
+					WithCause(err).WithProvider(cloudauth.Cloudflare)
 			}
 		}
 	}
 
-	ref := cloudauth.CreateMechanismRef("cloudflare_access", cloudauth.ProviderCloudflare, resourceIDs)
+	ref := cloudauth.CreateMechanismRef("cloudflare_access", cloudauth.Cloudflare, resourceIDs)
 
 	if opts.DryRun {
 		plan.Summary = fmt.Sprintf("Would create %d Cloudflare Access resources", len(plan.Actions))
@@ -378,7 +378,7 @@ func (p *Provider) Delete(ctx context.Context, ref cloudauth.MechanismRef, opts 
 // Use GetServiceTokenCredentials to retrieve stored service token credentials.
 func (p *Provider) Token(ctx context.Context, req cloudauth.TokenRequest) (*cloudauth.TokenResponse, error) {
 	return nil, cloudauth.ErrValidation("Cloudflare Access uses static service tokens, not dynamic token acquisition").
-		WithProvider(cloudauth.ProviderCloudflare).
+		WithProvider(cloudauth.Cloudflare).
 		WithDetail("hint", "Use GetServiceTokenCredentials() to retrieve stored service token credentials")
 }
 
@@ -424,23 +424,23 @@ type GetServiceTokenCredentialsInput struct {
 func (p *Provider) GetServiceTokenCredentials(ctx context.Context, input *GetServiceTokenCredentialsInput) (*ServiceTokenCredentials, error) {
 	if p.client == nil {
 		return nil, cloudauth.ErrValidation("Cloudflare API client not configured").
-			WithProvider(cloudauth.ProviderCloudflare).
+			WithProvider(cloudauth.Cloudflare).
 			WithDetail("hint", "Configure Cloudflare API client using WithAPIClient option")
 	}
 
 	// Validate input
 	if input.AccountID == "" {
-		return nil, cloudauth.ErrValidation("AccountID is required").WithProvider(cloudauth.ProviderCloudflare)
+		return nil, cloudauth.ErrValidation("AccountID is required").WithProvider(cloudauth.Cloudflare)
 	}
 	if input.TokenID == "" {
-		return nil, cloudauth.ErrValidation("TokenID is required").WithProvider(cloudauth.ProviderCloudflare)
+		return nil, cloudauth.ErrValidation("TokenID is required").WithProvider(cloudauth.Cloudflare)
 	}
 
 	token, err := p.client.GetAccessServiceToken(ctx, input.AccountID, input.TokenID)
 	if err != nil {
 		return nil, cloudauth.ErrAuth("failed to retrieve service token").
 			WithCause(err).
-			WithProvider(cloudauth.ProviderCloudflare).
+			WithProvider(cloudauth.Cloudflare).
 			WithResource("cloudflare:service-token", input.TokenID)
 	}
 

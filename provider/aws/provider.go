@@ -203,8 +203,8 @@ func New(opts ...ProviderOption) *Provider {
 }
 
 // Name implements cloudauth.Provider.
-func (p *Provider) Name() cloudauth.CloudProvider {
-	return cloudauth.ProviderAWS
+func (p *Provider) Name() cloudauth.Cloud {
+	return cloudauth.AWS
 }
 
 // Capabilities implements cloudauth.Provider.
@@ -236,7 +236,7 @@ func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts
 		return p.setupRoleTrustOIDC(ctx, s, opts)
 	default:
 		return nil, cloudauth.ErrValidation(fmt.Sprintf("unsupported spec type: %T", spec)).
-			WithProvider(cloudauth.ProviderAWS)
+			WithProvider(cloudauth.AWS)
 	}
 }
 
@@ -292,7 +292,7 @@ func (p *Provider) setupRoleTrustOIDC(ctx context.Context, spec *cloudauth.AWSRo
 				})
 				if err != nil {
 					return nil, cloudauth.ErrPermission("failed to create OIDC provider").
-						WithCause(err).WithProvider(cloudauth.ProviderAWS)
+						WithCause(err).WithProvider(cloudauth.AWS)
 				}
 				oidcProviderARN = arn
 				createdResources = append(createdResources, oidcProviderARN)
@@ -335,7 +335,7 @@ func (p *Provider) setupRoleTrustOIDC(ctx context.Context, spec *cloudauth.AWSRo
 		// Require client for non-dry-run operations
 		if p.client == nil {
 			return nil, cloudauth.ErrValidation("AWS IAM client not configured").
-				WithProvider(cloudauth.ProviderAWS).
+				WithProvider(cloudauth.AWS).
 				WithDetail("hint", "Configure AWS credentials or use --dry-run")
 		}
 
@@ -422,7 +422,7 @@ func (p *Provider) setupRoleTrustOIDC(ctx context.Context, spec *cloudauth.AWSRo
 		resourceIDs["oidc_provider_arn"] = oidcProviderARN
 	}
 
-	ref := cloudauth.CreateMechanismRef(cloudauth.MechanismAWSRoleTrustOIDC, cloudauth.ProviderAWS, resourceIDs)
+	ref := cloudauth.CreateMechanismRef(cloudauth.MechanismAWSRoleTrustOIDC, cloudauth.AWS, resourceIDs)
 
 	if opts.DryRun {
 		plan.Summary = fmt.Sprintf("Would create/update %d resources for AWS OIDC trust", len(plan.Actions))
@@ -548,14 +548,14 @@ func (p *Provider) deleteRoleTrustOIDC(ctx context.Context, ref cloudauth.Mechan
 func (p *Provider) Token(ctx context.Context, req cloudauth.TokenRequest) (*cloudauth.TokenResponse, error) {
 	if p.stsClient == nil {
 		return nil, cloudauth.ErrValidation("AWS STS client not configured").
-			WithProvider(cloudauth.ProviderAWS).
+			WithProvider(cloudauth.AWS).
 			WithDetail("hint", "Configure AWS STS client using WithSTSClient option")
 	}
 
 	// Validate required fields
 	if req.TargetIdentity == "" {
 		return nil, cloudauth.ErrValidation("TargetIdentity (role ARN) is required").
-			WithProvider(cloudauth.ProviderAWS)
+			WithProvider(cloudauth.AWS)
 	}
 
 	// The web identity token should be passed - we use Audience field for the token
@@ -563,7 +563,7 @@ func (p *Provider) Token(ctx context.Context, req cloudauth.TokenRequest) (*clou
 	webIdentityToken := req.Audience
 	if webIdentityToken == "" {
 		return nil, cloudauth.ErrValidation("Audience (web identity token) is required").
-			WithProvider(cloudauth.ProviderAWS).
+			WithProvider(cloudauth.AWS).
 			WithDetail("hint", "Pass the OIDC/JWT token in the Audience field")
 	}
 
@@ -593,7 +593,7 @@ func (p *Provider) Token(ctx context.Context, req cloudauth.TokenRequest) (*clou
 	if err != nil {
 		return nil, cloudauth.ErrAuth("failed to assume role with web identity").
 			WithCause(err).
-			WithProvider(cloudauth.ProviderAWS).
+			WithProvider(cloudauth.AWS).
 			WithResource("iam:role", req.TargetIdentity)
 	}
 
@@ -640,19 +640,19 @@ func (p *Provider) Token(ctx context.Context, req cloudauth.TokenRequest) (*clou
 func (p *Provider) GenerateGCPWorkloadIdentityToken(ctx context.Context, input *GCPWorkloadIdentityInput) (*CrossCloudTokenOutput, error) {
 	if p.stsClient == nil {
 		return nil, cloudauth.ErrValidation("AWS STS client not configured").
-			WithProvider(cloudauth.ProviderAWS).
+			WithProvider(cloudauth.AWS).
 			WithDetail("hint", "Configure AWS STS client using WithSTSClient option")
 	}
 
 	// Validate input
 	if input.ProjectNumber == "" {
-		return nil, cloudauth.ErrValidation("ProjectNumber is required").WithProvider(cloudauth.ProviderAWS)
+		return nil, cloudauth.ErrValidation("ProjectNumber is required").WithProvider(cloudauth.AWS)
 	}
 	if input.PoolID == "" {
-		return nil, cloudauth.ErrValidation("PoolID is required").WithProvider(cloudauth.ProviderAWS)
+		return nil, cloudauth.ErrValidation("PoolID is required").WithProvider(cloudauth.AWS)
 	}
 	if input.ProviderID == "" {
-		return nil, cloudauth.ErrValidation("ProviderID is required").WithProvider(cloudauth.ProviderAWS)
+		return nil, cloudauth.ErrValidation("ProviderID is required").WithProvider(cloudauth.AWS)
 	}
 
 	// Build the GCP audience (full resource name of the WIF provider)
@@ -682,7 +682,7 @@ func (p *Provider) GenerateGCPWorkloadIdentityToken(ctx context.Context, input *
 	signOutput, err := p.stsClient.SignRequest(ctx, signInput)
 	if err != nil {
 		return nil, cloudauth.ErrAuth("failed to sign request for GCP WIF").
-			WithCause(err).WithProvider(cloudauth.ProviderAWS)
+			WithCause(err).WithProvider(cloudauth.AWS)
 	}
 
 	// Build the token in the format expected by GCP
@@ -716,7 +716,7 @@ func (p *Provider) GenerateGCPWorkloadIdentityToken(ctx context.Context, input *
 //  3. Using AWS Lambda with GitHub Actions OIDC as an intermediary
 func (p *Provider) GenerateAzureFederatedToken(ctx context.Context, input *AzureFederatedTokenInput) (*CrossCloudTokenOutput, error) {
 	return nil, cloudauth.ErrValidation("AWS → Azure direct federation is not supported").
-		WithProvider(cloudauth.ProviderAWS).
+		WithProvider(cloudauth.AWS).
 		WithDetail("reason", "AWS does not expose an OIDC token endpoint that Azure can consume").
 		WithDetail("alternatives", "Use an identity broker like Vault, or use a service that provides OIDC tokens")
 }

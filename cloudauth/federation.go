@@ -1,5 +1,5 @@
 // This file holds the runtime federation domain types — the data-plane shared
-// by the source-identity providers (sip), target exchangers (te), and
+// by the source-identity providers (source), target exchangers (target), and
 // credential adapters (adapters): a workload obtains short-lived credentials
 // for another cloud with zero static secrets by minting a native proof of
 // identity and exchanging it at the target cloud's STS.
@@ -11,13 +11,20 @@ import (
 	"time"
 )
 
-// Cloud identifies a cloud provider participating in a federation exchange.
+// Cloud identifies a cloud or identity provider. The first three are the
+// federation-target hyperscalers; the remainder are additional providers the
+// control-plane can establish trust with.
 type Cloud string
 
 const (
-	AWS   Cloud = "aws"
-	GCP   Cloud = "gcp"
-	Azure Cloud = "azure"
+	AWS        Cloud = "aws"
+	GCP        Cloud = "gcp"
+	Azure      Cloud = "azure"
+	Cloudflare Cloud = "cloudflare"
+	Vault      Cloud = "vault"
+	Okta       Cloud = "okta"
+	GitHubOIDC Cloud = "github_oidc"
+	Kubernetes Cloud = "kubernetes"
 )
 
 // ParseCloud parses a case-insensitive cloud identifier, returning an error for

@@ -229,12 +229,12 @@ func (m *storedMechanism) Validate(ctx context.Context, opts ValidateOptions) (*
 }
 
 // GenerateMechanismID generates a unique ID for a mechanism.
-func GenerateMechanismID(mechType MechanismType, provider CloudProvider) string {
+func GenerateMechanismID(mechType MechanismType, provider Cloud) string {
 	return fmt.Sprintf("%s-%s-%s", mechType, provider, uuid.New().String()[:8])
 }
 
 // CreateMechanismRef creates a new MechanismRef with standard fields populated.
-func CreateMechanismRef(mechType MechanismType, provider CloudProvider, resourceIDs map[string]string) MechanismRef {
+func CreateMechanismRef(mechType MechanismType, provider Cloud, resourceIDs map[string]string) MechanismRef {
 	return MechanismRef{
 		ID:          GenerateMechanismID(mechType, provider),
 		Type:        mechType,

@@ -38,7 +38,7 @@ type CloudAuthError struct {
 	Message string
 
 	// Provider is the cloud provider where the error occurred.
-	Provider CloudProvider
+	Provider Cloud
 
 	// Operation is the operation that failed.
 	Operation string
@@ -95,7 +95,7 @@ func NewError(category ErrorCategory, message string) *CloudAuthError {
 }
 
 // WithProvider sets the provider.
-func (e *CloudAuthError) WithProvider(p CloudProvider) *CloudAuthError {
+func (e *CloudAuthError) WithProvider(p Cloud) *CloudAuthError {
 	e.Provider = p
 	return e
 }
@@ -199,7 +199,7 @@ func IsRetryable(err error) bool {
 }
 
 // GetErrorProvider extracts the provider from an error.
-func GetErrorProvider(err error) CloudProvider {
+func GetErrorProvider(err error) Cloud {
 	var caErr *CloudAuthError
 	if errors.As(err, &caErr) {
 		return caErr.Provider

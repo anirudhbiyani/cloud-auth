@@ -253,8 +253,8 @@ func New(opts ...ProviderOption) *Provider {
 }
 
 // Name implements cloudauth.Provider.
-func (p *Provider) Name() cloudauth.CloudProvider {
-	return cloudauth.ProviderGCP
+func (p *Provider) Name() cloudauth.Cloud {
+	return cloudauth.GCP
 }
 
 // Capabilities implements cloudauth.Provider.
@@ -286,7 +286,7 @@ func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts
 		return p.setupWorkloadIdentityPool(ctx, s, opts)
 	default:
 		return nil, cloudauth.ErrValidation(fmt.Sprintf("unsupported spec type: %T", spec)).
-			WithProvider(cloudauth.ProviderGCP)
+			WithProvider(cloudauth.GCP)
 	}
 }
 
@@ -319,7 +319,7 @@ func (p *Provider) setupWorkloadIdentityPool(ctx context.Context, spec *cloudaut
 		if !opts.DryRun {
 			if p.wifClient == nil {
 				return nil, cloudauth.ErrValidation("GCP Workload Identity client not configured").
-					WithProvider(cloudauth.ProviderGCP).
+					WithProvider(cloudauth.GCP).
 					WithDetail("hint", "Configure GCP credentials or use --dry-run")
 			}
 
@@ -337,7 +337,7 @@ func (p *Provider) setupWorkloadIdentityPool(ctx context.Context, spec *cloudaut
 				})
 			if err != nil {
 				return nil, cloudauth.ErrPermission("failed to create workload identity pool").
-					WithCause(err).WithProvider(cloudauth.ProviderGCP)
+					WithCause(err).WithProvider(cloudauth.GCP)
 			}
 		}
 	}
@@ -387,7 +387,7 @@ func (p *Provider) setupWorkloadIdentityPool(ctx context.Context, spec *cloudaut
 					_ = p.wifClient.DeleteWorkloadIdentityPool(ctx, poolName)
 				}
 				return nil, cloudauth.ErrPermission("failed to create workload identity provider").
-					WithCause(err).WithProvider(cloudauth.ProviderGCP)
+					WithCause(err).WithProvider(cloudauth.GCP)
 			}
 		}
 	}
@@ -421,7 +421,7 @@ func (p *Provider) setupWorkloadIdentityPool(ctx context.Context, spec *cloudaut
 				_, err := p.iamClient.CreateServiceAccount(ctx, spec.ProjectID, accountID, "Cloud-auth managed SA")
 				if err != nil {
 					return nil, cloudauth.ErrPermission("failed to create service account").
-						WithCause(err).WithProvider(cloudauth.ProviderGCP)
+						WithCause(err).WithProvider(cloudauth.GCP)
 				}
 			}
 		}
@@ -489,7 +489,7 @@ func (p *Provider) setupWorkloadIdentityPool(ctx context.Context, spec *cloudaut
 		"project_number":        spec.ProjectNumber,
 	}
 
-	ref := cloudauth.CreateMechanismRef(cloudauth.MechanismGCPWorkloadIdentityPool, cloudauth.ProviderGCP, resourceIDs)
+	ref := cloudauth.CreateMechanismRef(cloudauth.MechanismGCPWorkloadIdentityPool, cloudauth.GCP, resourceIDs)
 
 	if opts.DryRun {
 		plan.Summary = fmt.Sprintf("Would create/update %d resources for GCP Workload Identity Pool", len(plan.Actions))
@@ -606,19 +606,19 @@ func (p *Provider) deleteWorkloadIdentityPool(ctx context.Context, ref cloudauth
 func (p *Provider) Token(ctx context.Context, req cloudauth.TokenRequest) (*cloudauth.TokenResponse, error) {
 	if p.stsClient == nil {
 		return nil, cloudauth.ErrValidation("GCP STS client not configured").
-			WithProvider(cloudauth.ProviderGCP).
+			WithProvider(cloudauth.GCP).
 			WithDetail("hint", "Configure GCP STS client using WithSTSClient option")
 	}
 
 	// Validate required fields
 	if req.TargetIdentity == "" {
 		return nil, cloudauth.ErrValidation("TargetIdentity (service account email) is required").
-			WithProvider(cloudauth.ProviderGCP)
+			WithProvider(cloudauth.GCP)
 	}
 
 	if req.Audience == "" {
 		return nil, cloudauth.ErrValidation("Audience (WIF provider audience) is required").
-			WithProvider(cloudauth.ProviderGCP).
+			WithProvider(cloudauth.GCP).
 			WithDetail("hint", "Format: //iam.googleapis.com/projects/{project_number}/locations/global/workloadIdentityPools/{pool_id}/providers/{provider_id}")
 	}
 
@@ -626,7 +626,7 @@ func (p *Provider) Token(ctx context.Context, req cloudauth.TokenRequest) (*clou
 	subjectToken := req.SourceIdentity
 	if subjectToken == "" {
 		return nil, cloudauth.ErrValidation("SourceIdentity (subject token) is required").
-			WithProvider(cloudauth.ProviderGCP).
+			WithProvider(cloudauth.GCP).
 			WithDetail("hint", "Pass the external identity token (JWT, AWS signature) in SourceIdentity field")
 	}
 
@@ -653,7 +653,7 @@ func (p *Provider) Token(ctx context.Context, req cloudauth.TokenRequest) (*clou
 	if err != nil {
 		return nil, cloudauth.ErrAuth("failed to exchange token with GCP STS").
 			WithCause(err).
-			WithProvider(cloudauth.ProviderGCP)
+			WithProvider(cloudauth.GCP)
 	}
 
 	// Step 2: Use STS token to generate service account access token
@@ -674,7 +674,7 @@ func (p *Provider) Token(ctx context.Context, req cloudauth.TokenRequest) (*clou
 	if err != nil {
 		return nil, cloudauth.ErrAuth("failed to generate service account access token").
 			WithCause(err).
-			WithProvider(cloudauth.ProviderGCP).
+			WithProvider(cloudauth.GCP).
 			WithResource("service-account", req.TargetIdentity)
 	}
 
@@ -720,16 +720,16 @@ func (p *Provider) Token(ctx context.Context, req cloudauth.TokenRequest) (*clou
 func (p *Provider) GenerateAWSRoleAssumptionToken(ctx context.Context, input *AWSRoleAssumptionInput) (*CrossCloudTokenOutput, error) {
 	if p.stsClient == nil {
 		return nil, cloudauth.ErrValidation("GCP STS client not configured").
-			WithProvider(cloudauth.ProviderGCP).
+			WithProvider(cloudauth.GCP).
 			WithDetail("hint", "Configure GCP STS client using WithSTSClient option")
 	}
 
 	// Validate input
 	if input.ServiceAccountEmail == "" {
-		return nil, cloudauth.ErrValidation("ServiceAccountEmail is required").WithProvider(cloudauth.ProviderGCP)
+		return nil, cloudauth.ErrValidation("ServiceAccountEmail is required").WithProvider(cloudauth.GCP)
 	}
 	if input.RoleARN == "" {
-		return nil, cloudauth.ErrValidation("RoleARN is required").WithProvider(cloudauth.ProviderGCP)
+		return nil, cloudauth.ErrValidation("RoleARN is required").WithProvider(cloudauth.GCP)
 	}
 
 	// For AWS, the audience should be "sts.amazonaws.com" (the standard AWS STS audience)
@@ -746,7 +746,7 @@ func (p *Provider) GenerateAWSRoleAssumptionToken(ctx context.Context, input *AW
 	if err != nil {
 		return nil, cloudauth.ErrAuth("failed to generate identity token for AWS").
 			WithCause(err).
-			WithProvider(cloudauth.ProviderGCP).
+			WithProvider(cloudauth.GCP).
 			WithResource("service-account", input.ServiceAccountEmail)
 	}
 
@@ -784,19 +784,19 @@ func (p *Provider) GenerateAWSRoleAssumptionToken(ctx context.Context, input *AW
 func (p *Provider) GenerateAzureFederatedToken(ctx context.Context, input *AzureFederatedTokenInput) (*CrossCloudTokenOutput, error) {
 	if p.stsClient == nil {
 		return nil, cloudauth.ErrValidation("GCP STS client not configured").
-			WithProvider(cloudauth.ProviderGCP).
+			WithProvider(cloudauth.GCP).
 			WithDetail("hint", "Configure GCP STS client using WithSTSClient option")
 	}
 
 	// Validate input
 	if input.ServiceAccountEmail == "" {
-		return nil, cloudauth.ErrValidation("ServiceAccountEmail is required").WithProvider(cloudauth.ProviderGCP)
+		return nil, cloudauth.ErrValidation("ServiceAccountEmail is required").WithProvider(cloudauth.GCP)
 	}
 	if input.TenantID == "" {
-		return nil, cloudauth.ErrValidation("TenantID is required").WithProvider(cloudauth.ProviderGCP)
+		return nil, cloudauth.ErrValidation("TenantID is required").WithProvider(cloudauth.GCP)
 	}
 	if input.ClientID == "" {
-		return nil, cloudauth.ErrValidation("ClientID is required").WithProvider(cloudauth.ProviderGCP)
+		return nil, cloudauth.ErrValidation("ClientID is required").WithProvider(cloudauth.GCP)
 	}
 
 	// For Azure federated credentials, the default audience is "api://AzureADTokenExchange"
@@ -816,7 +816,7 @@ func (p *Provider) GenerateAzureFederatedToken(ctx context.Context, input *Azure
 	if err != nil {
 		return nil, cloudauth.ErrAuth("failed to generate identity token for Azure").
 			WithCause(err).
-			WithProvider(cloudauth.ProviderGCP).
+			WithProvider(cloudauth.GCP).
 			WithResource("service-account", input.ServiceAccountEmail)
 	}
 

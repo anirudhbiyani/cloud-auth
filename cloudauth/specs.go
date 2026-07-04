@@ -56,7 +56,7 @@ type AWSRoleTrustOIDCSpec struct {
 	PermissionsBoundary string `json:"permissions_boundary,omitempty" yaml:"permissions_boundary,omitempty"`
 
 	// SourceProvider identifies the OIDC provider type.
-	Source CloudProvider `json:"source" yaml:"source"`
+	Source Cloud `json:"source" yaml:"source"`
 }
 
 // Type implements MechanismSpec.
@@ -91,13 +91,13 @@ func (s *AWSRoleTrustOIDCSpec) Validate() error {
 }
 
 // SourceProvider implements MechanismSpec.
-func (s *AWSRoleTrustOIDCSpec) SourceProvider() CloudProvider {
+func (s *AWSRoleTrustOIDCSpec) SourceProvider() Cloud {
 	return s.Source
 }
 
 // TargetProvider implements MechanismSpec.
-func (s *AWSRoleTrustOIDCSpec) TargetProvider() CloudProvider {
-	return ProviderAWS
+func (s *AWSRoleTrustOIDCSpec) TargetProvider() Cloud {
+	return AWS
 }
 
 // GCPWorkloadIdentityPoolSpec specifies a GCP Workload Identity Pool configuration.
@@ -150,7 +150,7 @@ type GCPWorkloadIdentityPoolSpec struct {
 	ServiceAccountRoles []string `json:"service_account_roles,omitempty" yaml:"service_account_roles,omitempty"`
 
 	// Source identifies the external identity provider.
-	Source CloudProvider `json:"source" yaml:"source"`
+	Source Cloud `json:"source" yaml:"source"`
 }
 
 // Type implements MechanismSpec.
@@ -195,13 +195,13 @@ func (s *GCPWorkloadIdentityPoolSpec) Validate() error {
 }
 
 // SourceProvider implements MechanismSpec.
-func (s *GCPWorkloadIdentityPoolSpec) SourceProvider() CloudProvider {
+func (s *GCPWorkloadIdentityPoolSpec) SourceProvider() Cloud {
 	return s.Source
 }
 
 // TargetProvider implements MechanismSpec.
-func (s *GCPWorkloadIdentityPoolSpec) TargetProvider() CloudProvider {
-	return ProviderGCP
+func (s *GCPWorkloadIdentityPoolSpec) TargetProvider() Cloud {
+	return GCP
 }
 
 // AzureFederatedCredentialSpec specifies an Azure federated identity credential.
@@ -248,7 +248,7 @@ type AzureFederatedCredentialSpec struct {
 	RoleAssignments []AzureRoleAssignment `json:"role_assignments,omitempty" yaml:"role_assignments,omitempty"`
 
 	// Source identifies the external identity provider.
-	Source CloudProvider `json:"source" yaml:"source"`
+	Source Cloud `json:"source" yaml:"source"`
 }
 
 // AzureRoleAssignment specifies an Azure RBAC role assignment.
@@ -303,13 +303,13 @@ func (s *AzureFederatedCredentialSpec) Validate() error {
 }
 
 // SourceProvider implements MechanismSpec.
-func (s *AzureFederatedCredentialSpec) SourceProvider() CloudProvider {
+func (s *AzureFederatedCredentialSpec) SourceProvider() Cloud {
 	return s.Source
 }
 
 // TargetProvider implements MechanismSpec.
-func (s *AzureFederatedCredentialSpec) TargetProvider() CloudProvider {
-	return ProviderAzure
+func (s *AzureFederatedCredentialSpec) TargetProvider() Cloud {
+	return Azure
 }
 
 // K8sServiceAccountFederationSpec specifies a Kubernetes ServiceAccount federation.
@@ -331,7 +331,7 @@ type K8sServiceAccountFederationSpec struct {
 	OIDCIssuerURL string `json:"oidc_issuer_url" yaml:"oidc_issuer_url"`
 
 	// TargetCloud specifies which cloud provider to federate with.
-	TargetCloud CloudProvider `json:"target_cloud" yaml:"target_cloud"`
+	TargetCloud Cloud `json:"target_cloud" yaml:"target_cloud"`
 
 	// AWSConfig is required when TargetCloud is "aws".
 	AWSConfig *K8sToAWSConfig `json:"aws_config,omitempty" yaml:"aws_config,omitempty"`
@@ -386,21 +386,21 @@ func (s *K8sServiceAccountFederationSpec) Validate() error {
 	}
 
 	switch s.TargetCloud {
-	case ProviderAWS:
+	case AWS:
 		if s.AWSConfig == nil {
 			return fmt.Errorf("aws_config is required when target_cloud is 'aws'")
 		}
 		if s.AWSConfig.RoleName == "" || s.AWSConfig.AccountID == "" {
 			return fmt.Errorf("aws_config.role_name and account_id are required")
 		}
-	case ProviderGCP:
+	case GCP:
 		if s.GCPConfig == nil {
 			return fmt.Errorf("gcp_config is required when target_cloud is 'gcp'")
 		}
 		if s.GCPConfig.ProjectID == "" || s.GCPConfig.ServiceAccountEmail == "" {
 			return fmt.Errorf("gcp_config.project_id and service_account_email are required")
 		}
-	case ProviderAzure:
+	case Azure:
 		if s.AzureConfig == nil {
 			return fmt.Errorf("azure_config is required when target_cloud is 'azure'")
 		}
@@ -415,12 +415,12 @@ func (s *K8sServiceAccountFederationSpec) Validate() error {
 }
 
 // SourceProvider implements MechanismSpec.
-func (s *K8sServiceAccountFederationSpec) SourceProvider() CloudProvider {
-	return ProviderKubernetes
+func (s *K8sServiceAccountFederationSpec) SourceProvider() Cloud {
+	return Kubernetes
 }
 
 // TargetProvider implements MechanismSpec.
-func (s *K8sServiceAccountFederationSpec) TargetProvider() CloudProvider {
+func (s *K8sServiceAccountFederationSpec) TargetProvider() Cloud {
 	return s.TargetCloud
 }
 

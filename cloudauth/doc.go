@@ -44,7 +44,7 @@
 //	    OIDCProviderURL: "https://token.actions.githubusercontent.com",
 //	    Audience:        "sts.amazonaws.com",
 //	    Subject:         "repo:myorg/myrepo:ref:refs/heads/main",
-//	    Source:          cloudauth.ProviderGitHubOIDC,
+//	    Source:          cloudauth.GitHubOIDC,
 //	}
 //
 //	outputs, err := cloudauth.Setup(ctx, spec)

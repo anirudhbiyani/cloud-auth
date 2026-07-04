@@ -10,8 +10,8 @@ import (
 // It provides thread-safe access to registered providers.
 type Registry struct {
 	mu        sync.RWMutex
-	providers map[CloudProvider]Provider
-	factories map[CloudProvider]ProviderFactory
+	providers map[Cloud]Provider
+	factories map[Cloud]ProviderFactory
 }
 
 // DefaultRegistry is the global provider registry.
@@ -21,8 +21,8 @@ var DefaultRegistry = NewRegistry()
 // NewRegistry creates a new empty registry.
 func NewRegistry() *Registry {
 	return &Registry{
-		providers: make(map[CloudProvider]Provider),
-		factories: make(map[CloudProvider]ProviderFactory),
+		providers: make(map[Cloud]Provider),
+		factories: make(map[Cloud]ProviderFactory),
 	}
 }
 
@@ -43,7 +43,7 @@ func (r *Registry) Register(p Provider) error {
 
 // RegisterFactory adds a provider factory to the registry.
 // Factories allow lazy/configured provider instantiation.
-func (r *Registry) RegisterFactory(name CloudProvider, f ProviderFactory) error {
+func (r *Registry) RegisterFactory(name Cloud, f ProviderFactory) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -56,7 +56,7 @@ func (r *Registry) RegisterFactory(name CloudProvider, f ProviderFactory) error 
 }
 
 // Get retrieves a registered provider by name.
-func (r *Registry) Get(name CloudProvider) (Provider, error) {
+func (r *Registry) Get(name Cloud) (Provider, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -68,7 +68,7 @@ func (r *Registry) Get(name CloudProvider) (Provider, error) {
 }
 
 // GetOrCreate retrieves a provider or creates one using the factory.
-func (r *Registry) GetOrCreate(ctx context.Context, name CloudProvider, config map[string]interface{}) (Provider, error) {
+func (r *Registry) GetOrCreate(ctx context.Context, name Cloud, config map[string]interface{}) (Provider, error) {
 	// First try to get existing provider
 	r.mu.RLock()
 	p, exists := r.providers[name]
@@ -102,7 +102,7 @@ func (r *Registry) GetOrCreate(ctx context.Context, name CloudProvider, config m
 }
 
 // GetTokenProvider retrieves a provider that supports token acquisition.
-func (r *Registry) GetTokenProvider(name CloudProvider) (TokenProvider, error) {
+func (r *Registry) GetTokenProvider(name Cloud) (TokenProvider, error) {
 	p, err := r.Get(name)
 	if err != nil {
 		return nil, err
@@ -121,7 +121,7 @@ func (r *Registry) GetTokenProvider(name CloudProvider) (TokenProvider, error) {
 }
 
 // GetLifecycleProvider retrieves a provider that supports lifecycle operations.
-func (r *Registry) GetLifecycleProvider(name CloudProvider) (LifecycleProvider, error) {
+func (r *Registry) GetLifecycleProvider(name Cloud) (LifecycleProvider, error) {
 	p, err := r.Get(name)
 	if err != nil {
 		return nil, err
@@ -136,11 +136,11 @@ func (r *Registry) GetLifecycleProvider(name CloudProvider) (LifecycleProvider, 
 }
 
 // List returns all registered provider names.
-func (r *Registry) List() []CloudProvider {
+func (r *Registry) List() []Cloud {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	names := make([]CloudProvider, 0, len(r.providers))
+	names := make([]Cloud, 0, len(r.providers))
 	for name := range r.providers {
 		names = append(names, name)
 	}
@@ -148,11 +148,11 @@ func (r *Registry) List() []CloudProvider {
 }
 
 // ListByCapability returns providers that have a specific capability.
-func (r *Registry) ListByCapability(cap Capability) []CloudProvider {
+func (r *Registry) ListByCapability(cap Capability) []Cloud {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	var names []CloudProvider
+	var names []Cloud
 	for name, p := range r.providers {
 		if p.HasCapability(cap) {
 			names = append(names, name)
@@ -162,7 +162,7 @@ func (r *Registry) ListByCapability(cap Capability) []CloudProvider {
 }
 
 // Capabilities returns capabilities for a provider.
-func (r *Registry) Capabilities(name CloudProvider) ([]Capability, error) {
+func (r *Registry) Capabilities(name Cloud) ([]Capability, error) {
 	p, err := r.Get(name)
 	if err != nil {
 		return nil, err
@@ -172,7 +172,7 @@ func (r *Registry) Capabilities(name CloudProvider) ([]Capability, error) {
 
 // Unregister removes a provider from the registry.
 // This is mainly useful for testing.
-func (r *Registry) Unregister(name CloudProvider) {
+func (r *Registry) Unregister(name Cloud) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.providers, name)
@@ -183,8 +183,8 @@ func (r *Registry) Unregister(name CloudProvider) {
 func (r *Registry) Clear() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.providers = make(map[CloudProvider]Provider)
-	r.factories = make(map[CloudProvider]ProviderFactory)
+	r.providers = make(map[Cloud]Provider)
+	r.factories = make(map[Cloud]ProviderFactory)
 }
 
 // Global convenience functions that use DefaultRegistry
@@ -195,33 +195,33 @@ func Register(p Provider) error {
 }
 
 // RegisterFactory adds a provider factory to the default registry.
-func RegisterFactory(name CloudProvider, f ProviderFactory) error {
+func RegisterFactory(name Cloud, f ProviderFactory) error {
 	return DefaultRegistry.RegisterFactory(name, f)
 }
 
 // GetProvider retrieves a provider from the default registry.
-func GetProvider(name CloudProvider) (Provider, error) {
+func GetProvider(name Cloud) (Provider, error) {
 	return DefaultRegistry.Get(name)
 }
 
 // GetTokenProviderFromRegistry retrieves a token provider from the default registry.
-func GetTokenProviderFromRegistry(name CloudProvider) (TokenProvider, error) {
+func GetTokenProviderFromRegistry(name Cloud) (TokenProvider, error) {
 	return DefaultRegistry.GetTokenProvider(name)
 }
 
 // GetLifecycleProviderFromRegistry retrieves a lifecycle provider from the default registry.
-func GetLifecycleProviderFromRegistry(name CloudProvider) (LifecycleProvider, error) {
+func GetLifecycleProviderFromRegistry(name Cloud) (LifecycleProvider, error) {
 	return DefaultRegistry.GetLifecycleProvider(name)
 }
 
 // ListProviders returns all providers in the default registry.
-func ListProviders() []CloudProvider {
+func ListProviders() []Cloud {
 	return DefaultRegistry.List()
 }
 
 // ProviderInfo contains metadata about a registered provider.
 type ProviderInfo struct {
-	Name         CloudProvider
+	Name         Cloud
 	Capabilities []Capability
 	IsToken      bool
 	IsLifecycle  bool

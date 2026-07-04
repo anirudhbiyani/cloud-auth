@@ -91,14 +91,14 @@ Full lifecycle support for major cloud providers:
 
 **Using Go:**
 ```bash
-go install github.com/anirudhbiyani/cloud-auth@latest
+go install github.com/anirudhbiyani/cloud-auth/cmd/cloud-auth@latest
 ```
 
 **From Source:**
 ```bash
 git clone https://github.com/anirudhbiyani/cloud-auth.git
 cd cloud-auth
-go build -o cloud-auth .
+go build -o cloud-auth ./cmd/cloud-auth
 ```
 
 ### Library
@@ -414,23 +414,30 @@ VAULT_TOKEN                # Vault token
 
 ```
 cloud-auth/
-├── main.go                    # CLI entry point
-├── pkg/
-│   ├── cloudauth/             # Core library
-│   │   ├── interfaces.go      # Provider and Manager interfaces
-│   │   ├── types.go           # Core types (MechanismRef, Outputs, etc.)
-│   │   ├── specs.go           # Mechanism specifications
-│   │   ├── manager.go         # Default manager implementation
-│   │   ├── registry.go        # Provider registry
-│   │   ├── state.go           # State store implementations
-│   │   ├── validation.go      # Validation framework
-│   │   └── errors.go          # Structured errors
-│   └── providers/             # Provider implementations
-│       ├── aws/               # AWS IAM, STS, OIDC
-│       ├── gcp/               # GCP Workload Identity
-│       ├── azure/             # Azure AD Federated Credentials
-│       ├── cloudflare/        # Cloudflare Access
-│       └── vault/             # HashiCorp Vault
+├── cmd/cloud-auth/            # Single CLI binary (control-plane + runtime commands)
+├── cloudauth/                 # Core domain package (one shared vocabulary)
+│   ├── federation.go          # Runtime types (Cloud, Target, SourceToken, Credentials)
+│   ├── federation_interfaces.go # SourceProvider, Exchanger, Runtime, sentinel errors
+│   ├── interfaces.go          # Provider and Manager interfaces (control-plane)
+│   ├── types.go               # Control-plane types (MechanismRef, Outputs, etc.)
+│   ├── specs.go               # Mechanism specifications
+│   ├── manager.go             # Default manager implementation
+│   ├── registry.go            # Provider registry
+│   ├── state.go               # State store implementations
+│   ├── validation.go          # Validation framework
+│   └── errors.go              # Structured errors
+├── provider/                  # Control-plane provider implementations
+│   ├── aws/                   # AWS IAM, STS, OIDC
+│   ├── gcp/                   # GCP Workload Identity
+│   ├── azure/                 # Azure AD Federated Credentials
+│   ├── cloudflare/            # Cloudflare Access
+│   └── vault/                 # HashiCorp Vault
+├── source/                    # Runtime: source-identity detection + minting
+├── target/                    # Runtime: target STS exchangers
+├── adapters/                  # Runtime: SDK-native credential adapters
+├── broker/                    # Runtime: detect→mint→exchange orchestrator
+├── config/                    # Runtime: declarative federation config
+├── internal/                  # imds, jwt, cache, audit
 └── examples/                  # Example spec files
 ```
 
@@ -505,7 +512,7 @@ go mod download
 go test -v ./...
 
 # Build
-go build -o cloud-auth .
+go build -o cloud-auth ./cmd/cloud-auth
 
 # Run linter
 golangci-lint run

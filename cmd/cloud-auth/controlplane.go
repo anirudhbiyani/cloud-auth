@@ -73,6 +73,15 @@ func run(args []string) error {
 		return cmdProviders(ctx, cmdArgs)
 	case "version":
 		return cmdVersion()
+	// Runtime (data-plane) commands — handlers live in runtime.go.
+	case "doctor":
+		return cmdDoctor(ctx, cmdArgs)
+	case "exchange":
+		return cmdExchange(ctx, cmdArgs, "env")
+	case "credential-process":
+		return cmdExchange(ctx, cmdArgs, "credential-process")
+	case "config-validate":
+		return cmdConfigValidate(cmdArgs)
 	case "help", "-h", "--help":
 		printUsage()
 		return nil
@@ -87,13 +96,20 @@ func printUsage() {
 Usage:
   cloud-auth <command> [options]
 
-Commands:
+Control-plane commands (establish trust):
   setup       Create or update a cross-cloud authentication mechanism
   validate    Validate an existing mechanism configuration
   delete      Delete a mechanism and its resources
   list        List all managed mechanisms
   describe    Show details of a specific mechanism
   providers   List available providers and their capabilities
+
+Runtime commands (obtain credentials, zero static secrets):
+  doctor              Detect the runtime and print the resolved source identity
+  exchange            Obtain short-lived target credentials (--format env|json)
+  credential-process  Emit the AWS credential_process JSON contract
+  config-validate     Lint a declarative federation config (--config file)
+
   version     Show version information
   help        Show this help message
 
@@ -246,7 +262,8 @@ Examples:
   # List all mechanisms
   cloud-auth list
 
-For more information, visit: https://github.com/anirudhbiyani/cloud-auth`, )}
+For more information, visit: https://github.com/anirudhbiyani/cloud-auth`)
+}
 
 // CLI options for setup
 type setupOpts struct {
@@ -294,11 +311,11 @@ type setupOpts struct {
 	credentialName string
 
 	// K8s federation options
-	clusterName        string
-	k8sNamespace       string
-	k8sSAName          string
-	createK8sSA        bool
-	targetCloud        string
+	clusterName  string
+	k8sNamespace string
+	k8sSAName    string
+	createK8sSA  bool
+	targetCloud  string
 }
 
 func parseSetupOpts(args []string) (*setupOpts, error) {
@@ -547,28 +564,28 @@ func buildSpecFromFlags(opts *setupOpts) (cloudauth.MechanismSpec, error) {
 	}
 }
 
-func parseSourceProvider(source string) cloudauth.CloudProvider {
+func parseSourceProvider(source string) cloudauth.Cloud {
 	switch strings.ToLower(source) {
 	case "github", "github-actions", "github_oidc":
-		return cloudauth.ProviderGitHubOIDC
+		return cloudauth.GitHubOIDC
 	case "aws":
-		return cloudauth.ProviderAWS
+		return cloudauth.AWS
 	case "gcp", "google":
-		return cloudauth.ProviderGCP
+		return cloudauth.GCP
 	case "azure":
-		return cloudauth.ProviderAzure
+		return cloudauth.Azure
 	case "k8s", "kubernetes":
-		return cloudauth.ProviderKubernetes
+		return cloudauth.Kubernetes
 	case "okta":
-		return cloudauth.ProviderOkta
+		return cloudauth.Okta
 	case "vault":
-		return cloudauth.ProviderVault
+		return cloudauth.Vault
 	default:
-		return cloudauth.CloudProvider(source)
+		return cloudauth.Cloud(source)
 	}
 }
 
-func buildAWSSpec(opts *setupOpts, source cloudauth.CloudProvider) (*cloudauth.AWSRoleTrustOIDCSpec, error) {
+func buildAWSSpec(opts *setupOpts, source cloudauth.Cloud) (*cloudauth.AWSRoleTrustOIDCSpec, error) {
 	if opts.roleName == "" {
 		return nil, fmt.Errorf("--role-name is required for aws-oidc")
 	}
@@ -609,7 +626,7 @@ func buildAWSSpec(opts *setupOpts, source cloudauth.CloudProvider) (*cloudauth.A
 	return spec, nil
 }
 
-func buildGCPSpec(opts *setupOpts, source cloudauth.CloudProvider) (*cloudauth.GCPWorkloadIdentityPoolSpec, error) {
+func buildGCPSpec(opts *setupOpts, source cloudauth.Cloud) (*cloudauth.GCPWorkloadIdentityPoolSpec, error) {
 	if opts.projectID == "" {
 		return nil, fmt.Errorf("--project-id is required for gcp-wif")
 	}
@@ -658,7 +675,7 @@ func buildGCPSpec(opts *setupOpts, source cloudauth.CloudProvider) (*cloudauth.G
 	return spec, nil
 }
 
-func buildAzureSpec(opts *setupOpts, source cloudauth.CloudProvider) (*cloudauth.AzureFederatedCredentialSpec, error) {
+func buildAzureSpec(opts *setupOpts, source cloudauth.Cloud) (*cloudauth.AzureFederatedCredentialSpec, error) {
 	if opts.tenantID == "" {
 		return nil, fmt.Errorf("--tenant-id is required for azure-federated")
 	}
@@ -756,7 +773,7 @@ func buildK8sSpec(opts *setupOpts) (*cloudauth.K8sServiceAccountFederationSpec, 
 	// Parse target cloud and build cloud-specific config
 	switch strings.ToLower(opts.targetCloud) {
 	case "aws":
-		spec.TargetCloud = cloudauth.ProviderAWS
+		spec.TargetCloud = cloudauth.AWS
 		if opts.roleName == "" {
 			return nil, fmt.Errorf("--role-name is required for k8s-federation with target-cloud=aws")
 		}
@@ -777,7 +794,7 @@ func buildK8sSpec(opts *setupOpts) (*cloudauth.K8sServiceAccountFederationSpec, 
 		}
 
 	case "gcp", "google":
-		spec.TargetCloud = cloudauth.ProviderGCP
+		spec.TargetCloud = cloudauth.GCP
 		if opts.projectID == "" {
 			return nil, fmt.Errorf("--project-id is required for k8s-federation with target-cloud=gcp")
 		}
@@ -794,7 +811,7 @@ func buildK8sSpec(opts *setupOpts) (*cloudauth.K8sServiceAccountFederationSpec, 
 		}
 
 	case "azure":
-		spec.TargetCloud = cloudauth.ProviderAzure
+		spec.TargetCloud = cloudauth.Azure
 		if opts.tenantID == "" {
 			return nil, fmt.Errorf("--tenant-id is required for k8s-federation with target-cloud=azure")
 		}
@@ -1006,7 +1023,7 @@ func cmdValidate(ctx context.Context, args []string) error {
 	for _, check := range report.Checks {
 		status := "✓"
 		switch check.Status {
-case cloudauth.CheckStatusFailed:
+		case cloudauth.CheckStatusFailed:
 			status = "✗"
 		case cloudauth.CheckStatusSkipped:
 			status = "○"
@@ -1198,7 +1215,7 @@ func cmdList(ctx context.Context, args []string) error {
 		filter.Type = cloudauth.MechanismType(opts.mechType)
 	}
 	if opts.provider != "" {
-		filter.Provider = cloudauth.CloudProvider(opts.provider)
+		filter.Provider = cloudauth.Cloud(opts.provider)
 	}
 
 	// List mechanisms

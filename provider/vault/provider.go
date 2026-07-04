@@ -220,7 +220,7 @@ type CrossCloudTokenOutput struct {
 	// ExpiresAt is when the credentials expire.
 	ExpiresAt time.Time
 	// Provider is the target cloud provider.
-	Provider cloudauth.CloudProvider
+	Provider cloudauth.Cloud
 	// LeaseID is the Vault lease ID for renewal/revocation.
 	LeaseID string
 }
@@ -288,7 +288,7 @@ type VaultBrokerSpec struct {
 	PolicyDocument string `json:"policy_document,omitempty" yaml:"policy_document,omitempty"`
 
 	// Source identifies the source identity provider.
-	Source cloudauth.CloudProvider `json:"source" yaml:"source"`
+	Source cloudauth.Cloud `json:"source" yaml:"source"`
 }
 
 // Type implements cloudauth.MechanismSpec.
@@ -328,13 +328,13 @@ func (s *VaultBrokerSpec) Validate() error {
 }
 
 // SourceProvider implements cloudauth.MechanismSpec.
-func (s *VaultBrokerSpec) SourceProvider() cloudauth.CloudProvider {
+func (s *VaultBrokerSpec) SourceProvider() cloudauth.Cloud {
 	return s.Source
 }
 
 // TargetProvider implements cloudauth.MechanismSpec.
-func (s *VaultBrokerSpec) TargetProvider() cloudauth.CloudProvider {
-	return cloudauth.ProviderVault
+func (s *VaultBrokerSpec) TargetProvider() cloudauth.Cloud {
+	return cloudauth.Vault
 }
 
 // ProviderOption configures the Provider.
@@ -357,8 +357,8 @@ func New(opts ...ProviderOption) *Provider {
 }
 
 // Name implements cloudauth.Provider.
-func (p *Provider) Name() cloudauth.CloudProvider {
-	return cloudauth.ProviderVault
+func (p *Provider) Name() cloudauth.Cloud {
+	return cloudauth.Vault
 }
 
 // Capabilities implements cloudauth.Provider.
@@ -388,7 +388,7 @@ func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts
 	vaultSpec, ok := spec.(*VaultBrokerSpec)
 	if !ok {
 		return nil, cloudauth.ErrValidation(fmt.Sprintf("unsupported spec type: %T", spec)).
-			WithProvider(cloudauth.ProviderVault)
+			WithProvider(cloudauth.Vault)
 	}
 
 	var plan cloudauth.Plan
@@ -418,7 +418,7 @@ func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts
 			err := p.client.EnableAuthMethod(ctx, vaultSpec.AuthMethodPath, vaultSpec.AuthMethodType, nil)
 			if err != nil {
 				return nil, cloudauth.ErrPermission("failed to enable auth method").
-					WithCause(err).WithProvider(cloudauth.ProviderVault)
+					WithCause(err).WithProvider(cloudauth.Vault)
 			}
 		}
 	}
@@ -436,7 +436,7 @@ func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts
 		if !opts.DryRun {
 			if err := p.client.WriteJWTConfig(ctx, vaultSpec.AuthMethodPath, vaultSpec.JWTConfig); err != nil {
 				return nil, cloudauth.ErrPermission("failed to configure JWT auth").
-					WithCause(err).WithProvider(cloudauth.ProviderVault)
+					WithCause(err).WithProvider(cloudauth.Vault)
 			}
 		}
 	}
@@ -453,7 +453,7 @@ func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts
 		if !opts.DryRun {
 			if err := p.client.WriteAWSConfig(ctx, vaultSpec.AuthMethodPath, vaultSpec.AWSConfig); err != nil {
 				return nil, cloudauth.ErrPermission("failed to configure AWS auth").
-					WithCause(err).WithProvider(cloudauth.ProviderVault)
+					WithCause(err).WithProvider(cloudauth.Vault)
 			}
 		}
 	}
@@ -476,14 +476,14 @@ func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts
 			if vaultSpec.JWTRole != nil {
 				if err := p.client.WriteJWTRole(ctx, vaultSpec.AuthMethodPath, vaultSpec.RoleName, vaultSpec.JWTRole); err != nil {
 					return nil, cloudauth.ErrPermission("failed to create JWT role").
-						WithCause(err).WithProvider(cloudauth.ProviderVault)
+						WithCause(err).WithProvider(cloudauth.Vault)
 				}
 			}
 		case "aws":
 			if vaultSpec.AWSRole != nil {
 				if err := p.client.WriteAWSRole(ctx, vaultSpec.AuthMethodPath, vaultSpec.RoleName, vaultSpec.AWSRole); err != nil {
 					return nil, cloudauth.ErrPermission("failed to create AWS role").
-						WithCause(err).WithProvider(cloudauth.ProviderVault)
+						WithCause(err).WithProvider(cloudauth.Vault)
 				}
 			}
 		}
@@ -503,13 +503,13 @@ func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts
 		if !opts.DryRun {
 			if err := p.client.WritePolicy(ctx, policyName, vaultSpec.PolicyDocument); err != nil {
 				return nil, cloudauth.ErrPermission("failed to create policy").
-					WithCause(err).WithProvider(cloudauth.ProviderVault)
+					WithCause(err).WithProvider(cloudauth.Vault)
 			}
 			resourceIDs["policy_name"] = policyName
 		}
 	}
 
-	ref := cloudauth.CreateMechanismRef("vault_broker", cloudauth.ProviderVault, resourceIDs)
+	ref := cloudauth.CreateMechanismRef("vault_broker", cloudauth.Vault, resourceIDs)
 	ref.Owned = !authExists // Only own if we created the auth method
 
 	if opts.DryRun {
@@ -637,13 +637,13 @@ func (p *Provider) Token(ctx context.Context, req cloudauth.TokenRequest) (*clou
 func (p *Provider) GenerateAWSCredentials(ctx context.Context, input *GenerateAWSCredentialsInput) (*CrossCloudTokenOutput, error) {
 	if p.client == nil {
 		return nil, cloudauth.ErrValidation("Vault client not configured").
-			WithProvider(cloudauth.ProviderVault).
+			WithProvider(cloudauth.Vault).
 			WithDetail("hint", "Configure Vault client using WithVaultClient option")
 	}
 
 	// Validate input
 	if input.RoleName == "" {
-		return nil, cloudauth.ErrValidation("RoleName is required").WithProvider(cloudauth.ProviderVault)
+		return nil, cloudauth.ErrValidation("RoleName is required").WithProvider(cloudauth.Vault)
 	}
 
 	path := input.SecretsEnginePath
@@ -666,7 +666,7 @@ func (p *Provider) GenerateAWSCredentials(ctx context.Context, input *GenerateAW
 	if err != nil {
 		return nil, cloudauth.ErrAuth("failed to generate AWS credentials from Vault").
 			WithCause(err).
-			WithProvider(cloudauth.ProviderVault).
+			WithProvider(cloudauth.Vault).
 			WithResource("vault:aws-secrets-role", input.RoleName)
 	}
 
@@ -678,7 +678,7 @@ func (p *Provider) GenerateAWSCredentials(ctx context.Context, input *GenerateAW
 		SessionToken: creds.SessionToken,
 		TokenType:    "aws-credentials",
 		ExpiresAt:    expiresAt,
-		Provider:     cloudauth.ProviderAWS,
+		Provider:     cloudauth.AWS,
 		LeaseID:      creds.LeaseID,
 	}, nil
 }
@@ -704,13 +704,13 @@ func (p *Provider) GenerateAWSCredentials(ctx context.Context, input *GenerateAW
 func (p *Provider) GenerateGCPCredentials(ctx context.Context, input *GenerateGCPCredentialsInput) (*CrossCloudTokenOutput, error) {
 	if p.client == nil {
 		return nil, cloudauth.ErrValidation("Vault client not configured").
-			WithProvider(cloudauth.ProviderVault).
+			WithProvider(cloudauth.Vault).
 			WithDetail("hint", "Configure Vault client using WithVaultClient option")
 	}
 
 	// Validate input
 	if input.RoleName == "" {
-		return nil, cloudauth.ErrValidation("RoleName is required").WithProvider(cloudauth.ProviderVault)
+		return nil, cloudauth.ErrValidation("RoleName is required").WithProvider(cloudauth.Vault)
 	}
 
 	path := input.SecretsEnginePath
@@ -729,7 +729,7 @@ func (p *Provider) GenerateGCPCredentials(ctx context.Context, input *GenerateGC
 		if err != nil {
 			return nil, cloudauth.ErrAuth("failed to generate GCP access token from Vault").
 				WithCause(err).
-				WithProvider(cloudauth.ProviderVault).
+				WithProvider(cloudauth.Vault).
 				WithResource("vault:gcp-secrets-role", input.RoleName)
 		}
 
@@ -739,7 +739,7 @@ func (p *Provider) GenerateGCPCredentials(ctx context.Context, input *GenerateGC
 			Token:     token.Token,
 			TokenType: "gcp-access-token",
 			ExpiresAt: expiresAt,
-			Provider:  cloudauth.ProviderGCP,
+			Provider:  cloudauth.GCP,
 			LeaseID:   token.LeaseID,
 		}, nil
 
@@ -748,7 +748,7 @@ func (p *Provider) GenerateGCPCredentials(ctx context.Context, input *GenerateGC
 		if err != nil {
 			return nil, cloudauth.ErrAuth("failed to generate GCP service account key from Vault").
 				WithCause(err).
-				WithProvider(cloudauth.ProviderVault).
+				WithProvider(cloudauth.Vault).
 				WithResource("vault:gcp-secrets-role", input.RoleName)
 		}
 
@@ -758,13 +758,13 @@ func (p *Provider) GenerateGCPCredentials(ctx context.Context, input *GenerateGC
 			Token:     key.PrivateKeyData, // Base64-encoded JSON key
 			TokenType: "gcp-service-account-key",
 			ExpiresAt: expiresAt,
-			Provider:  cloudauth.ProviderGCP,
+			Provider:  cloudauth.GCP,
 			LeaseID:   key.LeaseID,
 		}, nil
 
 	default:
 		return nil, cloudauth.ErrValidation(fmt.Sprintf("unsupported key type: %s, use 'access_token' or 'service_account_key'", keyType)).
-			WithProvider(cloudauth.ProviderVault)
+			WithProvider(cloudauth.Vault)
 	}
 }
 
@@ -787,13 +787,13 @@ func (p *Provider) GenerateGCPCredentials(ctx context.Context, input *GenerateGC
 func (p *Provider) GenerateAzureCredentials(ctx context.Context, input *GenerateAzureCredentialsInput) (*CrossCloudTokenOutput, error) {
 	if p.client == nil {
 		return nil, cloudauth.ErrValidation("Vault client not configured").
-			WithProvider(cloudauth.ProviderVault).
+			WithProvider(cloudauth.Vault).
 			WithDetail("hint", "Configure Vault client using WithVaultClient option")
 	}
 
 	// Validate input
 	if input.RoleName == "" {
-		return nil, cloudauth.ErrValidation("RoleName is required").WithProvider(cloudauth.ProviderVault)
+		return nil, cloudauth.ErrValidation("RoleName is required").WithProvider(cloudauth.Vault)
 	}
 
 	path := input.SecretsEnginePath
@@ -805,7 +805,7 @@ func (p *Provider) GenerateAzureCredentials(ctx context.Context, input *Generate
 	if err != nil {
 		return nil, cloudauth.ErrAuth("failed to generate Azure credentials from Vault").
 			WithCause(err).
-			WithProvider(cloudauth.ProviderVault).
+			WithProvider(cloudauth.Vault).
 			WithResource("vault:azure-secrets-role", input.RoleName)
 	}
 
@@ -816,7 +816,7 @@ func (p *Provider) GenerateAzureCredentials(ctx context.Context, input *Generate
 		Secret:    creds.ClientSecret,
 		TokenType: "azure-credentials",
 		ExpiresAt: expiresAt,
-		Provider:  cloudauth.ProviderAzure,
+		Provider:  cloudauth.Azure,
 		LeaseID:   creds.LeaseID,
 	}, nil
 }

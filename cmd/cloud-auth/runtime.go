@@ -1,10 +1,7 @@
-// Command cloud-auth is the cloud-auth CLI: obtain short-lived credentials for one
-// cloud from a workload running in another, with zero static secrets.
-//
-//	cloud-auth doctor                         detect runtime + print source identity
-//	cloud-auth exchange --to aws --role ...   perform an exchange, print/export creds
-//	cloud-auth credential-process --to aws    emit the AWS credential_process JSON
-//	cloud-auth validate --config cloud-auth.yaml   lint the federation config
+// This file holds the runtime (data-plane) subcommands of the cloud-auth CLI:
+// obtaining short-lived credentials for one cloud from a workload running in
+// another, with zero static secrets. These are dispatched from run() in
+// controlplane.go, which is the single entry point.
 package main
 
 import (
@@ -20,47 +17,6 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/internal/audit"
 	"github.com/anirudhbiyani/cloud-auth/source"
 )
-
-func main() {
-	if len(os.Args) < 2 {
-		usage()
-		os.Exit(2)
-	}
-	ctx := context.Background()
-	var err error
-	switch os.Args[1] {
-	case "doctor":
-		err = cmdDoctor(ctx, os.Args[2:])
-	case "exchange":
-		err = cmdExchange(ctx, os.Args[2:], "env")
-	case "credential-process":
-		err = cmdExchange(ctx, os.Args[2:], "credential-process")
-	case "validate":
-		err = cmdValidate(os.Args[2:])
-	case "-h", "--help", "help":
-		usage()
-		return
-	default:
-		fmt.Fprintf(os.Stderr, "cloud-auth: unknown command %q\n\n", os.Args[1])
-		usage()
-		os.Exit(2)
-	}
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "cloud-auth: %v\n", err)
-		os.Exit(1)
-	}
-}
-
-func usage() {
-	fmt.Fprint(os.Stderr, `cloud-auth — cross-cloud workload identity federation
-
-Usage:
-  cloud-auth doctor [--to CLOUD --role ARN --audience AUD]
-  cloud-auth exchange --to CLOUD [--role ARN] [--pool WIP] [--tenant T --client-id C] --audience AUD [--format env|json]
-  cloud-auth credential-process --to aws --role ARN --audience AUD
-  cloud-auth validate --config cloud-auth.yaml
-`)
-}
 
 // targetFlags builds a cloudauth.Target from a flag set.
 func targetFlags(fs *flag.FlagSet) func() cloudauth.Target {
@@ -163,8 +119,8 @@ func cmdExchange(ctx context.Context, args []string, defaultFormat string) error
 	return nil
 }
 
-func cmdValidate(args []string) error {
-	fs := flag.NewFlagSet("validate", flag.ExitOnError)
+func cmdConfigValidate(args []string) error {
+	fs := flag.NewFlagSet("config-validate", flag.ExitOnError)
 	path := fs.String("config", "cloud-auth.yaml", "path to the federation config")
 	fs.Parse(args)
 

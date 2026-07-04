@@ -31,10 +31,10 @@ type MechanismSpec interface {
 	Validate() error
 
 	// SourceProvider returns the source identity's cloud provider.
-	SourceProvider() CloudProvider
+	SourceProvider() Cloud
 
 	// TargetProvider returns the target identity's cloud provider.
-	TargetProvider() CloudProvider
+	TargetProvider() Cloud
 }
 
 // MechanismManager provides lifecycle operations for mechanisms.
@@ -72,7 +72,7 @@ type ListFilter struct {
 	Type MechanismType
 
 	// Provider filters by cloud provider.
-	Provider CloudProvider
+	Provider Cloud
 
 	// Tags filters by tag key-value pairs.
 	Tags map[string]string
@@ -88,7 +88,7 @@ type ListFilter struct {
 // Providers handle authentication and API interactions with a specific cloud.
 type Provider interface {
 	// Name returns the provider identifier.
-	Name() CloudProvider
+	Name() Cloud
 
 	// Capabilities returns the features supported by this provider.
 	Capabilities() []Capability
