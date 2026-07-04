@@ -39,6 +39,7 @@ type AWS struct {
 	region      string
 	creds       aws.CredentialsProvider
 	stsEndpoint string
+	k8sClient   k8sTokenMinter // injected for tests; nil => derive in-cluster
 }
 
 // AWSOption configures an AWS provider.
@@ -52,6 +53,11 @@ func WithAWSIMDS(c *imds.Client) AWSOption                   { return func(a *AW
 func WithAWSRegion(r string) AWSOption                       { return func(a *AWS) { a.region = r } }
 func WithAWSCredentials(p aws.CredentialsProvider) AWSOption { return func(a *AWS) { a.creds = p } }
 func WithAWSSTSEndpoint(e string) AWSOption                  { return func(a *AWS) { a.stsEndpoint = e } }
+
+// WithAWSK8sTokenClient injects a Kubernetes TokenRequest client used by the
+// EKS-IRSA mint path to dynamically re-mint a projected token for a requested
+// audience. When unset, the client is derived from the in-cluster environment.
+func WithAWSK8sTokenClient(c k8sTokenMinter) AWSOption { return func(a *AWS) { a.k8sClient = c } }
 
 // NewAWS builds an AWS provider with defaults.
 func NewAWS(opts ...AWSOption) *AWS {
@@ -73,6 +79,10 @@ func (a *AWS) subRuntime() string {
 	switch {
 	case a.getenv("AWS_WEB_IDENTITY_TOKEN_FILE") != "":
 		return "eks-irsa"
+	case a.getenv("AWS_LAMBDA_FUNCTION_NAME") != "":
+		// Lambda vends task-role credentials in-process; it mints the SigV4
+		// GetCallerIdentity proof, same as EC2/ECS.
+		return "lambda"
 	case a.getenv("AWS_CONTAINER_CREDENTIALS_FULL_URI") != "":
 		// EKS Pod Identity agent vends creds over the full URI; not OIDC.
 		return "eks-pod-identity"
@@ -115,7 +125,7 @@ func (a *AWS) Mint(ctx context.Context, audience string) (*cloudauth.SourceToken
 	}
 	switch a.subRuntime() {
 	case "eks-irsa":
-		return a.mintIRSA(audience)
+		return a.mintIRSA(ctx, audience)
 	case "eks-pod-identity":
 		return nil, fmt.Errorf("%w: EKS Pod Identity vends AWS-internal credentials that are not an "+
 			"externally-verifiable token; use an OIDC-native source such as EKS IRSA for cross-cloud federation",
@@ -125,7 +135,7 @@ func (a *AWS) Mint(ctx context.Context, audience string) (*cloudauth.SourceToken
 	}
 }
 
-func (a *AWS) mintIRSA(audience string) (*cloudauth.SourceToken, error) {
+func (a *AWS) mintIRSA(ctx context.Context, audience string) (*cloudauth.SourceToken, error) {
 	raw, err := a.readFile(a.getenv("AWS_WEB_IDENTITY_TOKEN_FILE"))
 	if err != nil {
 		return nil, fmt.Errorf("aws: reading projected web identity token: %w", err)
@@ -134,23 +144,39 @@ func (a *AWS) mintIRSA(audience string) (*cloudauth.SourceToken, error) {
 	if err != nil {
 		return nil, fmt.Errorf("aws: parsing web identity token: %w", err)
 	}
-	// The projected SA token's aud is fixed by the pod's projected volume. Don't
-	// return a token whose aud doesn't match the target's expected audience — the
-	// target STS would reject it. Fail closed with an actionable message.
-	if !claims.HasAudience(audience) {
-		return nil, fmt.Errorf(
-			"aws: projected web identity token audience %v does not include the requested audience %q; "+
-				"set the projected service-account token's audience to match the target",
-			claims.Audiences, audience)
+	// Fast path: the on-disk projected token already carries the requested aud.
+	if claims.HasAudience(audience) {
+		return &cloudauth.SourceToken{
+			Kind:     cloudauth.OIDC,
+			Value:    string(raw),
+			Issuer:   claims.Issuer,
+			Subject:  claims.Subject,
+			Audience: audience,
+			Expiry:   claims.Expiry,
+		}, nil
 	}
-	return &cloudauth.SourceToken{
-		Kind:     cloudauth.OIDC,
-		Value:    string(raw),
-		Issuer:   claims.Issuer,
-		Subject:  claims.Subject,
-		Audience: audience,
-		Expiry:   claims.Expiry,
-	}, nil
+	// The projected SA token's aud is fixed by the pod's projected volume. When
+	// running in-cluster, mint a fresh token carrying the requested audience via
+	// the Kubernetes TokenRequest API rather than failing closed.
+	if token, available, err := mintDynamicAudienceToken(ctx, a.k8sClient, a.getenv, a.readFile, claims, audience); available {
+		if err != nil {
+			return nil, fmt.Errorf("aws: %w", err)
+		}
+		minted, _ := jwt.ParseUnverified(token)
+		return &cloudauth.SourceToken{
+			Kind:     cloudauth.OIDC,
+			Value:    token,
+			Issuer:   minted.Issuer,
+			Subject:  minted.Subject,
+			Audience: audience,
+			Expiry:   minted.Expiry,
+		}, nil
+	}
+	// Not in-cluster (or TokenRequest unavailable): fail closed with guidance.
+	return nil, fmt.Errorf(
+		"aws: projected web identity token audience %v does not include the requested audience %q; "+
+			"set the projected service-account token's audience to match the target",
+		claims.Audiences, audience)
 }
 
 // mintSigV4 builds and SigV4-signs a GetCallerIdentity request, then serializes

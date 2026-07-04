@@ -26,6 +26,7 @@ type Azure struct {
 	httpClient *http.Client
 	getenv     func(string) string
 	readFile   func(string) ([]byte, error)
+	k8sClient  k8sTokenMinter // injected for tests; nil => derive in-cluster
 }
 
 // AzureOption configures an Azure provider.
@@ -36,6 +37,14 @@ func WithAzureHTTPClient(h *http.Client) AzureOption { return func(a *Azure) { a
 func WithAzureEnv(f func(string) string) AzureOption { return func(a *Azure) { a.getenv = f } }
 func WithAzureFileReader(f func(string) ([]byte, error)) AzureOption {
 	return func(a *Azure) { a.readFile = f }
+}
+
+// WithAzureK8sTokenClient injects a Kubernetes TokenRequest client used by the
+// AKS Workload Identity mint path to dynamically re-mint a projected token for a
+// requested audience. When unset, the client is derived from the in-cluster
+// environment.
+func WithAzureK8sTokenClient(c k8sTokenMinter) AzureOption {
+	return func(a *Azure) { a.k8sClient = c }
 }
 
 // NewAzure builds an Azure provider with defaults.
@@ -56,6 +65,24 @@ func NewAzure(opts ...AzureOption) *Azure {
 // token is available (the preferred cross-cloud source path).
 func (a *Azure) usesWorkloadIdentity() bool {
 	return a.getenv("AZURE_FEDERATED_TOKEN_FILE") != ""
+}
+
+// managedIdentitySubRuntime reports the App Service / Container Apps sub-runtime
+// when the managed-identity token endpoint (IDENTITY_ENDPOINT + IDENTITY_HEADER)
+// is present, or "" otherwise. Container Apps and App Service both expose that
+// endpoint instead of IMDS.
+func (a *Azure) managedIdentitySubRuntime() string {
+	if a.getenv("IDENTITY_ENDPOINT") == "" || a.getenv("IDENTITY_HEADER") == "" {
+		return ""
+	}
+	switch {
+	case a.getenv("CONTAINER_APP_NAME") != "":
+		return "container-apps"
+	case a.getenv("WEBSITE_SITE_NAME") != "":
+		return "app-service"
+	default:
+		return ""
+	}
 }
 
 func (a *Azure) imdsGet(ctx context.Context, path, rawQuery string) ([]byte, error) {
@@ -90,6 +117,14 @@ func (a *Azure) Detect(ctx context.Context) (*cloudauth.Runtime, error) {
 			Subject:     a.getenv("AZURE_CLIENT_ID"),
 		}, nil
 	}
+	if sub := a.managedIdentitySubRuntime(); sub != "" {
+		return &cloudauth.Runtime{
+			Cloud:       cloudauth.Azure,
+			SubRuntime:  sub,
+			Federatable: true,
+			Subject:     a.getenv("AZURE_CLIENT_ID"),
+		}, nil
+	}
 	if _, err := a.imdsGet(ctx, "/metadata/instance", "api-version=2021-02-01"); err != nil {
 		return nil, fmt.Errorf("%w: %v", cloudauth.ErrNotThisRuntime, err)
 	}
@@ -106,12 +141,15 @@ func (a *Azure) Mint(ctx context.Context, audience string) (*cloudauth.SourceTok
 		return nil, fmt.Errorf("azure: audience is required")
 	}
 	if a.usesWorkloadIdentity() {
-		return a.mintFromFile(audience)
+		return a.mintFromFile(ctx, audience)
+	}
+	if a.managedIdentitySubRuntime() != "" {
+		return a.mintFromIdentityEndpoint(ctx, audience)
 	}
 	return a.mintFromIMDS(ctx, audience)
 }
 
-func (a *Azure) mintFromFile(audience string) (*cloudauth.SourceToken, error) {
+func (a *Azure) mintFromFile(ctx context.Context, audience string) (*cloudauth.SourceToken, error) {
 	raw, err := a.readFile(a.getenv("AZURE_FEDERATED_TOKEN_FILE"))
 	if err != nil {
 		return nil, fmt.Errorf("azure: reading projected token: %w", err)
@@ -120,20 +158,73 @@ func (a *Azure) mintFromFile(audience string) (*cloudauth.SourceToken, error) {
 	if err != nil {
 		return nil, fmt.Errorf("azure: parsing projected token: %w", err)
 	}
-	// The projected token's aud is fixed by the AKS Workload Identity webhook
-	// (default api://AzureADTokenExchange). We must not hand back a token whose
-	// aud doesn't match the target's expected audience — the target STS would
-	// reject it. Fail closed with an actionable message instead.
-	if !claims.HasAudience(audience) {
-		return nil, fmt.Errorf(
-			"azure: projected AKS token audience %v does not include the requested audience %q; "+
-				"reconfigure the service account's projected-token audience to match the target "+
-				"(via the azure.workload.identity/... annotation) or point --audience at the projected value",
-			claims.Audiences, audience)
+	// Fast path: the on-disk projected token already carries the requested aud.
+	if claims.HasAudience(audience) {
+		return &cloudauth.SourceToken{
+			Kind:     cloudauth.OIDC,
+			Value:    string(raw),
+			Issuer:   claims.Issuer,
+			Subject:  claims.Subject,
+			Audience: audience,
+			Expiry:   claims.Expiry,
+		}, nil
 	}
+	// The projected token's aud is fixed by the AKS Workload Identity webhook
+	// (default api://AzureADTokenExchange). When running in-cluster, mint a fresh
+	// token carrying the requested audience via the Kubernetes TokenRequest API
+	// rather than failing closed.
+	if token, available, err := mintDynamicAudienceToken(ctx, a.k8sClient, a.getenv, a.readFile, claims, audience); available {
+		if err != nil {
+			return nil, fmt.Errorf("azure: %w", err)
+		}
+		minted, _ := jwt.ParseUnverified(token)
+		return &cloudauth.SourceToken{
+			Kind:     cloudauth.OIDC,
+			Value:    token,
+			Issuer:   minted.Issuer,
+			Subject:  minted.Subject,
+			Audience: audience,
+			Expiry:   minted.Expiry,
+		}, nil
+	}
+	// Not in-cluster (or TokenRequest unavailable): fail closed with guidance.
+	return nil, fmt.Errorf(
+		"azure: projected AKS token audience %v does not include the requested audience %q; "+
+			"reconfigure the service account's projected-token audience to match the target "+
+			"(via the azure.workload.identity/... annotation) or point --audience at the projected value",
+		claims.Audiences, audience)
+}
+
+// mintFromIdentityEndpoint mints a managed-identity token via the App Service /
+// Container Apps local token endpoint (IDENTITY_ENDPOINT), authenticated with
+// the IDENTITY_HEADER secret rather than the IMDS Metadata header.
+func (a *Azure) mintFromIdentityEndpoint(ctx context.Context, audience string) (*cloudauth.SourceToken, error) {
+	endpoint := a.getenv("IDENTITY_ENDPOINT")
+	q := url.Values{"resource": {audience}, "api-version": {"2019-08-01"}}.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"?"+q, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-IDENTITY-HEADER", a.getenv("IDENTITY_HEADER"))
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("azure: minting managed-identity token: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("azure: managed-identity endpoint status %d: %s", resp.StatusCode, string(body))
+	}
+	var out struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("azure: decoding managed-identity token: %w", err)
+	}
+	claims, _ := jwt.ParseUnverified(out.AccessToken)
 	return &cloudauth.SourceToken{
 		Kind:     cloudauth.OIDC,
-		Value:    string(raw),
+		Value:    out.AccessToken,
 		Issuer:   claims.Issuer,
 		Subject:  claims.Subject,
 		Audience: audience,

@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/anirudhbiyani/cloud-auth/config/cloud-auth.schema.json",
+  "title": "cloud-auth configuration",
+  "description": "Declarative workload identity federation config for cloud-auth (schema version 1). Precedence is code > env > file; validation is fail-closed.",
+  "type": "object",
+  "required": ["version", "targets"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "description": "Config schema version. Only 1 is supported.",
+      "const": 1
+    },
+    "source": {
+      "description": "Runtime source detection.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "detect": {
+          "description": "\"auto\" or a forced sub-runtime identifier (e.g. \"aws-ec2\").",
+          "type": "string"
+        }
+      }
+    },
+    "targets": {
+      "description": "Named target bindings. Each target must have a unique name.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/target" }
+    },
+    "refresh": {
+      "description": "Credential refresh timing.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "buffer": {
+          "description": "Go duration string (e.g. \"5m\"). Defaults to 5m when unset.",
+          "type": "string"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "target": {
+      "type": "object",
+      "required": ["name", "cloud", "audience"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "Unique target name.",
+          "type": "string",
+          "minLength": 1
+        },
+        "cloud": {
+          "description": "Target cloud provider (case-insensitive).",
+          "type": "string",
+          "enum": ["aws", "gcp", "azure"]
+        },
+        "audience": {
+          "description": "OIDC audience, required and pinned per target. For GCP it may be omitted and defaults to the workload identity pool; for Azure it defaults to api://AzureADTokenExchange.",
+          "type": "string"
+        },
+        "role": {
+          "description": "AWS: IAM role ARN to assume (required for AWS targets).",
+          "type": "string"
+        },
+        "workload_identity_pool": {
+          "description": "GCP: workload identity pool resource path (required for GCP targets).",
+          "type": "string"
+        },
+        "impersonate_service_account": {
+          "description": "GCP: optional service account to impersonate.",
+          "type": "string"
+        },
+        "tenant": {
+          "description": "Azure: AAD tenant ID (required for Azure targets, together with client_id).",
+          "type": "string"
+        },
+        "client_id": {
+          "description": "Azure: application (client) ID (required for Azure targets, together with tenant).",
+          "type": "string"
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "cloud": { "const": "aws" } } },
+          "then": { "required": ["role"] }
+        },
+        {
+          "if": { "properties": { "cloud": { "const": "gcp" } } },
+          "then": { "required": ["workload_identity_pool"] }
+        },
+        {
+          "if": { "properties": { "cloud": { "const": "azure" } } },
+          "then": { "required": ["tenant", "client_id"] }
+        }
+      ]
+    }
+  }
+}

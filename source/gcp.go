@@ -70,9 +70,16 @@ func (g *GCP) Detect(ctx context.Context) (*cloudauth.Runtime, error) {
 	if _, err := g.get(ctx, "/computeMetadata/v1/"); err != nil {
 		return nil, fmt.Errorf("%w: %v", cloudauth.ErrNotThisRuntime, err)
 	}
+	// Env hints resolve the sub-runtime; GKE takes precedence over the
+	// serverless hints, then Cloud Run, then Cloud Functions, else bare GCE.
 	sub := "gce"
-	if g.getenv("KUBERNETES_SERVICE_HOST") != "" {
+	switch {
+	case g.getenv("KUBERNETES_SERVICE_HOST") != "":
 		sub = "gke"
+	case g.getenv("K_SERVICE") != "":
+		sub = "cloud-run"
+	case g.getenv("FUNCTION_TARGET") != "":
+		sub = "cloud-functions"
 	}
 	email, _ := g.get(ctx, "/computeMetadata/v1/instance/service-accounts/default/email")
 	return &cloudauth.Runtime{
