@@ -62,4 +62,21 @@ func TestParseUnverifiedAudienceArray(t *testing.T) {
 	if c.Audience != "api://AzureADTokenExchange" {
 		t.Errorf("aud = %q, want first element of array", c.Audience)
 	}
+	if len(c.Audiences) != 2 || c.Audiences[0] != "api://AzureADTokenExchange" || c.Audiences[1] != "other" {
+		t.Errorf("Audiences = %v, want both entries preserved", c.Audiences)
+	}
+	if !c.HasAudience("other") || c.HasAudience("missing") {
+		t.Errorf("HasAudience membership wrong: %v", c.Audiences)
+	}
+}
+
+func TestParseUnverifiedAudienceStringSetsSlice(t *testing.T) {
+	tok := makeJWT(t, map[string]any{"aud": "sts.amazonaws.com"})
+	c, _ := ParseUnverified(tok)
+	if len(c.Audiences) != 1 || c.Audiences[0] != "sts.amazonaws.com" {
+		t.Errorf("Audiences = %v, want single-element slice", c.Audiences)
+	}
+	if !c.HasAudience("sts.amazonaws.com") {
+		t.Error("HasAudience should match the single string aud")
+	}
 }

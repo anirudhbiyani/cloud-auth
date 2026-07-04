@@ -134,6 +134,15 @@ func (a *AWS) mintIRSA(audience string) (*cloudauth.SourceToken, error) {
 	if err != nil {
 		return nil, fmt.Errorf("aws: parsing web identity token: %w", err)
 	}
+	// The projected SA token's aud is fixed by the pod's projected volume. Don't
+	// return a token whose aud doesn't match the target's expected audience — the
+	// target STS would reject it. Fail closed with an actionable message.
+	if !claims.HasAudience(audience) {
+		return nil, fmt.Errorf(
+			"aws: projected web identity token audience %v does not include the requested audience %q; "+
+				"set the projected service-account token's audience to match the target",
+			claims.Audiences, audience)
+	}
 	return &cloudauth.SourceToken{
 		Kind:     cloudauth.OIDC,
 		Value:    string(raw),

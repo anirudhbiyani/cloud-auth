@@ -19,8 +19,21 @@ import (
 type Claims struct {
 	Issuer   string
 	Subject  string
-	Audience string
-	Expiry   time.Time
+	Audience string // first audience (convenience); see Audiences for all
+	// Audiences is every value of the aud claim. A JWT's aud may be a single
+	// string or an array; both are normalized here.
+	Audiences []string
+	Expiry    time.Time
+}
+
+// HasAudience reports whether aud is one of the token's audiences.
+func (c Claims) HasAudience(aud string) bool {
+	for _, a := range c.Audiences {
+		if a == aud {
+			return true
+		}
+	}
+	return false
 }
 
 // rawClaims mirrors the JSON payload; aud may be a string or []string.
@@ -50,22 +63,26 @@ func ParseUnverified(token string) (Claims, error) {
 	if rc.Exp > 0 {
 		c.Expiry = time.Unix(rc.Exp, 0)
 	}
-	c.Audience = firstAudience(rc.Aud)
+	c.Audiences = audiences(rc.Aud)
+	if len(c.Audiences) > 0 {
+		c.Audience = c.Audiences[0]
+	}
 	return c, nil
 }
 
-// firstAudience handles aud being a JSON string or array of strings.
-func firstAudience(raw json.RawMessage) string {
+// audiences normalizes the aud claim (a JSON string or array of strings) into a
+// slice.
+func audiences(raw json.RawMessage) []string {
 	if len(raw) == 0 {
-		return ""
+		return nil
 	}
 	var s string
 	if err := json.Unmarshal(raw, &s); err == nil {
-		return s
+		return []string{s}
 	}
 	var arr []string
-	if err := json.Unmarshal(raw, &arr); err == nil && len(arr) > 0 {
-		return arr[0]
+	if err := json.Unmarshal(raw, &arr); err == nil {
+		return arr
 	}
-	return ""
+	return nil
 }

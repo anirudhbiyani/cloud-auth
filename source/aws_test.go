@@ -104,6 +104,30 @@ func TestAWSMintIRSAReadsTokenFile(t *testing.T) {
 	if tok.Kind != cloudauth.OIDC {
 		t.Errorf("IRSA token kind = %v, want OIDC", tok.Kind)
 	}
+	if tok.Audience != "sts.amazonaws.com" {
+		t.Errorf("audience = %q, want the projected token's real aud", tok.Audience)
+	}
+}
+
+func TestAWSMintIRSARejectsAudienceMismatch(t *testing.T) {
+	// The projected SA token's aud is fixed by the pod's projected volume. Asking
+	// for a different target audience must fail closed, not return a token that
+	// the target STS will reject.
+	dir := t.TempDir()
+	tokFile := filepath.Join(dir, "token")
+	os.WriteFile(tokFile, []byte(gcpJWT("sts.amazonaws.com")), 0600)
+
+	a := NewAWS(WithAWSEnv(envFunc(map[string]string{
+		"AWS_WEB_IDENTITY_TOKEN_FILE": tokFile,
+		"AWS_ROLE_ARN":                "arn:aws:iam::123:role/pod",
+	})))
+	_, err := a.Mint(context.Background(), "//iam.googleapis.com/projects/1/locations/global/workloadIdentityPools/p/providers/aws")
+	if err == nil {
+		t.Fatal("expected fail-closed error on audience mismatch, got nil")
+	}
+	if !strings.Contains(err.Error(), "sts.amazonaws.com") {
+		t.Errorf("error %q should name the token's actual audience", err.Error())
+	}
 }
 
 func TestAWSMintEC2ProducesSigV4Proof(t *testing.T) {

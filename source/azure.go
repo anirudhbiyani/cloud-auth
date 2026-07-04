@@ -120,6 +120,17 @@ func (a *Azure) mintFromFile(audience string) (*cloudauth.SourceToken, error) {
 	if err != nil {
 		return nil, fmt.Errorf("azure: parsing projected token: %w", err)
 	}
+	// The projected token's aud is fixed by the AKS Workload Identity webhook
+	// (default api://AzureADTokenExchange). We must not hand back a token whose
+	// aud doesn't match the target's expected audience — the target STS would
+	// reject it. Fail closed with an actionable message instead.
+	if !claims.HasAudience(audience) {
+		return nil, fmt.Errorf(
+			"azure: projected AKS token audience %v does not include the requested audience %q; "+
+				"reconfigure the service account's projected-token audience to match the target "+
+				"(via the azure.workload.identity/... annotation) or point --audience at the projected value",
+			claims.Audiences, audience)
+	}
 	return &cloudauth.SourceToken{
 		Kind:     cloudauth.OIDC,
 		Value:    string(raw),

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/anirudhbiyani/cloud-auth/cloudauth"
@@ -66,6 +67,36 @@ func TestAzureMintAKSReadsProjectedToken(t *testing.T) {
 	}
 	if tok.Issuer != "https://oidc.aks/cluster" {
 		t.Errorf("issuer = %q", tok.Issuer)
+	}
+	if tok.Audience != "api://AzureADTokenExchange" {
+		t.Errorf("audience = %q, want the token's real aud", tok.Audience)
+	}
+}
+
+func TestAzureMintAKSRejectsAudienceMismatch(t *testing.T) {
+	// The projected token's aud is fixed by the webhook. If the caller asks for a
+	// different target audience (e.g. an AWS target), we must fail closed rather
+	// than hand back a token the target STS will reject.
+	dir := t.TempDir()
+	tokFile := filepath.Join(dir, "token")
+	os.WriteFile(tokFile, []byte(azureJWT("api://AzureADTokenExchange")), 0600)
+
+	a := NewAzure(WithAzureEnv(envFunc(map[string]string{
+		"AZURE_FEDERATED_TOKEN_FILE": tokFile,
+		"KUBERNETES_SERVICE_HOST":    "10.0.0.1",
+	})))
+
+	_, err := a.Mint(context.Background(), "sts.amazonaws.com")
+	if err == nil {
+		t.Fatal("expected a fail-closed error on audience mismatch, got nil")
+	}
+	// The message must name both the requested and the actual audience so the
+	// operator knows to reconfigure the projected token's audience.
+	msg := err.Error()
+	for _, want := range []string{"sts.amazonaws.com", "api://AzureADTokenExchange"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error %q should mention %q", msg, want)
+		}
 	}
 }
 
