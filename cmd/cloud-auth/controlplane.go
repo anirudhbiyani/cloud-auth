@@ -76,6 +76,10 @@ func run(args []string) error {
 	// Runtime (data-plane) commands — handlers live in runtime.go.
 	case "doctor":
 		return cmdDoctor(ctx, cmdArgs)
+	case "exec":
+		return cmdExec(ctx, cmdArgs)
+	case "init":
+		return cmdInitStdout(ctx, cmdArgs)
 	case "exchange":
 		return cmdExchange(ctx, cmdArgs, "env")
 	case "credential-process":
@@ -105,7 +109,9 @@ Control-plane commands (establish trust):
   providers   List available providers and their capabilities
 
 Runtime commands (obtain credentials, zero static secrets):
-  doctor              Detect the runtime and print the resolved source identity
+  doctor              Detect the runtime and preflight a target (--to/--role/... or --config/--target)
+  exec                Mint+exchange, then run a command with credentials injected (... -- <cmd>)
+  init                Print the target-side trust scaffold (Terraform + CLI); never applies changes
   exchange            Obtain short-lived target credentials (--format env|json)
   credential-process  Emit the AWS credential_process JSON contract
   config-validate     Lint a declarative federation config (--config file)

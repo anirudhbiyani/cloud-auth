@@ -8,6 +8,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -37,41 +38,75 @@ func targetFlags(fs *flag.FlagSet) func() cloudauth.Target {
 	}
 }
 
+// defaultClockSkew is the tolerance applied to token expiry checks in doctor.
+const defaultClockSkew = 60 * time.Second
+
 func cmdDoctor(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
 	getTarget := targetFlags(fs)
+	configPath := fs.String("config", "", "config file to resolve a named target (optional)")
+	targetName := fs.String("target", "", "named target from --config to preflight")
 	fs.Parse(args)
 
-	prov, rt, err := source.Default().Detect(ctx)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("Detected runtime:\n  cloud:       %s\n  sub-runtime: %s\n  federatable: %t\n",
-		rt.Cloud, rt.SubRuntime, rt.Federatable)
-	if rt.Subject != "" {
-		fmt.Printf("  subject:     %s\n", rt.Subject)
-	}
-	if rt.Issuer != "" {
-		fmt.Printf("  issuer:      %s\n", rt.Issuer)
-	}
-	if !rt.Federatable {
-		fmt.Println("\n⚠  This runtime cannot produce a federatable token. Use an OIDC-native source (e.g. EKS IRSA).")
-	}
+	prov, rt, detectErr := source.Default().Detect(ctx)
+
+	// Always print what was detected (degrade gracefully off-cloud).
+	printRuntime(os.Stdout, rt, detectErr)
 
 	target := getTarget()
+	// A named config target takes precedence when no explicit --to was given.
+	if target.Cloud == "" && *configPath != "" && *targetName != "" {
+		c, err := config.Load(*configPath)
+		if err != nil {
+			return err
+		}
+		t, err := c.Target(*targetName)
+		if err != nil {
+			return err
+		}
+		target = t
+	}
 	if target.Cloud == "" {
 		return nil // detection-only
 	}
 	if target.Audience == "" {
 		return fmt.Errorf("doctor: --audience is required to preflight a target")
 	}
-	fmt.Printf("\nPreflight target %s (audience %s):\n", target.Cloud, target.Audience)
-	if _, err := prov.Mint(ctx, target.Audience); err != nil {
-		fmt.Printf("  ✗ minting source proof failed: %v\n", err)
-		return nil
+
+	p := preflight{
+		runtime:   rt,
+		detectErr: detectErr,
+		target:    target,
+		now:       time.Now(),
+		skew:      defaultClockSkew,
 	}
-	fmt.Println("  ✓ source proof minted successfully")
+	// Only attempt a mint if detection succeeded and the runtime can federate.
+	if detectErr == nil && rt != nil && rt.Federatable && prov != nil {
+		p.token, p.mintErr = prov.Mint(ctx, target.Audience)
+	}
+
+	writeDiagnoses(os.Stdout, p, diagnose(p))
 	return nil
+}
+
+// printRuntime writes the detected-runtime summary, degrading gracefully when
+// detection failed (e.g. not running on a real cloud).
+func printRuntime(w io.Writer, rt *cloudauth.Runtime, detectErr error) {
+	if detectErr != nil || rt == nil {
+		fmt.Fprintf(w, "Detected runtime:\n  (none) — %v\n", detectErr)
+		return
+	}
+	fmt.Fprintf(w, "Detected runtime:\n  cloud:       %s\n  sub-runtime: %s\n  federatable: %t\n",
+		rt.Cloud, rt.SubRuntime, rt.Federatable)
+	if rt.Subject != "" {
+		fmt.Fprintf(w, "  subject:     %s\n", rt.Subject)
+	}
+	if rt.Issuer != "" {
+		fmt.Fprintf(w, "  issuer:      %s\n", rt.Issuer)
+	}
+	if !rt.Federatable {
+		fmt.Fprintln(w, "\n⚠  This runtime cannot produce a federatable token. Use an OIDC-native source (e.g. EKS IRSA).")
+	}
 }
 
 func cmdExchange(ctx context.Context, args []string, defaultFormat string) error {
