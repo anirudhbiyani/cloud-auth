@@ -21,7 +21,7 @@ Legend: pts ≈ ideal-days. `→` = depends on.
 - **T3.3 SigV4 canonical-request golden tests** (2) → T3.2. AC: deterministic signing verified against known-good fixtures.
 
 ## E4 — Source Identity Providers  ·  Sprint 2  ·  [P0-1, P1-2]
-- **T4.1 `sip` registry + deterministic `Detect()`** (2) → T1.2. AC: fixed probe order (env → metadata → k8s); returns `ErrNotThisRuntime` cleanly; forced-detect via config.
+- **T4.1 `source` registry + deterministic `Detect()`** (2) → T1.2. AC: fixed probe order (env → metadata → k8s); returns `ErrNotThisRuntime` cleanly; forced-detect via config.
 - **T4.2 AWS SIP detect+mint** (5) → T4.1,T2.1,T3.3. AC: distinguishes EC2/ECS/EKS-IRSA; mints SigV4 (EC2/ECS) and IRSA-OIDC (audience-pinned); **EKS-Pod-Identity → `ErrNonFederatableSource` with guidance** [P0-1].
 - **T4.3 GCP SIP detect+mint** (3) → T4.1. AC: GCE/GKE detected; OIDC minted via metadata `identity?audience=`; audience pinned.
 - **T4.4 Azure SIP detect+mint** (3) → T4.1,T2.1. AC: VM/VMSS/AKS detected; IMDS Entra token for Azure-native; AKS-WI projected OIDC JWT minted.
@@ -46,7 +46,7 @@ Legend: pts ≈ ideal-days. `→` = depends on.
 
 ## E8 — Config & policy  ·  Sprint 5  ·  [P0-5]
 - **T8.1 Config schema + loader (file/env/code precedence)** (3) → T1.1. AC: `code>env>file`; `CLOUD_AUTH_*` env; unmarshals to validated struct.
-- **T8.2 Strict fail-closed validation** (3) → T8.1. AC: audience required per target; malformed ARN/pool/tenant, duplicate names, unknown cloud all error before network; reuses `pkg/cloudauth/validation.go`.
+- **T8.2 Strict fail-closed validation** (3) → T8.1. AC: audience required per target; malformed ARN/pool/tenant, duplicate names, unknown cloud all error before network; reuses `cloudauth/validation.go`.
 - **T8.3 `cloud-auth.schema.json` + fuzz tests** (2) → T8.2. AC: schema published; fuzz corpus of invalid configs all rejected.
 
 ## E9 — `cloud-auth doctor` / `validate`  ·  Sprints 2,5,6  ·  [P0-1, P0-5]

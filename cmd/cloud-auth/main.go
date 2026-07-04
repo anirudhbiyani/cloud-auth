@@ -18,7 +18,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/cloudauth"
 	"github.com/anirudhbiyani/cloud-auth/config"
 	"github.com/anirudhbiyani/cloud-auth/internal/audit"
-	"github.com/anirudhbiyani/cloud-auth/sip"
+	"github.com/anirudhbiyani/cloud-auth/source"
 )
 
 func main() {
@@ -86,7 +86,7 @@ func cmdDoctor(ctx context.Context, args []string) error {
 	getTarget := targetFlags(fs)
 	fs.Parse(args)
 
-	prov, rt, err := sip.Default().Detect(ctx)
+	prov, rt, err := source.Default().Detect(ctx)
 	if err != nil {
 		return err
 	}

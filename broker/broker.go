@@ -9,13 +9,13 @@ import (
 	"fmt"
 
 	"github.com/anirudhbiyani/cloud-auth/cloudauth"
-	"github.com/anirudhbiyani/cloud-auth/sip"
-	"github.com/anirudhbiyani/cloud-auth/te"
+	"github.com/anirudhbiyani/cloud-auth/source"
+	"github.com/anirudhbiyani/cloud-auth/target"
 )
 
 // Broker performs detect→mint→exchange.
 type Broker struct {
-	registry     *sip.Registry
+	registry     *source.Registry
 	exchangerFor func(cloudauth.Cloud) (cloudauth.Exchanger, error)
 }
 
@@ -23,7 +23,7 @@ type Broker struct {
 type Option func(*Broker)
 
 // WithRegistry overrides the source-detection registry.
-func WithRegistry(r *sip.Registry) Option { return func(b *Broker) { b.registry = r } }
+func WithRegistry(r *source.Registry) Option { return func(b *Broker) { b.registry = r } }
 
 // WithExchangerFor overrides how target exchangers are resolved.
 func WithExchangerFor(f func(cloudauth.Cloud) (cloudauth.Exchanger, error)) Option {
@@ -33,7 +33,7 @@ func WithExchangerFor(f func(cloudauth.Cloud) (cloudauth.Exchanger, error)) Opti
 // New builds a Broker with the default registry (AWS→GCP→Azure) and the default
 // exchanger dispatcher.
 func New(opts ...Option) *Broker {
-	b := &Broker{registry: sip.Default(), exchangerFor: te.For}
+	b := &Broker{registry: source.Default(), exchangerFor: target.For}
 	for _, o := range opts {
 		o(b)
 	}

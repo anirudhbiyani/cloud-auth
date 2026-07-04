@@ -29,7 +29,7 @@ Derived from `PRD-cloud-auth.md` (§13 phasing) and `TDD-cloud-auth.md`.
 
 ## Sprint 2 — Source Identity Providers (P0-1) — ~20 pts
 **Goal:** Detect + mint for all primary runtimes; reject non-federatable.
-- `sip` registry + deterministic `Detect()` ordering (E4)
+- `source` registry + deterministic `Detect()` ordering (E4)
 - AWS SIP: EC2/ECS/EKS-IRSA detection; SigV4 + IRSA-OIDC mint; **EKS-Pod-Identity reject with guidance** [P0-1] (E4)
 - GCP SIP: GCE/GKE detection; OIDC mint via metadata (E4)
 - Azure SIP: VM/VMSS/AKS detection; IMDS token + AKS-WI OIDC mint (E4)

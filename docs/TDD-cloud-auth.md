@@ -24,11 +24,11 @@ The repo already contains the **control-plane** of the story:
 
 | Existing artifact | Role today | Reused as |
 |---|---|---|
-| `pkg/cloudauth` `MechanismManager`, `LifecycleProvider`, `Setup/Validate/Delete` | Establishes/validates target-side trust | **Trust Scaffolder** (PRD §8.5 / P1-1) and `cloud-auth validate` |
-| `pkg/cloudauth` `MechanismSpec`, `specs.go`, `validation.go` | Declarative trust specs + validation | Basis for the **federation config schema** (P0-5) |
-| `pkg/cloudauth` `TokenProvider`, `TokenRequest`, `TokenResponse` | Abstract token acquisition | Seed of the **Target Exchanger** contract (P0-2) |
-| `pkg/providers/{aws,gcp,azure}` | Per-cloud API clients + capability model | Foundation for both SIP detection and TE exchange |
-| `pkg/providers/{cloudflare,vault}` | Extra providers | Out of v1 scope; prove the plugin seam |
+| `cloudauth` `MechanismManager`, `LifecycleProvider`, `Setup/Validate/Delete` | Establishes/validates target-side trust | **Trust Scaffolder** (PRD §8.5 / P1-1) and `cloud-auth validate` |
+| `cloudauth` `MechanismSpec`, `specs.go`, `validation.go` | Declarative trust specs + validation | Basis for the **federation config schema** (P0-5) |
+| `cloudauth` `TokenProvider`, `TokenRequest`, `TokenResponse` | Abstract token acquisition | Seed of the **Target Exchanger** contract (P0-2) |
+| `provider/{aws,gcp,azure}` | Per-cloud API clients + capability model | Foundation for both SIP detection and TE exchange |
+| `provider/{cloudflare,vault}` | Extra providers | Out of v1 scope; prove the plugin seam |
 
 **Design principle:** cloud-auth adds the **data-plane / runtime** (detect → mint → exchange → adapt → refresh). It does *not* rewrite the control-plane. Two new top-level packages carry the new surface; existing packages are extended, not forked.
 
@@ -46,15 +46,15 @@ The repo already contains the **control-plane** of the story:
 ### 2.1 Functional (from PRD §9)
 | Req | Design owner (§) | Package |
 |---|---|---|
-| P0-1 Source detection & minting | §5 SIP | `sip/` |
-| P0-2 Six first-class target exchanges | §6 TE | `te/` |
+| P0-1 Source detection & minting | §5 SIP | `source/` |
+| P0-2 Six first-class target exchanges | §6 TE | `target/` |
 | P0-3 Native adapters + auto-refresh | §7 Adapters | `adapters/`, `internal/cache` |
 | P0-4 `credential_process` / `external_account` | §7.4 | `adapters/`, `cmd/cloud-auth` |
 | P0-5 Declarative config + validation | §8 Config | `config/` |
 | P0-6 Security baseline | §9 Security | cross-cutting |
-| P0-7 EC2→Azure gap handling | §6.4 | `te/azure`, `sip` |
-| P1-1 Trust scaffolder | §10 | `pkg/cloudauth` (existing) |
-| P1-2 More runtimes | §5 SIP | `sip/` |
+| P0-7 EC2→Azure gap handling | §6.4 | `te/azure`, `source` |
+| P1-1 Trust scaffolder | §10 | `cloudauth` (existing) |
+| P1-2 More runtimes | §5 SIP | `source/` |
 | P1-3 `cloud-auth exec` | §11 CLI | `cmd/cloud-auth` |
 | P1-4 OTel observability | §12 | `internal/telemetry` |
 | P1-6 Azure flexible FIC | §10 | scaffolder |
@@ -91,7 +91,7 @@ The repo already contains the **control-plane** of the story:
                                           │ (P1) generates
                                           ▼
                           ┌──────────────────────────────────────────────┐
-                          │  Trust Scaffolder  = existing pkg/cloudauth    │
+                          │  Trust Scaffolder  = existing cloudauth    │
                           │  LifecycleProvider.Setup → Terraform/CLI print │
                           └──────────────────────────────────────────────┘
 ```
@@ -102,7 +102,7 @@ Five internal components (PRD §8), each an interface with per-cloud implementat
 2. **Target Exchanger (TE)** — call the target STS, return native creds.
 3. **Credential Adapter** — wrap creds in each SDK's native interface + cache/refresh.
 4. **Config & Policy** — declarative source-predicate → target-binding map.
-5. **Trust Scaffolder** — reuse `pkg/cloudauth`; print IaC/CLI, no apply.
+5. **Trust Scaffolder** — reuse `cloudauth`; print IaC/CLI, no apply.
 
 ---
 
@@ -111,12 +111,12 @@ Five internal components (PRD §8), each an interface with per-cloud implementat
 ```
 github.com/anirudhbiyani/cloud-auth
 ├── cloudauth.go                 // public façade: NewCredentialsProvider, Target, Cloud
-├── sip/                        // Source Identity Providers  [P0-1, P1-2]
+├── source/                        // Source Identity Providers  [P0-1, P1-2]
 │   ├── sip.go                  //   SourceProvider iface, SourceToken, Detect registry
 │   ├── aws.go                  //   EC2/ECS/EKS-IRSA/(Lambda P1); SigV4 + OIDC mint
 │   ├── gcp.go                  //   GCE/GKE (+Cloud Run/Functions P1); OIDC via metadata
 │   └── azure.go                //   VM/VMSS/AKS (+ Container Apps P1); IMDS + AKS WI OIDC
-├── te/                         // Target Exchangers          [P0-2, P0-7]
+├── target/                         // Target Exchangers          [P0-2, P0-7]
 │   ├── te.go                   //   Exchanger iface, Credentials result type
 │   ├── aws.go                  //   AssumeRoleWithWebIdentity
 │   ├── gcp.go                  //   STS token exchange + direct access / impersonation
@@ -136,10 +136,10 @@ github.com/anirudhbiyani/cloud-auth
 │   └── telemetry/              //   OTel hooks (P1-4)
 ├── cmd/cloud-auth/                   // CLI: doctor, exchange, exec, credential-process,
 │   └── ...                     //      init, validate  [P0, P1-3]
-└── pkg/cloudauth, pkg/providers  // EXISTING — control-plane / scaffolder (reused)
+└── cloudauth, provider  // EXISTING — control-plane / scaffolder (reused)
 ```
 
-Rationale: `sip`/`te`/`adapters`/`config` are the public data-plane API and stay top-level. Everything an integrator should not import (IMDS, cache, JWT, audit) lives under `internal/`. The existing `pkg/` tree is untouched in structure.
+Rationale: `source`/`target`/`adapters`/`config` are the public data-plane API and stay top-level. Everything an integrator should not import (IMDS, cache, JWT, audit) lives under `internal/`. The existing `pkg/` tree is untouched in structure.
 
 ---
 
@@ -296,7 +296,7 @@ refresh: { buffer: 5m }
 - `audience` required per target (missing = hard error) [P0-6].
 - Unknown target cloud, malformed ARN/pool/tenant → error before any network call.
 - Ambiguity (two targets same `name`) → error.
-- Reuses/extends `pkg/cloudauth/validation.go` validation primitives.
+- Reuses/extends `cloudauth/validation.go` validation primitives.
 
 ---
 
@@ -318,7 +318,7 @@ Trust anchored **only** in the receiving cloud's IAM. cloud-auth presents provab
 
 ---
 
-## 10. Trust Scaffolder (P1-1) — reuse existing `pkg/cloudauth`
+## 10. Trust Scaffolder (P1-1) — reuse existing `cloudauth`
 
 `cloud-auth init --to <cloud>` maps a config target to a `MechanismSpec` and calls the existing `LifecycleProvider.Setup` **in `DryRun` mode**, rendering the resulting `Plan`/`Outputs` as Terraform + native CLI (`gcloud`/`az`/`aws`). **Print-only in v1** — no apply (PRD §5.5). This is where the existing control-plane code earns its keep; the scaffolder is a thin renderer over `Setup(DryRun)`.
 
@@ -359,7 +359,7 @@ CLI is a thin shell over the library — no business logic in `cmd/`.
 | **Integration (Phase 0 + CI)** | Live matrix behind build tag `//go:build integration`: the 6 first-class pairs against provisioned test trust; gated by cloud creds in CI secrets |
 | Injectable clock | All expiry/refresh logic uses a `Clock` interface so time is deterministic in tests |
 
-Coverage target: unit ≥ 80% on `sip`/`te`/`adapters`/`config`; the 6 pairs each have one green integration test before v0.1.
+Coverage target: unit ≥ 80% on `source`/`target`/`adapters`/`config`; the 6 pairs each have one green integration test before v0.1.
 
 ---
 
@@ -370,7 +370,7 @@ Coverage target: unit ≥ 80% on `sip`/`te`/`adapters`/`config`; the 6 pairs eac
 4. **Azure flexible FIC (preview)** — depend on it for fleet scoping in v1? → keep static-subject FICs as the v1 default; flexible FIC behind P1-6 flag.
 
 ## 15. Key trade-offs
-- **Reuse control-plane vs. clean-slate:** reusing `pkg/cloudauth` cuts scaffolder cost and keeps one trust model, at the cost of carrying its current abstractions. Chosen: reuse.
+- **Reuse control-plane vs. clean-slate:** reusing `cloudauth` cuts scaffolder cost and keeps one trust model, at the cost of carrying its current abstractions. Chosen: reuse.
 - **`internal/` for IMDS/cache/jwt:** narrows the public API (easier SemVer) but blocks external reuse of those helpers. Chosen: internal until asked otherwise.
 - **No retry on 4xx:** favors fast, honest failure (>99% + <30 min goals) over resilience to transient trust propagation delay; mitigated by `doctor` guidance.
 - **SigV4 path complexity:** GCP-only consumer today, but building it unlocks EC2→GCP without an OIDC bridge — worth the spike risk.

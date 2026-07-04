@@ -16,14 +16,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/anirudhbiyani/cloud-auth/pkg/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/cloudauth"
 
 	// Import providers to register them
-	_ "github.com/anirudhbiyani/cloud-auth/pkg/providers/aws"
-	_ "github.com/anirudhbiyani/cloud-auth/pkg/providers/azure"
-	_ "github.com/anirudhbiyani/cloud-auth/pkg/providers/cloudflare"
-	_ "github.com/anirudhbiyani/cloud-auth/pkg/providers/gcp"
-	_ "github.com/anirudhbiyani/cloud-auth/pkg/providers/vault"
+	_ "github.com/anirudhbiyani/cloud-auth/provider/aws"
+	_ "github.com/anirudhbiyani/cloud-auth/provider/azure"
+	_ "github.com/anirudhbiyani/cloud-auth/provider/cloudflare"
+	_ "github.com/anirudhbiyani/cloud-auth/provider/gcp"
+	_ "github.com/anirudhbiyani/cloud-auth/provider/vault"
 )
 
 const (

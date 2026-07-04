@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/anirudhbiyani/cloud-auth/cloudauth"
-	"github.com/anirudhbiyani/cloud-auth/sip"
+	"github.com/anirudhbiyani/cloud-auth/source"
 )
 
 type fakeProvider struct {
@@ -36,7 +36,7 @@ func TestExchangeDetectsMintsExchanges(t *testing.T) {
 	want := &cloudauth.Credentials{Cloud: cloudauth.AWS, AccessKeyID: "AKIA"}
 
 	b := New(
-		WithRegistry(sip.NewRegistry(prov)),
+		WithRegistry(source.NewRegistry(prov)),
 		WithExchangerFor(func(cloudauth.Cloud) (cloudauth.Exchanger, error) {
 			return &fakeExchanger{creds: want}, nil
 		}),
@@ -61,7 +61,7 @@ func TestExchangeRejectsNonFederatableSource(t *testing.T) {
 		mintErr: cloudauth.ErrNonFederatableSource,
 	}
 	b := New(
-		WithRegistry(sip.NewRegistry(prov)),
+		WithRegistry(source.NewRegistry(prov)),
 		WithExchangerFor(func(cloudauth.Cloud) (cloudauth.Exchanger, error) {
 			return &fakeExchanger{creds: &cloudauth.Credentials{}}, nil
 		}),
@@ -74,7 +74,7 @@ func TestExchangeRejectsNonFederatableSource(t *testing.T) {
 
 func TestExchangeRequiresAudience(t *testing.T) {
 	prov := &fakeProvider{rt: &cloudauth.Runtime{Cloud: cloudauth.GCP, Federatable: true}}
-	b := New(WithRegistry(sip.NewRegistry(prov)))
+	b := New(WithRegistry(source.NewRegistry(prov)))
 	_, _, err := b.Exchange(context.Background(), cloudauth.Target{Cloud: cloudauth.AWS, Role: "r"})
 	if err == nil {
 		t.Fatal("expected error when audience is empty (fail closed)")
