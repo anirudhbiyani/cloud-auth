@@ -13,7 +13,7 @@ Derived from `PRD-cloud-auth.md` (§13 phasing) and `TDD-cloud-auth.md`.
 |---|---|---|---|
 | **M0 Spike** | Phase 0 | S1 | GCP→AWS *and* AWS-EC2→GCP proven end-to-end live; SigV4 path de-risked |
 | **M1 v0.1 MVP (P0)** | Phase 1 | S2–S6 | 6 first-class pairs + adapters + credential_process/external_account + config + security baseline + docs |
-| **M2 v0.2 (P1)** | Phase 2 | S7–S9 | Scaffolder, more runtimes, `exec`, OTel, flexible FIC |
+| **M2 v0.2 (P1)** | Phase 2 | S7–S9 | Scaffolder, more runtimes, `exec`, flexible FIC (no telemetry) |
 | **M3 v0.3+ (P2)** | Phase 3 | later | SPIFFE/X.509, more clouds, apply, policy-as-code (design-only now) |
 
 ---
@@ -76,7 +76,7 @@ Derived from `PRD-cloud-auth.md` (§13 phasing) and `TDD-cloud-auth.md`.
 ## Sprint 7–9 — v0.2 (P1) — outline
 - **S7:** Trust Scaffolder `cloud-auth init` over existing `LifecycleProvider.Setup(DryRun)` — AWS/GCP/Azure IaC+CLI print (P1-1).
 - **S8:** More runtimes (Lambda, Cloud Run/Functions, Container Apps/App Service) + `cloud-auth exec` (P1-2, P1-3).
-- **S9:** OTel observability hooks (P1-4); Azure flexible FIC generate/validate (P1-6); multi-hop design spike (P1-5).
+- **S9:** Azure flexible FIC generate/validate (P1-6); multi-hop design spike (P1-5).
 
 ## Risks & mitigations
 | Risk | Mitigation |

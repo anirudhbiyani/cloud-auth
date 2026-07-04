@@ -8,7 +8,7 @@
 <p align="center">
   <a href="https://pkg.go.dev/github.com/anirudhbiyani/cloud-auth"><img src="https://pkg.go.dev/badge/github.com/anirudhbiyani/cloud-auth.svg" alt="Go Reference"></a>
   <a href="https://goreportcard.com/report/github.com/anirudhbiyani/cloud-auth"><img src="https://goreportcard.com/badge/github.com/anirudhbiyani/cloud-auth" alt="Go Report Card"></a>
-  <a href="https://opensource.org/licenses/LGPL-3.0"><img src="https://img.shields.io/badge/License-LGPL_v3-blue.svg" alt="License: LGPL-3.0"></a>
+  <a href="https://www.gnu.org/licenses/agpl-3.0"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL-3.0"></a>
   <img src="https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go&logoColor=white" alt="Go Version">
 </p>
 
@@ -530,7 +530,7 @@ golangci-lint run
 
 ## 📄 License
 
-This project is licensed under the **LGPL-3.0 License** - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)** - see the [LICENSE](LICENSE) file for details.
 
 ---
 

@@ -56,7 +56,7 @@ The repo already contains the **control-plane** of the story:
 | P1-1 Trust scaffolder | §10 | `cloudauth` (existing) |
 | P1-2 More runtimes | §5 SIP | `source/` |
 | P1-3 `cloud-auth exec` | §11 CLI | `cmd/cloud-auth` |
-| P1-4 OTel observability | §12 | `internal/telemetry` |
+| P1-4 Observability | §12 | local audit log only — no telemetry (dropped) |
 | P1-6 Azure flexible FIC | §10 | scaffolder |
 
 ### 2.2 Non-functional (from PRD §11)
@@ -133,7 +133,6 @@ github.com/anirudhbiyani/cloud-auth
 │   ├── imds/                   //   IMDSv2 client (token-required, hop-limit) [P0-6]
 │   ├── jwt/                    //   JWKS fetch/verify, claim extraction (doctor)
 │   ├── audit/                  //   structured audit events  [P0-6]
-│   └── telemetry/              //   OTel hooks (P1-4)
 ├── cmd/cloud-auth/                   // CLI: doctor, exchange, exec, credential-process,
 │   └── ...                     //      init, validate  [P0, P1-3]
 └── cloudauth, provider  // EXISTING — control-plane / scaffolder (reused)
@@ -341,8 +340,8 @@ CLI is a thin shell over the library — no business logic in `cmd/`.
 
 ---
 
-## 12. Observability (P1-4)
-`internal/telemetry` exposes optional OTel spans/metrics: exchange latency histogram, success/refusal counters (labeled by source×target), refresh-failure counter. No-op by default; enabled via config/env. Audit log (P0) is independent and always available.
+## 12. Observability — no telemetry (decided)
+**CrossFed ships no telemetry.** No OpenTelemetry, no metrics exporters, no phone-home, no `internal/telemetry` package — nothing leaves the host. The only observability surface is the **local structured audit log** (`internal/audit`, P0), written to stderr/a local sink and consumed by the operator's own SIEM. This is a deliberate trust decision for a security-sensitive credential broker, not a deferral. The former P1-4 "OTel observability" item is **dropped**.
 
 ---
 
@@ -363,11 +362,13 @@ Coverage target: unit ≥ 80% on `source`/`target`/`adapters`/`config`; the 6 pa
 
 ---
 
-## 14. Open technical questions (carried from PRD §12)
-1. **File-based credential sink at all, or in-memory only?** → *Blocks §7.2/§9 disk-sink code.* Default in-memory now; keep sink behind a flag, decide before v0.1 GA.
-2. **EC2→Azure: ship a minimal OIDC bridge, or document-only?** → *Blocks P0-7 depth.* Design guards + guidance now (document-only); bridge helper deferred to a decision gate in Sprint 4.
-3. **GCP direct-access coverage** vs. the supported-services list → verify during Phase 0; lock default = direct access.
-4. **Azure flexible FIC (preview)** — depend on it for fleet scoping in v1? → keep static-subject FICs as the v1 default; flexible FIC behind P1-6 flag.
+## 14. Resolved decisions (were open questions; carried from PRD §12)
+1. **Credential sink → in-memory only by default; opt-in `0600` file sink behind an explicit flag.** No credential is ever written to disk unless the operator explicitly opts in, in which case the file is created `0600`. **Decided.**
+2. **EC2→Azure gap → document-only for v1.** Detect the SigV4→Azure pairing and return an actionable message pointing to the OIDC-bridge options (Cognito / EKS-IRSA / self-hosted broker). No bridge helper ships in v1. **Decided.**
+3. **GCP target → direct resource access is the default**, with `impersonate_service_account` as an explicit opt-in for APIs lacking direct-federation support. Both paths are implemented. (Non-blocking follow-up: reconfirm direct-access service coverage against Google's list at release.) **Decided.**
+4. **Azure flexible FIC (preview) → not depended on for v1.** Static-subject FICs are the v1 default; flexible-FIC support is a post-v1 follow-up, not a launch dependency. **Decided.**
+5. **Telemetry → none, ever.** See §12. **Decided.**
+6. **License → AGPL-3.0.** The repository `LICENSE` is the GNU Affero General Public License v3.0. Contribution model (CLA vs DCO) still to confirm; DCO (`Signed-off-by`) is the lightweight default recommendation pending sign-off.
 
 ## 15. Key trade-offs
 - **Reuse control-plane vs. clean-slate:** reusing `cloudauth` cuts scaffolder cost and keeps one trust model, at the cost of carrying its current abstractions. Chosen: reuse.

@@ -63,13 +63,13 @@ Legend: pts ≈ ideal-days. `→` = depends on.
 - **T11.2 Release engineering** (3) → all P0. AC: `go install` + Homebrew tap; versioned tag `v0.1.0`; CHANGELOG.
 
 ## E12 — Decision gate: credential sink  ·  Sprint 4  ·  [PRD §12 Q1]
-- **T12.1 Resolve in-memory-only vs opt-in `0600` file sink** (1). AC: decision recorded in TDD §14; if file sink kept, gated behind explicit flag + `0600` enforced.
+- **T12.1 RESOLVED**: in-memory only by default; opt-in `0600` file sink behind an explicit flag (TDD §14).
 
 ## E13 — CI integration matrix  ·  Sprint 6
 - **T13.1 Live 6-pair integration tests behind `//go:build integration`** (4) → all TE/SIP. AC: matrix runs in CI with sandbox creds; each pair green before v0.1 tag.
 
 ## E14 — Legal/community gate  ·  Sprint 6  ·  [PRD §12]
-- **T14.1 License + contribution model decision** (1). AC: Apache-2.0 vs copyleft chosen; CLA vs DCO chosen; `CONTRIBUTING.md` + `LICENSE` reflect it before public launch.
+- **T14.1 RESOLVED (license)**: **AGPL-3.0** — `LICENSE` set. Contribution model (CLA vs DCO) still to confirm; DCO is the default recommendation. `CONTRIBUTING.md` pending.
 
 ---
 
