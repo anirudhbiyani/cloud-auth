@@ -1,0 +1,115 @@
+name: Cloud Integration Harness
+
+# MANUAL ONLY — never on push/pull_request.
+#
+# This workflow provisions real, billable infrastructure across AWS, GCP, and
+# Azure and needs privileged cloud credentials. Running it automatically on
+# untrusted PR code would both cost money and expose those credentials, so the
+# only trigger is an explicit workflow_dispatch (plus an opt-in nightly that is
+# commented out by default).
+on:
+  workflow_dispatch:
+    inputs:
+      clouds:
+        description: "Clouds to provision (comma-separated)"
+        default: "aws,gcp,azure"
+        type: string
+      runtimes:
+        description: "Source runtimes to verify (comma-separated)"
+        default: "gcp-gce,aws-ec2,aws-eks-irsa,azure-aks-workload-identity"
+        type: string
+      keep_alive:
+        description: "Skip teardown (DANGER: leaves billable resources running)"
+        default: false
+        type: boolean
+
+# Never let two harness runs race: they share resource names and would fight
+# over the same trust objects.
+concurrency:
+  group: cloud-integration-harness
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write   # OIDC federation into the clouds — no long-lived CI keys
+
+jobs:
+  harness:
+    name: Provision, verify, destroy
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: cloud-integration   # gate this with required reviewers
+    env:
+      CLOUDS: ${{ inputs.clouds }}
+      RUNTIMES: ${{ inputs.runtimes }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.5"
+
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: "1.10.0"
+
+      # Dogfooding note: CI itself authenticates to each cloud with keyless OIDC
+      # federation — the very pattern cloud-auth implements. No static keys here.
+      - name: Authenticate to AWS
+        if: contains(inputs.clouds, 'aws')
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_HARNESS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Authenticate to GCP
+        if: contains(inputs.clouds, 'gcp')
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_HARNESS_SA }}
+
+      - name: Authenticate to Azure
+        if: contains(inputs.clouds, 'azure')
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Static checks
+        working-directory: test/harness
+        run: make check
+
+      - name: Provision
+        working-directory: test/harness
+        run: make up YES=1 CLOUDS="$CLOUDS"
+
+      - name: Verify all pairs
+        id: verify
+        working-directory: test/harness
+        run: make verify RUNTIMES="$RUNTIMES"
+
+      # `if: always()` is the whole safety story: teardown runs even when verify
+      # fails, the job is cancelled, or an earlier step errored.
+      - name: Destroy
+        if: always() && !inputs.keep_alive
+        working-directory: test/harness
+        run: make down YES=1 CLOUDS="$CLOUDS"
+
+      - name: Report orphans if teardown failed
+        if: always() && !inputs.keep_alive
+        working-directory: test/harness
+        run: make sweep || true
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-results
+          path: |
+            test/harness/state/results-*.json
+            test/harness/state/results-*.log
+            test/harness/state/targets.json
+          if-no-files-found: warn
+          retention-days: 14

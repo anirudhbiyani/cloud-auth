@@ -205,3 +205,18 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# ---- cloud-auth integration harness ----
+# Local OpenTofu state and provider plugins (never commit: contains resource
+# identifiers and can contain sensitive values).
+test/harness/tofu/**/.terraform/
+test/harness/tofu/**/.terraform.lock.hcl
+test/harness/tofu/**/terraform.tfstate
+test/harness/tofu/**/terraform.tfstate.*
+test/harness/tofu/**/*.tfplan
+# Generated cross-cloud tfvars (derived from stage1 outputs each run).
+test/harness/tofu/**/harness.auto.tfvars
+# Run artifacts: stage outputs, merged targets, verifier reports, built binary.
+test/harness/state/*
+!test/harness/state/.gitkeep
+!test/harness/state/*.example.json

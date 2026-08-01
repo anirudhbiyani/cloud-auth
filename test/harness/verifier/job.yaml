@@ -1,0 +1,187 @@
+# Kubernetes Job template for the cloud-auth harness verifier.
+#
+# One template covers both Kubernetes sources in the matrix — EKS with IRSA and
+# AKS with Workload Identity. The two clouds differ only in how the projected
+# token reaches the pod, so only the ServiceAccount differs: apply the EKS
+# ServiceAccount on EKS and the AKS one on AKS, then the shared RBAC + Job.
+#
+# Namespace / ServiceAccount are fixed by test/harness/CONTRACT.md:
+#   namespace       cloud-auth-test
+#   serviceaccount  verifier
+#
+# ---------------------------------------------------------------------------
+# PLACEHOLDERS THE DRIVER SUBSTITUTES (e.g. `sed`/`envsubst` before `kubectl apply`)
+#
+#   ${IMAGE}            verifier image reference, e.g. 123.dkr.ecr.us-east-1.amazonaws.com/cloud-auth-verifier:<run_id>
+#   ${RUN_ID}           harness run id — must match the run-id tag on every cloud resource
+#   ${TARGETS_JSON}     the merged state/targets.json document, indented into the ConfigMap below
+#                       (in practice: `kubectl create configmap cloud-auth-targets
+#                        --from-file=targets.json=state/targets.json -n cloud-auth-test`)
+#   ${IRSA_ROLE_ARN}    EKS only  — aws-stage1.ec2_role_arn's sibling: the IRSA role ARN for the pod
+#   ${AZURE_CLIENT_ID}  AKS only  — the user-assigned managed identity client id for the AKS source
+#   ${AZURE_TENANT_ID}  AKS only  — azure-stage1.tenant_id
+#
+# Everything else is fixed by the contract and must not be edited per-run.
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cloud-auth-test
+  labels:
+    managed-by: cloud-auth-harness
+    run-id: "${RUN_ID}"
+---
+# The verifier's plan. The driver replaces this whole object with a
+# `kubectl create configmap ... --from-file` when it has the merged file.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloud-auth-targets
+  namespace: cloud-auth-test
+  labels:
+    managed-by: cloud-auth-harness
+    run-id: "${RUN_ID}"
+data:
+  targets.json: |
+    ${TARGETS_JSON}
+---
+# ---------------------------------------------------------------------------
+# APPLY ON EKS ONLY — IRSA. The role ARN annotation is what makes the kubelet
+# project an AWS-audience token and set AWS_WEB_IDENTITY_TOKEN_FILE in the pod.
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: verifier
+  namespace: cloud-auth-test
+  labels:
+    managed-by: cloud-auth-harness
+    run-id: "${RUN_ID}"
+  annotations:
+    eks.amazonaws.com/role-arn: "${IRSA_ROLE_ARN}"
+    # Regional STS endpoints avoid the global-endpoint throttling that shows up
+    # as flaky, hard-to-read failures in a matrix run.
+    eks.amazonaws.com/sts-regional-endpoints: "true"
+---
+# ---------------------------------------------------------------------------
+# APPLY ON AKS ONLY — Workload Identity. The label is what makes the workload
+# identity mutating webhook inject AZURE_FEDERATED_TOKEN_FILE / AZURE_CLIENT_ID
+# / AZURE_TENANT_ID into the pod.
+#
+# (Apply exactly one of these two ServiceAccounts: they share the name the
+# contract mandates.)
+# ---------------------------------------------------------------------------
+# apiVersion: v1
+# kind: ServiceAccount
+# metadata:
+#   name: verifier
+#   namespace: cloud-auth-test
+#   labels:
+#     managed-by: cloud-auth-harness
+#     run-id: "${RUN_ID}"
+#     azure.workload.identity/use: "true"
+#   annotations:
+#     azure.workload.identity/client-id: "${AZURE_CLIENT_ID}"
+#     azure.workload.identity/tenant-id: "${AZURE_TENANT_ID}"
+---
+# cloud-auth re-mints the projected service-account token when the target's
+# audience differs from the one the platform projected (every cross-cloud pair:
+# an IRSA token is pinned to sts.amazonaws.com, a GCP target wants the pool
+# audience). That uses the TokenRequest API, which needs this permission,
+# scoped to this one service account.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: verifier-token-request
+  namespace: cloud-auth-test
+  labels:
+    managed-by: cloud-auth-harness
+    run-id: "${RUN_ID}"
+rules:
+  - apiGroups: [""]
+    resources: ["serviceaccounts/token"]
+    resourceNames: ["verifier"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: verifier-token-request
+  namespace: cloud-auth-test
+  labels:
+    managed-by: cloud-auth-harness
+    run-id: "${RUN_ID}"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: verifier-token-request
+subjects:
+  - kind: ServiceAccount
+    name: verifier
+    namespace: cloud-auth-test
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cloud-auth-verifier
+  namespace: cloud-auth-test
+  labels:
+    managed-by: cloud-auth-harness
+    run-id: "${RUN_ID}"
+spec:
+  # No retries: a failed pair is a result to report, not a flake to paper over.
+  backoffLimit: 0
+  # Bound the whole run so a hung STS cannot keep the Job (and the cluster) alive.
+  activeDeadlineSeconds: 900
+  # Keep the pod around long enough for the driver to collect logs, then reap it.
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: cloud-auth-verifier
+        managed-by: cloud-auth-harness
+        run-id: "${RUN_ID}"
+        # AKS ONLY: required on the POD (not just the SA) for the workload
+        # identity webhook to inject the federated token. Harmless on EKS, so
+        # the driver may leave it in place for both.
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: verifier
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: verifier
+          image: "${IMAGE}"
+          imagePullPolicy: IfNotPresent
+          args:
+            - --targets=/etc/cloud-auth/targets.json
+            - --timeout=60s
+          env:
+            # The verifier self-selects on the runtime it detects; nothing here
+            # tells it which cloud it is on.
+            - name: CLOUD_AUTH_TARGETS_FILE
+              value: /etc/cloud-auth/targets.json
+          volumeMounts:
+            - name: targets
+              mountPath: /etc/cloud-auth
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      volumes:
+        - name: targets
+          configMap:
+            name: cloud-auth-targets

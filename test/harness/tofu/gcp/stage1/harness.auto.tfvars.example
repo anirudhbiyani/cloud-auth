@@ -1,0 +1,19 @@
+# Example of the file the driver generates as
+#   test/harness/tofu/gcp/stage1/harness.auto.tfvars
+#
+# `*.auto.tfvars` is loaded automatically, so `tofu apply` needs no -var-file.
+# The real file is gitignored. Copy this to harness.auto.tfvars to apply by hand.
+#
+# stage1 has no cross-cloud inputs — every variable here has a working default,
+# and in practice the driver only needs to pin run_id (and often project_id).
+
+run_id = "20260705-abc123"
+
+# Leave empty to inherit GOOGLE_PROJECT / `gcloud config get-value project`.
+project_id = ""
+
+region = "us-central1"
+zone   = "us-central1-a"
+
+# Set false and use IAP TCP forwarding to drop the ~$0.004/hour external IP.
+assign_external_ip = true
