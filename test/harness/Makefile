@@ -37,15 +37,10 @@ sweep:
 targets:
 	$(SCRIPTS)/build-targets.sh
 
-# The whole point of the harness: never leave infrastructure running because a
-# test failed. `down` runs even when `verify` exits non-zero, and the recorded
-# verify status is what the target ultimately reports.
+# Delegates to run-harness.sh, which owns the teardown guarantee (a trap that
+# fires on failure AND on Ctrl-C — something make alone can't give us).
 cycle:
-	@set -o pipefail; \
-	$(MAKE) up YES=1 CLOUDS=$(CLOUDS); \
-	rc=0; $(MAKE) verify RUNTIMES=$(RUNTIMES) || rc=$$?; \
-	$(MAKE) down YES=1 CLOUDS=$(CLOUDS) || true; \
-	exit $$rc
+	./run-harness.sh --yes --clouds $(CLOUDS) --runtimes $(RUNTIMES)
 
 # Static checks that need no cloud access at all.
 check: fmt

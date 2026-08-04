@@ -197,8 +197,11 @@ process only executes the cases matching the runtime it finds itself on
 1. **Destroy must always be possible.** `down.sh` tears down stage2 then stage1 and
    must succeed even if `verify` failed or a stage-2 apply half-failed. Never make
    destroy depend on verify passing.
-2. **No auto-run in CI.** The GitHub workflow is `workflow_dispatch` only. Never on
-   `push`/`pull_request` — it costs money and needs cloud credentials.
+2. **Local only — never wired into CI.** This harness is run by a human from a
+   shell (`./run-harness.sh`). It must not be added to any GitHub workflow: it
+   needs privileged cloud credentials and creates billable infrastructure, and
+   an automated trigger would risk both leaking those credentials and spending
+   money unattended. The repo's `ci.yml` runs unit tests only.
 3. **Cost warning + confirmation.** `up.sh` prints an itemized cost estimate and
    requires an explicit confirmation (`--yes` for automation) before applying.
 4. **No credentials or tokens in logs or state committed to git.** Redact tokens in

@@ -13,24 +13,36 @@ no amount of `httptest` can cover.
 
 ## Quick start
 
+This is a **local bash harness** — you run it from your own shell. One command
+does the whole loop, and tears everything down even if verification fails or you
+Ctrl-C:
+
 ```bash
 cd test/harness
-make up        # stage1 compute, then stage2 cross-cloud trust
-make verify    # run the verifier in every source runtime
-make down      # destroy everything
+./run-harness.sh
 ```
 
-Or the whole loop, with teardown guaranteed even if verification fails:
+Useful variations:
 
 ```bash
-make cycle
+./run-harness.sh --check                    # static checks only — no cloud, no cost
+./run-harness.sh --clouds aws,gcp           # subset of clouds
+./run-harness.sh --runtimes aws-ec2         # subset of source runtimes
+./run-harness.sh --keep                     # leave it up to debug (REMEMBER to destroy)
+./run-harness.sh --yes                      # no prompts
 ```
 
-Scope it down while iterating:
+Individual phases, if you'd rather drive them yourself:
 
 ```bash
-make cycle CLOUDS=aws,gcp RUNTIMES=aws-ec2,gcp-gce
+./scripts/up.sh        # stage1 compute, then stage2 cross-cloud trust
+./scripts/verify.sh    # run the verifier in every source runtime
+./scripts/down.sh      # destroy everything
+./scripts/sweep.sh     # list orphans by tag if a destroy failed
 ```
+
+The `Makefile` wraps the same scripts (`make up` / `verify` / `down` / `sweep` /
+`cycle` / `check`) if you prefer make.
 
 ## Why two stages
 
@@ -115,16 +127,17 @@ These are deliberate, and worth preserving if you edit the scripts:
 3. **Everything is tagged** `managed-by=cloud-auth-harness` + `run-id=<id>`, so
    `make sweep` can find orphans even if tofu state is lost. `sweep` **lists by
    default**; deleting is opt-in via `--delete`.
-4. **CI is manual-only.** [`integration.yml`](../../.github/workflows/integration.yml)
-   triggers on `workflow_dispatch` only — never `push`/`pull_request`. It needs
-   privileged cloud credentials, so running it on untrusted PR code would both
-   cost money and expose them.
-5. **No static keys anywhere.** CI federates into each cloud with OIDC
-   (`id-token: write`) — the harness dogfoods the pattern cloud-auth implements.
-6. **No credentials in output.** The verifier reports identities and outcomes,
+4. **Local only — deliberately not in CI.** You run this from a shell, by hand.
+   It is not wired into any GitHub workflow and should not be: it needs
+   privileged cloud credentials and creates billable infrastructure, so an
+   automated trigger risks leaking credentials and spending money unattended.
+   The repo's `ci.yml` runs unit tests only and never touches a cloud.
+5. **No credentials in output.** The verifier reports identities and outcomes,
    never raw tokens; a unit test enforces the redaction.
-7. **Preflight fails before spending.** Required tools are checked for *runnability*,
-   not just presence, so a broken install fails before any resource is created.
+6. **Preflight fails before spending.** Required tools are checked for *runnability*,
+   not just presence, and every stage-2 module's required inputs are checked
+   before any stage-2 apply — so mistakes fail before resources exist, or at
+   worst before the trust stage compounds them.
 
 ## Prerequisites
 
