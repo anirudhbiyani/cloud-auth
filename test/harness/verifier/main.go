@@ -183,6 +183,7 @@ func openOut(path string, stdout io.Writer) (io.Writer, func(), error) {
 	if path == "" || path == "-" {
 		return stdout, func() {}, nil
 	}
+	// #nosec G304 -- report path is supplied by the operator (--out).
 	f, err := os.Create(path)
 	if err != nil {
 		return nil, func() {}, fmt.Errorf("opening --out %s: %w", path, err)

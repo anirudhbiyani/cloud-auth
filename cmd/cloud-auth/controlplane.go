@@ -1349,6 +1349,7 @@ func cmdVersion() error {
 // Helper functions
 
 func loadSpec(path string) (cloudauth.MechanismSpec, error) {
+	// #nosec G304 -- spec path comes from the operator's own --file flag.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %w", err)

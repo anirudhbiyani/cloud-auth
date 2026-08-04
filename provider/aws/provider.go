@@ -576,9 +576,24 @@ func (p *Provider) Token(ctx context.Context, req cloudauth.TokenRequest) (*clou
 	// Sanitize session name (must match [\w+=,.@-]*)
 	roleSessionName = sanitizeSessionName(roleSessionName)
 
-	durationSeconds := int32(req.Duration)
-	if durationSeconds == 0 {
-		durationSeconds = 3600 // Default 1 hour
+	// Clamp before narrowing to int32: req.Duration is a plain int, so on 64-bit
+	// platforms an out-of-range value would silently wrap and could produce a
+	// negative or absurdly short session. AWS accepts 900s..43200s (the upper
+	// bound is further capped by the role's own MaxSessionDuration).
+	const (
+		minSessionSeconds     = 900
+		maxSessionSeconds     = 43200
+		defaultSessionSeconds = 3600
+	)
+	durationSeconds := int32(defaultSessionSeconds)
+	switch {
+	case req.Duration == 0: // unset — keep the default
+	case req.Duration < minSessionSeconds:
+		durationSeconds = minSessionSeconds
+	case req.Duration > maxSessionSeconds:
+		durationSeconds = maxSessionSeconds
+	default:
+		durationSeconds = int32(req.Duration)
 	}
 
 	// Call STS AssumeRoleWithWebIdentity

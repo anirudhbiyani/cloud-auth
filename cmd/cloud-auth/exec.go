@@ -77,6 +77,12 @@ func cmdExec(ctx context.Context, args []string) error {
 		return err
 	}
 
+	// Running an operator-supplied command IS this subcommand's purpose — the
+	// same contract as `env`, `aws-vault exec`, or `kubectl exec`. The argv comes
+	// from this process's own command line after `--`, not from any remote or
+	// untrusted source, and it is passed straight to execve: no shell is
+	// interposed, so there is no metacharacter interpretation to inject through.
+	// #nosec G204,G702 -- operator-supplied argv, executed without a shell
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 	cmd.Env = execEnviron(os.Environ(), creds)
 	cmd.Stdin = os.Stdin

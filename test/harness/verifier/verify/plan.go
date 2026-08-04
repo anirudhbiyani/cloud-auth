@@ -317,6 +317,7 @@ func ResolvePlan(getenv func(string) string, path string) (*Plan, string, error)
 	if path == "" {
 		return nil, "", ErrPlanNotFound
 	}
+	// #nosec G304 -- plan path is supplied by the harness driver (--targets).
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, path, fmt.Errorf("%w: %s (set $%s or $%s)", ErrPlanNotFound, path, EnvTargetsInline, EnvTargetsFile)

@@ -53,6 +53,8 @@ func Load(path string) (*Config, error) {
 
 // LoadWithEnv is Load with an injectable environment lookup (for tests).
 func LoadWithEnv(path string, getenv func(string) string) (*Config, error) {
+	// #nosec G304 -- config path is supplied by the operator (--config / default);
+	// reading an operator-named file is the documented behaviour.
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("config: reading %s: %w", path, err)
