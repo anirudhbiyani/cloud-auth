@@ -73,7 +73,12 @@ docs/_build/
 
 # PyBuilder
 .pybuilder/
-target/
+# NOTE: the upstream Python template ignores a bare `target/` here (PyBuilder's
+# build output, also Cargo's and Maven's). This is a Go repo whose Target
+# Exchangers live in ./target, and that pattern silently swallowed the entire
+# package — it built locally while CI failed on a clean checkout. Scoped to
+# PyBuilder's actual output path so Go source can never be excluded again.
+.pybuilder/target/
 
 # Jupyter Notebook
 .ipynb_checkpoints
