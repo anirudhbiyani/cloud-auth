@@ -254,9 +254,17 @@ func (p *Provider) setupRoleTrustOIDC(ctx context.Context, spec *cloudauth.AWSRo
 	}
 
 	// Step 1: Handle OIDC provider
-	if spec.OIDCProviderARN != "" {
+	//
+	// Built-in IdPs (Google, Cognito, Login with Amazon, Facebook) are trusted by
+	// AWS natively: creating an iam:OpenIDConnectProvider for them is unnecessary
+	// and, for Google, actively wrong — the trust principal is the bare host, so
+	// a provider ARN would never be referenced.
+	switch {
+	case spec.OIDCProviderARN != "":
 		oidcProviderARN = spec.OIDCProviderARN
-	} else if spec.OIDCProviderURL != "" {
+	case spec.OIDCProviderURL != "" && !needsOIDCProviderResource(spec.OIDCProviderURL):
+		// Nothing to create; buildTrustPolicy uses the bare host as principal.
+	case spec.OIDCProviderURL != "":
 		// Check if provider already exists
 		existingARN, err := p.findOIDCProviderByURL(ctx, spec.OIDCProviderURL)
 		if err != nil {
@@ -836,10 +844,60 @@ func (p *Provider) rollback(ctx context.Context, resources []string, roleExisted
 	return errors
 }
 
+// oidcConditionPrefix returns the IAM condition-key prefix for an OIDC issuer:
+// the provider NAME (host plus any path), with the scheme stripped.
+//
+// AWS: "Define condition keys using the name of the OIDC provider
+// (token.actions.githubusercontent.com) followed by a claim (:aud)". Building
+// the key from the provider ARN instead yields a key that IAM never populates,
+// so StringEquals fails and the role can never be assumed.
+func oidcConditionPrefix(issuerURL string) string {
+	s := strings.TrimPrefix(issuerURL, "https://")
+	s = strings.TrimPrefix(s, "http://")
+	return strings.TrimSuffix(s, "/")
+}
+
+// builtInOIDCProviders are identity providers AWS trusts natively. They need no
+// iam:OpenIDConnectProvider resource, and the trust principal is the bare host
+// rather than a provider ARN.
+var builtInOIDCProviders = map[string]bool{
+	"accounts.google.com":            true,
+	"cognito-identity.amazonaws.com": true,
+	"www.amazon.com":                 true,
+	"graph.facebook.com":             true,
+}
+
+// needsOIDCProviderResource reports whether an IAM OIDC provider must be created
+// for this issuer.
+func needsOIDCProviderResource(issuerURL string) bool {
+	return !builtInOIDCProviders[oidcConditionPrefix(issuerURL)]
+}
+
+// audienceConditionClaim returns the claim to pin the audience with.
+//
+// Normally that is "aud". For accounts.google.com it must be "oaud": AWS maps
+// the :aud key to the token's azp claim whenever azp is set, and Google service
+// account tokens do set azp — so pinning :aud to the audience would never match.
+// :oaud always carries the real aud.
+func audienceConditionClaim(issuerURL string) string {
+	if oidcConditionPrefix(issuerURL) == "accounts.google.com" {
+		return "oaud"
+	}
+	return "aud"
+}
+
 func buildTrustPolicy(oidcProviderARN string, spec *cloudauth.AWSRoleTrustOIDCSpec) map[string]interface{} {
+	prefix := oidcConditionPrefix(spec.OIDCProviderURL)
+
+	// A built-in IdP has no provider resource; the principal is the bare host.
+	principal := oidcProviderARN
+	if !needsOIDCProviderResource(spec.OIDCProviderURL) || principal == "" {
+		principal = prefix
+	}
+
 	condition := map[string]interface{}{
 		"StringEquals": map[string]string{
-			oidcProviderARN + ":aud": spec.Audience,
+			prefix + ":" + audienceConditionClaim(spec.OIDCProviderURL): spec.Audience,
 		},
 	}
 
@@ -848,7 +906,10 @@ func buildTrustPolicy(oidcProviderARN string, spec *cloudauth.AWSRoleTrustOIDCSp
 		if spec.SubjectCondition != "" {
 			conditionKey = spec.SubjectCondition
 		}
-		condition[conditionKey].(map[string]string)[oidcProviderARN+":sub"] = spec.Subject
+		if _, ok := condition[conditionKey]; !ok {
+			condition[conditionKey] = map[string]string{}
+		}
+		condition[conditionKey].(map[string]string)[prefix+":sub"] = spec.Subject
 	}
 
 	return map[string]interface{}{
@@ -857,7 +918,7 @@ func buildTrustPolicy(oidcProviderARN string, spec *cloudauth.AWSRoleTrustOIDCSp
 			{
 				"Effect": "Allow",
 				"Principal": map[string]string{
-					"Federated": oidcProviderARN,
+					"Federated": principal,
 				},
 				"Action":    "sts:AssumeRoleWithWebIdentity",
 				"Condition": condition,

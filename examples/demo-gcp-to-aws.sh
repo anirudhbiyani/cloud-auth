@@ -1,35 +1,45 @@
 #!/usr/bin/env bash
 #
-# Demo: a GCP workload gets AWS credentials with ZERO static secrets.
+# Demo: a GCP workload gets AWS credentials with ZERO static secrets —
+#       driven entirely by cloud-auth.
 #
 # A GCE VM asks its metadata server for a Google-signed OIDC token, presents it
 # to AWS STS via AssumeRoleWithWebIdentity, and receives short-lived AWS
-# credentials. No AWS access key ever exists.
+# credentials. No AWS access key ever exists on the VM.
 #
-#   ./demo-gcp-to-aws.sh preflight    # check tooling and auth
-#   ./demo-gcp-to-aws.sh aws-setup    # create the AWS role + trust (AWS admin)
-#   ./demo-gcp-to-aws.sh deploy       # build + copy cloud-auth to the VM
-#   ./demo-gcp-to-aws.sh demo         # THE DEMO: doctor + exchange + proof
-#   ./demo-gcp-to-aws.sh all          # aws-setup + deploy + demo
-#   ./demo-gcp-to-aws.sh cleanup      # delete the AWS role
+# Every step uses cloud-auth itself — the whole lifecycle:
+#   setup    -> create the AWS-side trust        (cloud-auth setup)
+#   validate -> prove the trust is correct       (cloud-auth validate)
+#   doctor   -> show the workload's identity     (cloud-auth doctor)
+#   exchange -> mint AWS credentials             (cloud-auth exchange)
+#   exec     -> run a command with them injected (cloud-auth exec)
+#   delete   -> tear the trust down              (cloud-auth delete)
 #
-# Configure with env vars (or edit the defaults below):
-#   GCP_PROJECT, GCP_ZONE, GCP_VM          the GCE VM acting as the source
-#   AWS_ROLE_NAME, AWS_REGION              the AWS role to create/assume
-#   DEMO_AUDIENCE                          audience pinned into the token+trust
+#   ./demo-gcp-to-aws.sh preflight   # check tooling + read GCP identity facts
+#   ./demo-gcp-to-aws.sh setup       # cloud-auth setup (run where AWS admin creds live)
+#   ./demo-gcp-to-aws.sh deploy      # build + copy cloud-auth to the VM
+#   ./demo-gcp-to-aws.sh demo        # THE DEMO (runs on the VM)
+#   ./demo-gcp-to-aws.sh all         # setup + deploy + demo
+#   ./demo-gcp-to-aws.sh cleanup     # cloud-auth delete
+#
+# Config via env vars:
+#   GCP_PROJECT, GCP_ZONE, GCP_VM     the GCE VM acting as the source
+#   AWS_ROLE_NAME, AWS_ACCOUNT_ID     the AWS role cloud-auth will create
+#   DEMO_AUDIENCE                     audience pinned into both token and trust
 set -euo pipefail
 
 GCP_PROJECT="${GCP_PROJECT:-$(gcloud config get-value project 2>/dev/null || true)}"
 GCP_ZONE="${GCP_ZONE:-us-central1-a}"
 GCP_VM="${GCP_VM:-cloud-auth-demo}"
 AWS_ROLE_NAME="${AWS_ROLE_NAME:-cloud-auth-demo-from-gcp}"
-AWS_REGION="${AWS_REGION:-us-east-1}"
-# Any string works, but it MUST be identical in the token and the trust policy.
+AWS_ACCOUNT_ID="${AWS_ACCOUNT_ID:-}"
+# Any string works, but it MUST match in the token and the trust policy.
 # Audience pinning is what stops this token being replayed at another trust.
 DEMO_AUDIENCE="${DEMO_AUDIENCE:-sts.amazonaws.com}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORK="${TMPDIR:-/tmp}/cloud-auth-demo"
+CA="$WORK/cloud-auth"           # locally-built binary, used for setup/validate/delete
 mkdir -p "$WORK"
 
 if [[ -t 1 ]]; then B=$'\033[1m'; G=$'\033[32m'; Y=$'\033[33m'; R=$'\033[31m'; N=$'\033[0m'
@@ -38,24 +48,26 @@ say()  { printf '\n%s==> %s%s\n' "$B" "$*" "$N"; }
 ok()   { printf '%s  ok%s %s\n' "$G" "$N" "$*"; }
 warn() { printf '%swarn%s %s\n' "$Y" "$N" "$*" >&2; }
 die()  { printf '%sfail%s %s\n' "$R" "$N" "$*" >&2; exit 1; }
-
 need() { command -v "$1" >/dev/null 2>&1 || die "missing '$1' in PATH"; }
 
+build_local() {
+  [[ -x "$CA" ]] && return
+  ( cd "$REPO_ROOT" && go build -o "$CA" ./cmd/cloud-auth )
+}
+
 # ---------------------------------------------------------------------------
-# The two facts the AWS trust policy must pin.
+# The two facts the AWS trust must pin.
 #
 # sub = the service account's NUMERIC unique id, not its email. Google puts the
-# numeric id in the token's sub claim; pinning the email would never match.
+# numeric id in the token's sub claim, so pinning the email would never match.
 # ---------------------------------------------------------------------------
 gcp_facts() {
-  [[ -n "$GCP_PROJECT" ]] || die "set GCP_PROJECT (or run: gcloud config set project ...)"
-
+  [[ -n "$GCP_PROJECT" ]] || die "set GCP_PROJECT (or: gcloud config set project ...)"
   SA_EMAIL="$(gcloud compute instances describe "$GCP_VM" \
       --project "$GCP_PROJECT" --zone "$GCP_ZONE" \
       --format='value(serviceAccounts[0].email)' 2>/dev/null || true)"
   [[ -n "$SA_EMAIL" ]] || die "could not read the service account of VM '$GCP_VM' in $GCP_ZONE.
-     Check GCP_VM/GCP_ZONE/GCP_PROJECT, and that the VM has a service account attached."
-
+     Check GCP_VM / GCP_ZONE / GCP_PROJECT, and that the VM has a service account."
   SA_UNIQUE_ID="$(gcloud iam service-accounts describe "$SA_EMAIL" \
       --project "$GCP_PROJECT" --format='value(uniqueId)')"
   [[ -n "$SA_UNIQUE_ID" ]] || die "could not read the unique id of $SA_EMAIL"
@@ -68,147 +80,139 @@ gcp_facts() {
 
 cmd_preflight() {
   say "Preflight"
-  need gcloud; need aws; need go
-  gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -1 \
-    | grep -q . && ok "gcloud authenticated" || die "run: gcloud auth login"
-  aws sts get-caller-identity >/dev/null 2>&1 \
-    && ok "aws authenticated as $(aws sts get-caller-identity --query Arn --output text)" \
-    || die "AWS credentials not working. These are only needed on YOUR machine to
-     create the role — the VM itself never gets an AWS key."
+  need gcloud; need go
+  build_local; ok "built cloud-auth"
+  gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -1 | grep -q . \
+    && ok "gcloud authenticated" || die "run: gcloud auth login"
+  [[ -n "$AWS_ACCOUNT_ID" ]] || warn "AWS_ACCOUNT_ID not set — required for 'setup'"
   gcp_facts
   ok "preflight passed"
 }
 
 # ---------------------------------------------------------------------------
-# AWS side. Note two things that trip people up:
+# cloud-auth creates the AWS-side trust. Run this where AWS admin credentials
+# live (your laptop / a bastion) — NOT on the VM. The VM never needs them.
 #
-#  1. NO IAM OIDC provider resource is created. Google (like Facebook/Cognito)
-#     is a BUILT-IN AWS identity provider, so the principal is the bare string
-#     "accounts.google.com", not a provider ARN.
-#
-#  2. The audience is pinned with :oaud, NOT :aud. For accounts.google.com AWS
-#     maps the :aud condition key to the token's azp claim whenever azp is set
-#     — and a GCE service-account token DOES set azp (to the SA's unique id).
-#     Pinning :aud to the audience would therefore never match, and the demo
-#     would fail with an opaque AccessDenied. :oaud always maps to the real aud.
-#     Ref: AWS IAM condition-key reference, "Available keys for AWS OIDC federation".
+# cloud-auth handles two AWS subtleties itself:
+#   * Google is a BUILT-IN AWS identity provider, so no iam:OpenIDConnectProvider
+#     resource is created and the trust principal is the bare "accounts.google.com".
+#   * The audience is pinned with :oaud, not :aud — for accounts.google.com AWS
+#     maps :aud to the token's azp claim whenever azp is set, and GCE service
+#     account tokens do set it.
 # ---------------------------------------------------------------------------
-cmd_aws_setup() {
-  say "AWS setup — role + trust policy"
-  gcp_facts
+cmd_setup() {
+  say "cloud-auth setup — create the AWS role + trust policy"
+  build_local; gcp_facts
+  [[ -n "$AWS_ACCOUNT_ID" ]] || die "set AWS_ACCOUNT_ID=<12-digit account>"
 
-  cat > "$WORK/trust.json" <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [{
-    "Effect": "Allow",
-    "Principal": { "Federated": "accounts.google.com" },
-    "Action": "sts:AssumeRoleWithWebIdentity",
-    "Condition": {
-      "StringEquals": {
-        "accounts.google.com:oaud": "$DEMO_AUDIENCE",
-        "accounts.google.com:sub": "$SA_UNIQUE_ID"
-      }
-    }
-  }]
-}
-EOF
-  echo "  trust policy:"; sed 's/^/    /' "$WORK/trust.json"
+  echo "  dry run first (shows the plan, changes nothing):"
+  "$CA" setup --type aws-oidc \
+      --role-name "$AWS_ROLE_NAME" \
+      --account-id "$AWS_ACCOUNT_ID" \
+      --oidc-url https://accounts.google.com \
+      --audience "$DEMO_AUDIENCE" \
+      --subject "$SA_UNIQUE_ID" \
+      --source gcp \
+      --policy-arns arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess \
+      --dry-run 2>&1 | sed 's/^/    /'
 
-  if aws iam get-role --role-name "$AWS_ROLE_NAME" >/dev/null 2>&1; then
-    aws iam update-assume-role-policy --role-name "$AWS_ROLE_NAME" \
-        --policy-document "file://$WORK/trust.json"
-    ok "updated existing role $AWS_ROLE_NAME"
-  else
-    aws iam create-role --role-name "$AWS_ROLE_NAME" \
-        --assume-role-policy-document "file://$WORK/trust.json" \
-        --description "cloud-auth demo: GCP -> AWS keyless federation" \
-        --tags Key=managed-by,Value=cloud-auth-demo >/dev/null
-    ok "created role $AWS_ROLE_NAME"
-  fi
+  echo
+  echo "  applying:"
+  "$CA" setup --type aws-oidc \
+      --role-name "$AWS_ROLE_NAME" \
+      --account-id "$AWS_ACCOUNT_ID" \
+      --oidc-url https://accounts.google.com \
+      --audience "$DEMO_AUDIENCE" \
+      --subject "$SA_UNIQUE_ID" \
+      --source gcp \
+      --policy-arns arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess 2>&1 | tee "$WORK/setup.out" | sed 's/^/    /'
 
-  # Read-only, so the demo can show the credentials actually doing something.
-  aws iam attach-role-policy --role-name "$AWS_ROLE_NAME" \
-      --policy-arn arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess >/dev/null 2>&1 \
-    && ok "attached AmazonS3ReadOnlyAccess" || warn "could not attach S3 read-only (demo still works)"
+  # cloud-auth records the mechanism in its state file; grab the ref for later.
+  MECH_REF="$("$CA" list 2>/dev/null | awk '/aws_role_trust_oidc/ {print $1; exit}')"
+  [[ -n "$MECH_REF" ]] && { echo "$MECH_REF" > "$WORK/mech_ref"; ok "mechanism $MECH_REF"; } \
+    || warn "could not determine the mechanism ref from 'cloud-auth list'"
 
-  ROLE_ARN="$(aws iam get-role --role-name "$AWS_ROLE_NAME" --query 'Role.Arn' --output text)"
+  ROLE_ARN="arn:aws:iam::${AWS_ACCOUNT_ID}:role/${AWS_ROLE_NAME}"
   echo "$ROLE_ARN" > "$WORK/role_arn"
   ok "role ARN      $ROLE_ARN"
-  warn "IAM trust changes take a few seconds to propagate. If the first exchange"
-  warn "returns AccessDenied, wait ~10s and retry before debugging anything."
+
+  say "cloud-auth validate — is the trust actually correct?"
+  if [[ -n "$MECH_REF" ]]; then
+    "$CA" validate --ref "$MECH_REF" 2>&1 | sed 's/^/    /' || true
+  else
+    warn "skipping validate (no mechanism ref)"
+  fi
+  warn "IAM changes take a few seconds to propagate. If the first exchange is"
+  warn "denied, wait ~10s and retry before debugging."
 }
 
 cmd_deploy() {
   say "Build cloud-auth for the VM and copy it over"
   ( cd "$REPO_ROOT" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-      go build -trimpath -ldflags='-s -w' -o "$WORK/cloud-auth" ./cmd/cloud-auth )
-  ok "built $(du -h "$WORK/cloud-auth" | cut -f1) static linux/amd64 binary"
-  gcloud compute scp "$WORK/cloud-auth" "$GCP_VM:~/cloud-auth" \
+      go build -trimpath -ldflags='-s -w' -o "$WORK/cloud-auth-linux" ./cmd/cloud-auth )
+  ok "built $(du -h "$WORK/cloud-auth-linux" | cut -f1) static linux/amd64 binary"
+  gcloud compute scp "$WORK/cloud-auth-linux" "$GCP_VM:~/cloud-auth" \
       --project "$GCP_PROJECT" --zone "$GCP_ZONE" --quiet
   gcloud compute ssh "$GCP_VM" --project "$GCP_PROJECT" --zone "$GCP_ZONE" --quiet \
-      --command 'chmod +x ~/cloud-auth && ~/cloud-auth version 2>/dev/null || true'
+      --command 'chmod +x ~/cloud-auth'
   ok "deployed to $GCP_VM"
 }
 
 # ---------------------------------------------------------------------------
-# The demo itself. Everything below runs ON THE VM.
+# The demo. Everything below runs ON THE VM, using only cloud-auth.
 # ---------------------------------------------------------------------------
 cmd_demo() {
-  say "THE DEMO — GCP workload obtaining AWS credentials, no static secrets"
-  [[ -f "$WORK/role_arn" ]] || { gcp_facts; ROLE_ARN="$(aws iam get-role --role-name "$AWS_ROLE_NAME" --query 'Role.Arn' --output text)"; echo "$ROLE_ARN" > "$WORK/role_arn"; }
+  say "THE DEMO — a GCP workload using AWS, with no AWS key anywhere"
+  [[ -f "$WORK/role_arn" ]] || die "run '$0 setup' first (no role ARN recorded)"
   ROLE_ARN="$(cat "$WORK/role_arn")"
 
   local remote
   remote=$(cat <<REMOTE
 set -e
 echo
-echo "--- 1. Who am I? (no AWS credentials exist on this box) ---"
-env | grep -c '^AWS_' | xargs -I{} echo "AWS_* env vars present: {}"
-ls ~/.aws 2>/dev/null && echo "(~/.aws exists)" || echo "no ~/.aws directory"
+echo "=== 1. There are no AWS credentials on this machine ==="
+echo -n "AWS_* env vars: "; env | grep -c '^AWS_' || true
+[ -d ~/.aws ] && echo "~/.aws exists" || echo "no ~/.aws directory"
 
 echo
-echo "--- 2. cloud-auth doctor: what identity does this workload have? ---"
+echo "=== 2. cloud-auth doctor — what identity does this workload have? ==="
 ~/cloud-auth doctor --to aws --role '$ROLE_ARN' --audience '$DEMO_AUDIENCE' || true
 
 echo
-echo "--- 3. Exchange the Google identity for AWS credentials ---"
-~/cloud-auth exchange --to aws --role '$ROLE_ARN' --audience '$DEMO_AUDIENCE' --format env > /tmp/creds.env
-echo "got credentials:"
-sed 's/=.*/=<redacted>/' /tmp/creds.env
+echo "=== 3. cloud-auth exchange — turn that identity into AWS credentials ==="
+~/cloud-auth exchange --to aws --role '$ROLE_ARN' --audience '$DEMO_AUDIENCE' --format json \
+  | sed -E 's/("(SecretAccessKey|SessionToken)": ")[^"]*/\1<redacted>/g'
 
 echo
-echo "--- 4. Prove they work: call AWS as the assumed role ---"
-set -a; . /tmp/creds.env; set +a
-if command -v aws >/dev/null 2>&1; then
-  aws sts get-caller-identity
-else
-  echo "(aws CLI not installed on the VM; credentials above are live and usable)"
-fi
-rm -f /tmp/creds.env
+echo "=== 4. cloud-auth exec — run a command with those credentials injected ==="
+echo "(the child process sees AWS_* env vars; this parent shell never did)"
+~/cloud-auth exec --to aws --role '$ROLE_ARN' --audience '$DEMO_AUDIENCE' -- \\
+  sh -c 'echo "inside the child:"; env | grep -o "^AWS_[A-Z_]*" | sed "s/^/  /"'
 REMOTE
 )
   gcloud compute ssh "$GCP_VM" --project "$GCP_PROJECT" --zone "$GCP_ZONE" --quiet --command "$remote"
   echo
-  ok "demo complete — a GCE VM just used AWS with no AWS key anywhere"
+  ok "demo complete — zero static secrets involved"
 }
 
 cmd_cleanup() {
-  say "Cleanup"
-  aws iam detach-role-policy --role-name "$AWS_ROLE_NAME" \
-      --policy-arn arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess >/dev/null 2>&1 || true
-  aws iam delete-role --role-name "$AWS_ROLE_NAME" >/dev/null 2>&1 \
-    && ok "deleted role $AWS_ROLE_NAME" || warn "role $AWS_ROLE_NAME not found (already gone?)"
+  say "cloud-auth delete — tear the trust down"
+  build_local
+  if [[ -f "$WORK/mech_ref" ]]; then
+    "$CA" delete --ref "$(cat "$WORK/mech_ref")" 2>&1 | sed 's/^/    /' \
+      && ok "deleted mechanism" || warn "delete reported a problem — check 'cloud-auth list'"
+  else
+    warn "no mechanism ref recorded; list what remains with: $CA list"
+  fi
   rm -rf "$WORK"
-  ok "cleaned up"
 }
 
 case "${1:-}" in
   preflight) cmd_preflight ;;
-  aws-setup) cmd_aws_setup ;;
+  setup)     cmd_setup ;;
   deploy)    cmd_deploy ;;
   demo)      cmd_demo ;;
-  all)       cmd_preflight; cmd_aws_setup; cmd_deploy; cmd_demo ;;
+  all)       cmd_preflight; cmd_setup; cmd_deploy; cmd_demo ;;
   cleanup)   cmd_cleanup ;;
-  *) sed -n '2,26p' "$0"; exit 1 ;;
+  *) sed -n '2,29p' "$0"; exit 1 ;;
 esac
