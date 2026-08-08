@@ -1026,6 +1026,15 @@ func cmdValidate(ctx context.Context, args []string) error {
 		report.Summary.FailedChecks,
 		report.Summary.SkippedChecks)
 
+	// An empty report is vacuously "valid": nothing failed because nothing ran.
+	// Never let that read as a clean bill of health.
+	if !report.HasChecks() {
+		fmt.Printf("\n⚠ NO CHECKS RAN — this mechanism was NOT verified. \"Valid: true\"\n" +
+			"  above only means nothing failed, and nothing was tested. Treat this as\n" +
+			"  unverified and report it: the provider registered no validators.\n")
+		os.Exit(exitValidationError)
+	}
+
 	// "Valid" only means nothing failed. If a security-relevant check never ran,
 	// say so plainly — otherwise a mechanism whose trust policy was never
 	// inspected reads as fully verified.
