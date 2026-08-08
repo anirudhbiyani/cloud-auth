@@ -489,6 +489,22 @@ func (p *Provider) setupWorkloadIdentityPool(ctx context.Context, spec *cloudaut
 		"project_number":        spec.ProjectNumber,
 	}
 
+	// Record what the trust was SUPPOSED to be so a later Validate can compare the
+	// live provider against the original intent (a widened attribute condition or a
+	// repointed issuer is otherwise undetectable). All public values.
+	if spec.OIDCIssuerURL != "" {
+		resourceIDs["expected_issuer"] = spec.OIDCIssuerURL
+	}
+	if len(spec.AllowedAudiences) > 0 {
+		resourceIDs["expected_audience"] = spec.AllowedAudiences[0]
+	}
+	if spec.AttributeCondition != "" {
+		resourceIDs["expected_attribute_condition"] = spec.AttributeCondition
+	}
+	if len(spec.ServiceAccountRoles) > 0 {
+		resourceIDs["expected_roles"] = strings.Join(spec.ServiceAccountRoles, ",")
+	}
+
 	ref := cloudauth.CreateMechanismRef(cloudauth.MechanismGCPWorkloadIdentityPool, cloudauth.GCP, resourceIDs)
 
 	if opts.DryRun {
@@ -539,6 +555,24 @@ func (p *Provider) Validate(ctx context.Context, ref cloudauth.MechanismRef, opt
 				projectID: projectID,
 				email:     saEmail,
 			})
+		}
+
+		// Compare the live pool provider against the recorded intent. Also
+		// catches an absent attribute condition, which leaves the pool open to
+		// every identity the issuer can mint.
+		expIssuer := ref.ResourceIDs["expected_issuer"]
+		expAudience := ref.ResourceIDs["expected_audience"]
+		expSubject := firstCELLiteral(ref.ResourceIDs["expected_attribute_condition"])
+		if providerName != "" && (expIssuer != "" || expAudience != "" || expSubject != "") {
+			validators = append(validators, cloudauth.NewTrustPolicyMatchValidator(
+				expIssuer, expAudience, expSubject,
+				cloudauth.WithTrustPolicySource(p)))
+		}
+
+		if raw := ref.ResourceIDs["expected_roles"]; raw != "" && saEmail != "" {
+			validators = append(validators, cloudauth.NewPermissionsValidator(
+				strings.Split(raw, ","),
+				cloudauth.WithGrantedPolicySource(p)))
 		}
 	}
 

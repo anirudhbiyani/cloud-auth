@@ -290,3 +290,46 @@ func TestValidatorsSkipWithoutSource(t *testing.T) {
 		}
 	}
 }
+
+// Azure matches issuer/subject/audience case-sensitively and exactly. A
+// case-only difference is the classic FIC trap, and a generic "not admitted"
+// message sends people hunting in the wrong place — so it gets its own wording.
+func TestTrustPolicyReportsCaseOnlyMismatchExplicitly(t *testing.T) {
+	tests := []struct {
+		name                   string
+		expIss, expAud, expSub string
+		live                   *TrustPolicy
+	}{
+		{
+			name:   "issuer differs only in case",
+			expIss: "https://oidc.eks.us-east-1.amazonaws.com/id/ABC", expAud: "api://AzureADTokenExchange", expSub: "system:serviceaccount:ns:sa",
+			live: &TrustPolicy{
+				Issuer:    "https://oidc.eks.us-east-1.amazonaws.com/id/abc",
+				Audiences: []string{"api://AzureADTokenExchange"},
+				Subjects:  []string{"system:serviceaccount:ns:sa"},
+			},
+		},
+		{
+			name:   "subject differs only in case",
+			expIss: "https://x", expAud: "api://AzureADTokenExchange", expSub: "system:serviceaccount:NS:SA",
+			live: &TrustPolicy{
+				Issuer:    "https://x",
+				Audiences: []string{"api://AzureADTokenExchange"},
+				Subjects:  []string{"system:serviceaccount:ns:sa"},
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			v := NewTrustPolicyMatchValidator(tc.expIss, tc.expAud, tc.expSub,
+				WithTrustPolicySource(&fakeTrustSource{tp: tc.live}))
+			got := v.Validate(context.Background(), MechanismRef{ID: "r"})
+			if got.Status != CheckStatusFailed {
+				t.Fatalf("status = %s, want failed", got.Status)
+			}
+			if !strings.Contains(strings.ToLower(got.Message), "case") {
+				t.Errorf("message %q should call out the case-only difference", got.Message)
+			}
+		})
+	}
+}

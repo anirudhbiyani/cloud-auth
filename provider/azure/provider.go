@@ -416,6 +416,8 @@ func (p *Provider) setupAppRegistrationFederated(ctx context.Context, spec *clou
 		}
 	}
 
+	recordExpectedTrust(resourceIDs, spec)
+
 	ref := cloudauth.CreateMechanismRef(cloudauth.MechanismAzureFederatedCredential, cloudauth.Azure, resourceIDs)
 	ref.Owned = createdApp // Only owned if we created the app
 
@@ -550,6 +552,8 @@ func (p *Provider) setupManagedIdentityFederated(ctx context.Context, spec *clou
 		}
 	}
 
+	recordExpectedTrust(resourceIDs, spec)
+
 	ref := cloudauth.CreateMechanismRef(cloudauth.MechanismAzureFederatedCredential, cloudauth.Azure, resourceIDs)
 	ref.Owned = createdIdentity
 
@@ -598,6 +602,18 @@ func (p *Provider) Validate(ctx context.Context, ref cloudauth.MechanismRef, opt
 				resourceGroup:  ref.ResourceIDs["resource_group"],
 				identityName:   identityName,
 			})
+		}
+
+		// Compare the live federated identity credential against the recorded
+		// intent. Entra's matching is case-sensitive and exact, so a case-only
+		// drift is reported explicitly rather than as a generic mismatch.
+		expIssuer := ref.ResourceIDs["expected_issuer"]
+		expSubject := ref.ResourceIDs["expected_subject"]
+		expAudience := ref.ResourceIDs["expected_audience"]
+		if expIssuer != "" || expSubject != "" || expAudience != "" {
+			validators = append(validators, cloudauth.NewTrustPolicyMatchValidator(
+				expIssuer, expAudience, expSubject,
+				cloudauth.WithTrustPolicySource(p)))
 		}
 	}
 

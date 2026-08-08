@@ -243,6 +243,17 @@ func wildcardMatch(pattern, s string) bool {
 	return match(pattern, s)
 }
 
+// caseOnlyHint returns a diagnostic fragment when two values differ ONLY in
+// case. Azure Entra matches issuer, subject and audience case-sensitively and
+// exactly, so this is a common and very confusing misconfiguration: everything
+// "looks" right in a side-by-side diff. Naming it saves real debugging time.
+func caseOnlyHint(actual, expected string) string {
+	if actual != expected && strings.EqualFold(actual, expected) {
+		return " (differs ONLY in case — Azure and OIDC subject matching are case-sensitive)"
+	}
+	return ""
+}
+
 // isUnscoped reports whether a subject pattern admits essentially anything.
 // A trust that accepts any subject is the classic confused-deputy hole: any
 // workload from that issuer can assume the target identity.
@@ -317,7 +328,8 @@ func (v *TrustPolicyMatchValidator) Validate(ctx context.Context, ref MechanismR
 	// trusted than the one intended.
 	if v.expectedIssuer != "" && live.Issuer != v.expectedIssuer {
 		problems = append(problems, fmt.Sprintf(
-			"issuer mismatch: policy trusts %q, expected %q", live.Issuer, v.expectedIssuer))
+			"issuer mismatch%s: policy trusts %q, expected %q",
+			caseOnlyHint(live.Issuer, v.expectedIssuer), live.Issuer, v.expectedIssuer))
 	}
 
 	// Audience: exact membership. Audience pinning is what stops a token minted
@@ -331,8 +343,16 @@ func (v *TrustPolicyMatchValidator) Validate(ctx context.Context, ref MechanismR
 			}
 		}
 		if !found {
+			hint := ""
+			for _, a := range live.Audiences {
+				if h := caseOnlyHint(a, v.expectedAudience); h != "" {
+					hint = h
+					break
+				}
+			}
 			problems = append(problems, fmt.Sprintf(
-				"audience %q is not accepted (policy accepts %v)", v.expectedAudience, live.Audiences))
+				"audience %q is not accepted%s (policy accepts %v)",
+				v.expectedAudience, hint, live.Audiences))
 		}
 	}
 
@@ -354,9 +374,16 @@ func (v *TrustPolicyMatchValidator) Validate(ctx context.Context, ref MechanismR
 			}
 		}
 		if !admitted {
+			hint := ""
+			for _, s := range live.Subjects {
+				if h := caseOnlyHint(s, v.expectedSubject); h != "" {
+					hint = h
+					break
+				}
+			}
 			problems = append(problems, fmt.Sprintf(
-				"subject %q is not admitted by the policy (policy allows %v)",
-				v.expectedSubject, live.Subjects))
+				"subject %q is not admitted by the policy%s (policy allows %v)",
+				v.expectedSubject, hint, live.Subjects))
 		}
 	}
 
