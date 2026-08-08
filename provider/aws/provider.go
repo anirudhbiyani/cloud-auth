@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anirudhbiyani/cloud-auth/cloudauth"
@@ -13,8 +14,31 @@ import (
 
 // Provider implements cloudauth.LifecycleProvider for AWS.
 type Provider struct {
+	mu        sync.Mutex
 	client    IAMClient
 	stsClient STSClient
+}
+
+// iam returns the IAM client, building a real one from the ambient AWS
+// configuration on first use.
+//
+// Construction is lazy because init() registers the provider at package load —
+// long before anyone has asked to talk to AWS. Building eagerly there would make
+// every import of this package depend on resolvable credentials, and would
+// surface a credential problem as an import-time failure rather than at the
+// operation that needed it. An injected client (tests, custom config) always wins.
+func (p *Provider) iam(ctx context.Context) (IAMClient, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.client != nil {
+		return p.client, nil
+	}
+	c, err := NewIAMClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+	p.client = c
+	return c, nil
 }
 
 // STSClient abstracts AWS STS operations for token acquisition.
@@ -340,11 +364,13 @@ func (p *Provider) setupRoleTrustOIDC(ctx context.Context, spec *cloudauth.AWSRo
 
 	var roleARN string
 	if !opts.DryRun {
-		// Require client for non-dry-run operations
-		if p.client == nil {
+		// Resolve the IAM client (building one from the ambient AWS config if
+		// none was injected) before doing anything that touches AWS.
+		if _, err := p.iam(ctx); err != nil {
 			return nil, cloudauth.ErrValidation("AWS IAM client not configured").
+				WithCause(err).
 				WithProvider(cloudauth.AWS).
-				WithDetail("hint", "Configure AWS credentials or use --dry-run")
+				WithDetail("hint", "Configure AWS credentials (env, shared config, or SSO) or use --dry-run")
 		}
 
 		// Build trust policy
@@ -470,6 +496,16 @@ func (p *Provider) setupRoleTrustOIDC(ctx context.Context, spec *cloudauth.AWSRo
 
 // Validate implements cloudauth.LifecycleProvider.
 func (p *Provider) Validate(ctx context.Context, ref cloudauth.MechanismRef, opts cloudauth.ValidateOptions) (*cloudauth.ValidationReport, error) {
+	// Resolve the IAM client BEFORE constructing validators: they capture it,
+	// and a nil client would panic inside the check rather than reporting a
+	// clean "could not reach AWS".
+	if _, err := p.iam(ctx); err != nil {
+		return nil, cloudauth.ErrValidation("AWS IAM client not configured").
+			WithCause(err).
+			WithProvider(cloudauth.AWS).
+			WithDetail("hint", "Configure AWS credentials (env, shared config, or SSO)")
+	}
+
 	var validators []cloudauth.Validator
 
 	// Add standard validators based on mechanism type
@@ -804,12 +840,14 @@ func sanitizeSessionName(name string) string {
 // Helper functions
 
 func (p *Provider) findOIDCProviderByURL(ctx context.Context, url string) (string, error) {
-	// If no client configured, return empty (will create new provider)
-	if p.client == nil {
+	// Without a usable client (e.g. a dry run with no credentials) we cannot
+	// look, so report "not found" and let the caller plan a create.
+	client, err := p.iam(ctx)
+	if err != nil || client == nil {
 		return "", nil
 	}
 
-	providers, err := p.client.ListOpenIDConnectProviders(ctx)
+	providers, err := client.ListOpenIDConnectProviders(ctx)
 	if err != nil {
 		return "", err
 	}
