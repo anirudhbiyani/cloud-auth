@@ -1026,6 +1026,16 @@ func cmdValidate(ctx context.Context, args []string) error {
 		report.Summary.FailedChecks,
 		report.Summary.SkippedChecks)
 
+	// "Valid" only means nothing failed. If a security-relevant check never ran,
+	// say so plainly — otherwise a mechanism whose trust policy was never
+	// inspected reads as fully verified.
+	if !report.IsComplete() {
+		fmt.Printf("\n⚠ INCOMPLETE: %d security-relevant check(s) did not run — this mechanism\n"+
+			"  is NOT fully verified. \"Valid: true\" here means \"nothing failed\", not\n"+
+			"  \"everything was checked\". See the ○ entries below.\n",
+			len(report.SkippedChecks()))
+	}
+
 	for _, check := range report.Checks {
 		status := "✓"
 		switch check.Status {
@@ -1036,7 +1046,13 @@ func cmdValidate(ctx context.Context, args []string) error {
 		}
 
 		fmt.Printf("\n%s %s [%s]\n", status, check.Name, check.Severity)
-		if check.Status == cloudauth.CheckStatusFailed && check.Remediation != "" {
+		if check.Message != "" {
+			fmt.Printf("  %s\n", check.Message)
+		}
+		// Show remediation for skipped checks too: an unrun check is precisely
+		// where the operator needs to know what to do manually.
+		if check.Remediation != "" &&
+			(check.Status == cloudauth.CheckStatusFailed || check.Status == cloudauth.CheckStatusSkipped) {
 			fmt.Printf("  Remediation: %s\n", check.Remediation)
 		}
 	}

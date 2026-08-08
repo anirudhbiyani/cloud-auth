@@ -1,0 +1,156 @@
+package cloudauth
+
+import (
+	"context"
+	"testing"
+	"time"
+)
+
+// Severity is a string type, so comparing it with >= is a lexicographic compare,
+// not a severity compare. "critical" sorts BEFORE "error", which silently
+// inverted the gate: critical failures were ignored while info-level failures
+// invalidated the report. Rank gives it a real ordering.
+func TestSeverityRankOrdering(t *testing.T) {
+	if !(SeverityInfo.Rank() < SeverityWarning.Rank() &&
+		SeverityWarning.Rank() < SeverityError.Rank() &&
+		SeverityError.Rank() < SeverityCritical.Rank()) {
+		t.Fatalf("severity ranks are not strictly increasing: info=%d warning=%d error=%d critical=%d",
+			SeverityInfo.Rank(), SeverityWarning.Rank(), SeverityError.Rank(), SeverityCritical.Rank())
+	}
+}
+
+func TestIsValidUsesSeverityRankNotStringCompare(t *testing.T) {
+	tests := []struct {
+		name     string
+		status   CheckStatus
+		severity Severity
+		want     bool // expected IsValid()
+	}{
+		// The bug this pins: a CRITICAL failure must invalidate the report.
+		// Token acquisition — the check proving credentials actually work — is
+		// SeverityCritical, so this was the most damaging case.
+		{"critical failure invalidates", CheckStatusFailed, SeverityCritical, false},
+		{"error failure invalidates", CheckStatusFailed, SeverityError, false},
+		// ...and a low-severity failure must NOT invalidate it.
+		{"warning failure does not invalidate", CheckStatusFailed, SeverityWarning, true},
+		{"info failure does not invalidate", CheckStatusFailed, SeverityInfo, true},
+		{"passed critical is valid", CheckStatusPassed, SeverityCritical, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &ValidationReport{Checks: []ValidationCheck{
+				{ID: "x", Status: tc.status, Severity: tc.severity},
+			}}
+			if got := r.IsValid(); got != tc.want {
+				t.Errorf("IsValid() = %v, want %v (status=%s severity=%s)",
+					got, tc.want, tc.status, tc.severity)
+			}
+		})
+	}
+}
+
+// A skipped check verified nothing. Reporting "valid" when the trust policy and
+// permissions were never inspected is the exact failure this tool exists to
+// prevent, so callers need a way to tell "nothing failed" from "everything was
+// actually checked".
+func TestIsCompleteDistinguishesUnverifiedFromValid(t *testing.T) {
+	r := &ValidationReport{Checks: []ValidationCheck{
+		{ID: "reachable", Status: CheckStatusPassed, Severity: SeverityError},
+		{ID: "trust_policy", Status: CheckStatusSkipped, Severity: SeverityError},
+	}}
+	if !r.IsValid() {
+		t.Error("IsValid() should be true: nothing failed")
+	}
+	if r.IsComplete() {
+		t.Error("IsComplete() must be false when an error-severity check was skipped")
+	}
+	skipped := r.SkippedChecks()
+	if len(skipped) != 1 || skipped[0].ID != "trust_policy" {
+		t.Errorf("SkippedChecks() = %+v, want just trust_policy", skipped)
+	}
+}
+
+func TestIsCompleteIgnoresLowSeveritySkips(t *testing.T) {
+	// A skipped informational check doesn't make the run incomplete.
+	r := &ValidationReport{Checks: []ValidationCheck{
+		{ID: "a", Status: CheckStatusPassed, Severity: SeverityError},
+		{ID: "b", Status: CheckStatusSkipped, Severity: SeverityInfo},
+	}}
+	if !r.IsComplete() {
+		t.Error("IsComplete() should be true when only low-severity checks were skipped")
+	}
+}
+
+// The clock-skew validator reported Passed while doing nothing but reading the
+// local clock — a false green on a real federation failure mode.
+func TestClockSkewNotPassedWithoutTimeSource(t *testing.T) {
+	v := NewClockSkewValidator(time.Minute)
+	got := v.Validate(context.Background(), MechanismRef{ID: "r"})
+	if got.Status == CheckStatusPassed {
+		t.Error("clock skew must not report Passed with no remote time source to compare against")
+	}
+	if got.Status != CheckStatusSkipped {
+		t.Errorf("status = %s, want skipped", got.Status)
+	}
+	if got.Remediation == "" {
+		t.Error("a skipped check should explain how to enable it")
+	}
+}
+
+func TestClockSkewComparesAgainstRemoteTime(t *testing.T) {
+	local := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	clock := func() time.Time { return local }
+
+	t.Run("within tolerance passes", func(t *testing.T) {
+		v := NewClockSkewValidator(5*time.Minute,
+			WithClockSkewNow(clock),
+			WithRemoteTime(func(context.Context) (time.Time, error) {
+				return local.Add(30 * time.Second), nil
+			}))
+		got := v.Validate(context.Background(), MechanismRef{ID: "r"})
+		if got.Status != CheckStatusPassed {
+			t.Errorf("status = %s, want passed (30s drift under a 5m tolerance)", got.Status)
+		}
+	})
+
+	t.Run("beyond tolerance fails", func(t *testing.T) {
+		v := NewClockSkewValidator(time.Minute,
+			WithClockSkewNow(clock),
+			WithRemoteTime(func(context.Context) (time.Time, error) {
+				return local.Add(10 * time.Minute), nil
+			}))
+		got := v.Validate(context.Background(), MechanismRef{ID: "r"})
+		if got.Status != CheckStatusFailed {
+			t.Errorf("status = %s, want failed (10m drift over a 1m tolerance)", got.Status)
+		}
+	})
+
+	t.Run("skew is absolute, direction does not matter", func(t *testing.T) {
+		v := NewClockSkewValidator(time.Minute,
+			WithClockSkewNow(clock),
+			WithRemoteTime(func(context.Context) (time.Time, error) {
+				return local.Add(-10 * time.Minute), nil // local ahead of remote
+			}))
+		got := v.Validate(context.Background(), MechanismRef{ID: "r"})
+		if got.Status != CheckStatusFailed {
+			t.Errorf("status = %s, want failed; skew must be measured absolutely", got.Status)
+		}
+	})
+}
+
+// The stubs are honest (Skipped, not Passed) but must say so loudly enough that
+// a caller can act on it.
+func TestStubbedValidatorsAreSkippedWithRemediation(t *testing.T) {
+	for _, v := range []Validator{
+		NewTrustPolicyMatchValidator("iss", "aud", "sub"),
+		NewPermissionsValidator([]string{"s3:GetObject"}),
+	} {
+		got := v.Validate(context.Background(), MechanismRef{ID: "r"})
+		if got.Status != CheckStatusSkipped {
+			t.Errorf("%s: status = %s, want skipped", v.ID(), got.Status)
+		}
+		if got.Remediation == "" {
+			t.Errorf("%s: skipped check must carry remediation guidance", v.ID())
+		}
+	}
+}

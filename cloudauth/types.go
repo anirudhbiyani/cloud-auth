@@ -116,6 +116,30 @@ const (
 	SeverityCritical Severity = "critical"
 )
 
+// Rank returns the ordinal severity, for comparisons.
+//
+// Severity is a string, so comparing two values with < or >= compares them
+// lexicographically rather than by seriousness — and "critical" sorts BEFORE
+// "error". Code that gated on `severity >= SeverityError` therefore ignored
+// every critical finding while treating info-level ones as blocking, exactly
+// inverting the intent. Always compare Rank(), never the raw values.
+func (s Severity) Rank() int {
+	switch s {
+	case SeverityInfo:
+		return 1
+	case SeverityWarning:
+		return 2
+	case SeverityError:
+		return 3
+	case SeverityCritical:
+		return 4
+	default:
+		// Unknown severities are treated as the most serious: an unrecognized
+		// value should fail loudly rather than be silently discounted.
+		return 4
+	}
+}
+
 // CheckStatus indicates the result of a validation check.
 type CheckStatus string
 
@@ -145,6 +169,10 @@ type ValidationCheck struct {
 
 	// Evidence contains data supporting the check result.
 	Evidence map[string]interface{} `json:"evidence,omitempty"`
+
+	// Message is a short human-readable summary of the outcome — in particular
+	// what was NOT verified when a check is skipped.
+	Message string `json:"message,omitempty"`
 
 	// Remediation contains steps to fix a failed check.
 	Remediation string `json:"remediation,omitempty"`
@@ -177,14 +205,48 @@ type ValidationSummary struct {
 	IsValid       bool `json:"is_valid"`
 }
 
-// IsValid returns true if all checks passed or were skipped.
+// IsValid reports whether no check failed at error severity or above.
+//
+// It answers "did anything fail?", NOT "was everything verified" — a skipped
+// check proves nothing. Pair it with IsComplete before treating a mechanism as
+// trustworthy.
 func (r *ValidationReport) IsValid() bool {
 	for _, check := range r.Checks {
-		if check.Status == CheckStatusFailed && check.Severity >= SeverityError {
+		if check.Status == CheckStatusFailed && check.Severity.Rank() >= SeverityError.Rank() {
 			return false
 		}
 	}
 	return true
+}
+
+// IsComplete reports whether every check that matters actually ran.
+//
+// A skipped or unknown check at error severity or above means the mechanism was
+// not verified — the trust policy or permissions may be wrong and we simply did
+// not look. Callers that need assurance (rather than merely "nothing failed")
+// must require IsValid && IsComplete.
+func (r *ValidationReport) IsComplete() bool {
+	for _, check := range r.Checks {
+		if check.Severity.Rank() < SeverityError.Rank() {
+			continue
+		}
+		if check.Status == CheckStatusSkipped || check.Status == CheckStatusUnknown {
+			return false
+		}
+	}
+	return true
+}
+
+// SkippedChecks returns the checks that did not run, so callers can report what
+// was left unverified rather than silently treating it as fine.
+func (r *ValidationReport) SkippedChecks() []ValidationCheck {
+	var skipped []ValidationCheck
+	for _, check := range r.Checks {
+		if check.Status == CheckStatusSkipped || check.Status == CheckStatusUnknown {
+			skipped = append(skipped, check)
+		}
+	}
+	return skipped
 }
 
 // FailedChecks returns only the checks that failed.
