@@ -1,0 +1,18 @@
+# Example of the file the driver generates as
+#   test/harness/tofu/gcp/stage2/harness.auto.tfvars
+# from test/harness/state/aws-stage1.json and test/harness/state/azure-stage1.json.
+#
+# `*.auto.tfvars` is loaded automatically, so `tofu apply` needs no -var-file.
+# The real file is gitignored. Copy this to harness.auto.tfvars to apply by hand.
+
+run_id = "20260705-abc123"
+
+# from state/aws-stage1.json
+aws_account_id          = "123456789012"
+aws_eks_oidc_issuer_url = "https://oidc.eks.us-east-1.amazonaws.com/id/ABC123"
+aws_irsa_subject        = "system:serviceaccount:cloud-auth-test:verifier"
+aws_ec2_role_name       = "cloud-auth-test-ec2-source"
+
+# from state/azure-stage1.json
+azure_aks_oidc_issuer_url = "https://eastus.oic.prod-aks.azure.com/aaaa/bbbb/"
+azure_subject             = "system:serviceaccount:cloud-auth-test:verifier"

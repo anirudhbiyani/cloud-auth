@@ -73,7 +73,12 @@ docs/_build/
 
 # PyBuilder
 .pybuilder/
-target/
+# NOTE: the upstream Python template ignores a bare `target/` here (PyBuilder's
+# build output, also Cargo's and Maven's). This is a Go repo whose Target
+# Exchangers live in ./target, and that pattern silently swallowed the entire
+# package — it built locally while CI failed on a clean checkout. Scoped to
+# PyBuilder's actual output path so Go source can never be excluded again.
+.pybuilder/target/
 
 # Jupyter Notebook
 .ipynb_checkpoints
@@ -205,3 +210,18 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# ---- cloud-auth integration harness ----
+# Local OpenTofu state and provider plugins (never commit: contains resource
+# identifiers and can contain sensitive values).
+test/harness/tofu/**/.terraform/
+test/harness/tofu/**/.terraform.lock.hcl
+test/harness/tofu/**/terraform.tfstate
+test/harness/tofu/**/terraform.tfstate.*
+test/harness/tofu/**/*.tfplan
+# Generated cross-cloud tfvars (derived from stage1 outputs each run).
+test/harness/tofu/**/harness.auto.tfvars
+# Run artifacts: stage outputs, merged targets, verifier reports, built binary.
+test/harness/state/*
+!test/harness/state/.gitkeep
+!test/harness/state/*.example.json

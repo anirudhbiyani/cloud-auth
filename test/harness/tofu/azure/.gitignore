@@ -1,0 +1,17 @@
+# Local state only -- never commit it, it contains resource ids and identity
+# metadata for a live run.
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+crash.log
+crash.*.log
+
+# Driver-generated inputs (derived from the other clouds' stage-1 JSON).
+*.auto.tfvars
+*.auto.tfvars.json
+!terraform.tfvars.example
+
+# tofu plan artifacts
+*.tfplan

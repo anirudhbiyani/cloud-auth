@@ -8,8 +8,8 @@
 <p align="center">
   <a href="https://pkg.go.dev/github.com/anirudhbiyani/cloud-auth"><img src="https://pkg.go.dev/badge/github.com/anirudhbiyani/cloud-auth.svg" alt="Go Reference"></a>
   <a href="https://goreportcard.com/report/github.com/anirudhbiyani/cloud-auth"><img src="https://goreportcard.com/badge/github.com/anirudhbiyani/cloud-auth" alt="Go Report Card"></a>
-  <a href="https://opensource.org/licenses/LGPL-3.0"><img src="https://img.shields.io/badge/License-LGPL_v3-blue.svg" alt="License: LGPL-3.0"></a>
-  <img src="https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go&logoColor=white" alt="Go Version">
+  <a href="https://www.gnu.org/licenses/agpl-3.0"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL-3.0"></a>
+  <img src="https://img.shields.io/badge/Go-1.26.5+-00ADD8?logo=go&logoColor=white" alt="Go Version">
 </p>
 
 <p align="center">
@@ -91,14 +91,14 @@ Full lifecycle support for major cloud providers:
 
 **Using Go:**
 ```bash
-go install github.com/anirudhbiyani/cloud-auth@latest
+go install github.com/anirudhbiyani/cloud-auth/cmd/cloud-auth@latest
 ```
 
 **From Source:**
 ```bash
 git clone https://github.com/anirudhbiyani/cloud-auth.git
 cd cloud-auth
-go build -o cloud-auth .
+go build -o cloud-auth ./cmd/cloud-auth
 ```
 
 ### Library
@@ -167,6 +167,8 @@ cloud-auth setup --type k8s-federation \
 
 ### CLI Commands
 
+**Control-plane** — establish and manage the trust relationship:
+
 | Command | Description |
 |---------|-------------|
 | `setup` | Create or update a cross-cloud authentication mechanism |
@@ -176,6 +178,19 @@ cloud-auth setup --type k8s-federation \
 | `describe` | Show details of a specific mechanism |
 | `providers` | List available providers and their capabilities |
 | `version` | Show version information |
+
+**Runtime** — obtain short-lived credentials at workload run time, with zero
+static secrets. The workload detects its own identity, mints a native proof, and
+exchanges it at the target cloud's STS:
+
+| Command | Description |
+|---------|-------------|
+| `doctor` | Detect the runtime and preflight a target; explains exactly why an exchange would be refused |
+| `exchange` | Obtain short-lived target credentials (`--format env\|json`) |
+| `exec` | Mint + exchange, then run a command with the credentials injected (`... -- <cmd>`) |
+| `init` | Print the target-side trust scaffold (Terraform/OpenTofu + CLI). Print-only; never applies changes |
+| `credential-process` | Emit the AWS `credential_process` JSON contract for zero-code SDK integration |
+| `config-validate` | Lint a declarative federation config file |
 
 ### Mechanism Types
 
@@ -275,13 +290,36 @@ cloud-auth validate --ref aws_role_trust_oidc-aws-abc123 --include-token-test
 cloud-auth validate --ref aws_role_trust_oidc-aws-abc123 --timeout 60s
 ```
 
-Validation checks include:
-- ✅ Resource existence
-- ✅ Trust policy configuration
-- ✅ OIDC provider configuration
-- ✅ Permission policies
-- ✅ Audience/Subject claims
-- ✅ Token acquisition (optional)
+Validation checks, and their **current** implementation status:
+
+| Check | Status |
+|---|---|
+| Resource existence | ✅ implemented |
+| OIDC provider configuration | ✅ implemented — fetches the issuer's `.well-known/openid-configuration` |
+| Token acquisition | ✅ implemented (opt-in via `--include-token-test`) |
+| Clock skew | ✅ implemented — requires a remote time source; reports **skipped** without one |
+| Trust policy configuration | ✅ implemented for **AWS, GCP and Azure** — reads the live trust object and checks the issuer, audience and subject still match what was configured, and flags an unscoped trust outright |
+| Permission policies | ✅ implemented for **AWS, GCP and Azure** — confirms the expected policies/roles are still attached |
+
+> **What "unscoped" means per cloud.** The trust check fails outright when a
+> trust admits any identity from its issuer: an AWS `sub: "*"` condition, a GCP
+> workload identity pool provider with **no attribute condition**, or an Azure
+> federated credential with an empty subject. Each is a confused-deputy hole,
+> and each would otherwise "match" whatever you compared it to.
+
+> **Trust-policy and permission checks compare against the intent recorded at
+> setup.** Mechanisms created before cloud-auth persisted that intent have
+> nothing to compare against, so those checks report *skipped* rather than
+> failing — re-run `setup` to record it.
+
+> **Read the result carefully.** `Valid: true` means *nothing failed*, not
+> *everything was checked*. Checks that cannot run are reported as **skipped**
+> and never silently pass, and `validate` prints a prominent `⚠ INCOMPLETE`
+> banner listing what went unverified. In the library, pair `report.IsValid()`
+> with `report.IsComplete()` — and use `report.SkippedChecks()` to see the gaps.
+> Until trust-policy and permission validation are automated, verify those two
+> manually; each skipped check carries `Remediation` text telling you what to
+> confirm.
 
 ### State Management
 
@@ -310,9 +348,9 @@ import (
     "fmt"
     "log"
 
-    "github.com/anirudhbiyani/cloud-auth/pkg/cloudauth"
-    _ "github.com/anirudhbiyani/cloud-auth/pkg/providers/aws"
-    _ "github.com/anirudhbiyani/cloud-auth/pkg/providers/gcp"
+    "github.com/anirudhbiyani/cloud-auth/cloudauth"
+    _ "github.com/anirudhbiyani/cloud-auth/provider/aws"
+    _ "github.com/anirudhbiyani/cloud-auth/provider/gcp"
 )
 
 func main() {
@@ -326,7 +364,7 @@ func main() {
         Audience:         "sts.amazonaws.com",
         Subject:          "repo:myorg/myrepo:*",
         SubjectCondition: "StringLike",
-        Source:           cloudauth.ProviderGitHubOIDC,
+        Source:           cloudauth.GitHubOIDC,
         PolicyARNs: []string{
             "arn:aws:iam::aws:policy/ReadOnlyAccess",
         },
@@ -414,23 +452,31 @@ VAULT_TOKEN                # Vault token
 
 ```
 cloud-auth/
-├── main.go                    # CLI entry point
-├── pkg/
-│   ├── cloudauth/             # Core library
-│   │   ├── interfaces.go      # Provider and Manager interfaces
-│   │   ├── types.go           # Core types (MechanismRef, Outputs, etc.)
-│   │   ├── specs.go           # Mechanism specifications
-│   │   ├── manager.go         # Default manager implementation
-│   │   ├── registry.go        # Provider registry
-│   │   ├── state.go           # State store implementations
-│   │   ├── validation.go      # Validation framework
-│   │   └── errors.go          # Structured errors
-│   └── providers/             # Provider implementations
-│       ├── aws/               # AWS IAM, STS, OIDC
-│       ├── gcp/               # GCP Workload Identity
-│       ├── azure/             # Azure AD Federated Credentials
-│       ├── cloudflare/        # Cloudflare Access
-│       └── vault/             # HashiCorp Vault
+├── cmd/cloud-auth/            # Single CLI binary (control-plane + runtime commands)
+├── cloudauth/                 # Core domain package (one shared vocabulary)
+│   ├── federation.go          # Runtime types (Cloud, Target, SourceToken, Credentials)
+│   ├── federation_interfaces.go # SourceProvider, Exchanger, Runtime, sentinel errors
+│   ├── interfaces.go          # Provider and Manager interfaces (control-plane)
+│   ├── types.go               # Control-plane types (MechanismRef, Outputs, etc.)
+│   ├── specs.go               # Mechanism specifications
+│   ├── manager.go             # Default manager implementation
+│   ├── registry.go            # Provider registry
+│   ├── state.go               # State store implementations
+│   ├── validation.go          # Validation framework
+│   └── errors.go              # Structured errors
+├── provider/                  # Control-plane provider implementations
+│   ├── aws/                   # AWS IAM, STS, OIDC
+│   ├── gcp/                   # GCP Workload Identity
+│   ├── azure/                 # Azure AD Federated Credentials
+│   ├── cloudflare/            # Cloudflare Access
+│   └── vault/                 # HashiCorp Vault
+├── source/                    # Runtime: source-identity detection + minting
+├── target/                    # Runtime: target STS exchangers
+├── adapters/                  # Runtime: SDK-native credential adapters
+├── broker/                    # Runtime: detect→mint→exchange orchestrator
+├── config/                    # Runtime: declarative federation config
+├── internal/                  # imds, jwt, k8stoken, cache, audit
+├── test/                      # Cloud integration harness (OpenTofu) + build-tagged tests
 └── examples/                  # Example spec files
 ```
 
@@ -505,7 +551,7 @@ go mod download
 go test -v ./...
 
 # Build
-go build -o cloud-auth .
+go build -o cloud-auth ./cmd/cloud-auth
 
 # Run linter
 golangci-lint run
@@ -523,7 +569,7 @@ golangci-lint run
 
 ## 📄 License
 
-This project is licensed under the **LGPL-3.0 License** - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)** - see the [LICENSE](LICENSE) file for details.
 
 ---
 

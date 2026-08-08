@@ -1,0 +1,29 @@
+# Example of the tfvars the driver generates from the OTHER clouds' stage-1
+# JSON. Copy to azure-stage2.auto.tfvars (gitignored) or pass with
+# `tofu apply -var-file=...`.
+#
+# Generate it, do not hand-edit it -- hand-editing is how issuer/subject strings
+# acquire the case and trailing-slash damage that breaks federation silently:
+#
+#   jq -r '
+#     "run_id = \"" + $run + "\"\n" +
+#     "gcp_issuer_url = " + (.gcp.issuer_url|tostring|@json) + "\n" +
+#     "gcp_source_sa_unique_id = " + (.gcp.source_sa_unique_id|tostring|@json) + "\n" +
+#     "aws_eks_oidc_issuer_url = " + (.aws.eks_oidc_issuer_url|tostring|@json) + "\n" +
+#     "aws_irsa_subject = " + (.aws.irsa_subject|tostring|@json)
+#   ' --arg run "$RUN_ID" \
+#     <(jq -s '{gcp: .[0], aws: .[1]}' state/gcp-stage1.json state/aws-stage1.json) \
+#     > stage2/azure-stage2.auto.tfvars
+
+run_id      = "20260705-abc123"
+name_prefix = "cloud-auth-test"
+location    = "eastus"
+
+# --- from test/harness/state/gcp-stage1.json ---
+gcp_issuer_url          = "https://accounts.google.com"
+gcp_source_sa_unique_id = "109876543210987654321"
+
+# --- from test/harness/state/aws-stage1.json ---
+# Verbatim. No trailing slash on EKS issuers; the /id/ segment is case-sensitive.
+aws_eks_oidc_issuer_url = "https://oidc.eks.us-east-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E"
+aws_irsa_subject        = "system:serviceaccount:cloud-auth-test:verifier"
