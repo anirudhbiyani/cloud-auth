@@ -421,6 +421,23 @@ func (p *Provider) setupRoleTrustOIDC(ctx context.Context, spec *cloudauth.AWSRo
 	if oidcProviderARN != "" {
 		resourceIDs["oidc_provider_arn"] = oidcProviderARN
 	}
+	// Persist what the trust was SUPPOSED to be, so a later Validate can compare
+	// the live policy against the original intent. Without these, validation can
+	// only confirm the role exists — it cannot detect that someone widened the
+	// subject condition or repointed the issuer. None of these are secrets; they
+	// are already public in the trust policy itself.
+	if spec.OIDCProviderURL != "" {
+		resourceIDs["expected_issuer"] = spec.OIDCProviderURL
+	}
+	if spec.Audience != "" {
+		resourceIDs["expected_audience"] = spec.Audience
+	}
+	if spec.Subject != "" {
+		resourceIDs["expected_subject"] = spec.Subject
+	}
+	if len(spec.PolicyARNs) > 0 {
+		resourceIDs["expected_policy_arns"] = strings.Join(spec.PolicyARNs, ",")
+	}
 
 	ref := cloudauth.CreateMechanismRef(cloudauth.MechanismAWSRoleTrustOIDC, cloudauth.AWS, resourceIDs)
 
@@ -458,9 +475,28 @@ func (p *Provider) Validate(ctx context.Context, ref cloudauth.MechanismRef, opt
 		// Role exists validator
 		validators = append(validators, &roleExistsValidator{client: p.client, roleName: roleName})
 
-		// Trust policy validator
+		// OIDC provider object exists
 		if oidcARN := ref.ResourceIDs["oidc_provider_arn"]; oidcARN != "" {
 			validators = append(validators, &oidcProviderExistsValidator{client: p.client, arn: oidcARN})
+		}
+
+		// Compare the LIVE trust policy against the intent recorded at setup.
+		// Mechanisms created before these keys were persisted simply won't have
+		// them, and the check reports skipped rather than failing spuriously.
+		expIssuer := ref.ResourceIDs["expected_issuer"]
+		expAudience := ref.ResourceIDs["expected_audience"]
+		expSubject := ref.ResourceIDs["expected_subject"]
+		if expIssuer != "" || expAudience != "" || expSubject != "" {
+			validators = append(validators, cloudauth.NewTrustPolicyMatchValidator(
+				expIssuer, expAudience, expSubject,
+				cloudauth.WithTrustPolicySource(p)))
+		}
+
+		// Confirm the policies the spec asked for are still attached.
+		if raw := ref.ResourceIDs["expected_policy_arns"]; raw != "" {
+			validators = append(validators, cloudauth.NewPermissionsValidator(
+				strings.Split(raw, ","),
+				cloudauth.WithGrantedPolicySource(p)))
 		}
 	}
 

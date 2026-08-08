@@ -2,6 +2,8 @@ package cloudauth
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -151,6 +153,140 @@ func TestStubbedValidatorsAreSkippedWithRemediation(t *testing.T) {
 		}
 		if got.Remediation == "" {
 			t.Errorf("%s: skipped check must carry remediation guidance", v.ID())
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Trust-policy and permission validators, once a provider supplies live facts.
+// ---------------------------------------------------------------------------
+
+type fakeTrustSource struct {
+	tp  *TrustPolicy
+	err error
+}
+
+func (f *fakeTrustSource) TrustPolicy(context.Context, MechanismRef) (*TrustPolicy, error) {
+	return f.tp, f.err
+}
+
+type fakeGrantSource struct {
+	policies []string
+	err      error
+}
+
+func (f *fakeGrantSource) GrantedPolicies(context.Context, MechanismRef) ([]string, error) {
+	return f.policies, f.err
+}
+
+func TestTrustPolicyMatchAgainstLivePolicy(t *testing.T) {
+	const (
+		iss = "https://token.actions.githubusercontent.com"
+		aud = "sts.amazonaws.com"
+		sub = "repo:myorg/myrepo:ref:refs/heads/main"
+	)
+	tests := []struct {
+		name string
+		live *TrustPolicy
+		want CheckStatus
+		// substring the failure message must mention, so an operator can act
+		mentions string
+	}{
+		{
+			name: "exact match passes",
+			live: &TrustPolicy{Issuer: iss, Audiences: []string{aud}, Subjects: []string{sub}},
+			want: CheckStatusPassed,
+		},
+		{
+			name:     "wrong issuer fails and names it",
+			live:     &TrustPolicy{Issuer: "https://evil.example", Audiences: []string{aud}, Subjects: []string{sub}},
+			want:     CheckStatusFailed,
+			mentions: "issuer",
+		},
+		{
+			name:     "missing audience fails",
+			live:     &TrustPolicy{Issuer: iss, Audiences: []string{"other"}, Subjects: []string{sub}},
+			want:     CheckStatusFailed,
+			mentions: "audience",
+		},
+		{
+			name:     "subject not admitted fails",
+			live:     &TrustPolicy{Issuer: iss, Audiences: []string{aud}, Subjects: []string{"repo:other/repo:*"}},
+			want:     CheckStatusFailed,
+			mentions: "subject",
+		},
+		{
+			// A StringLike wildcard in the deployed policy legitimately admits a
+			// concrete expected subject.
+			name: "wildcard pattern admits concrete subject",
+			live: &TrustPolicy{Issuer: iss, Audiences: []string{aud}, Subjects: []string{"repo:myorg/myrepo:*"}},
+			want: CheckStatusPassed,
+		},
+		{
+			// An unscoped trust is the confused-deputy hole this check exists for.
+			name:     "wide-open subject is rejected outright",
+			live:     &TrustPolicy{Issuer: iss, Audiences: []string{aud}, Subjects: []string{"*"}},
+			want:     CheckStatusFailed,
+			mentions: "unscoped",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			v := NewTrustPolicyMatchValidator(iss, aud, sub,
+				WithTrustPolicySource(&fakeTrustSource{tp: tc.live}))
+			got := v.Validate(context.Background(), MechanismRef{ID: "r"})
+			if got.Status != tc.want {
+				t.Fatalf("status = %s, want %s (message=%q)", got.Status, tc.want, got.Message)
+			}
+			if tc.mentions != "" && !strings.Contains(strings.ToLower(got.Message), tc.mentions) {
+				t.Errorf("message %q should mention %q", got.Message, tc.mentions)
+			}
+		})
+	}
+}
+
+func TestTrustPolicyFetchErrorFails(t *testing.T) {
+	v := NewTrustPolicyMatchValidator("i", "a", "s",
+		WithTrustPolicySource(&fakeTrustSource{err: errors.New("access denied")}))
+	got := v.Validate(context.Background(), MechanismRef{ID: "r"})
+	if got.Status != CheckStatusFailed {
+		t.Errorf("status = %s, want failed when the policy cannot be read", got.Status)
+	}
+}
+
+func TestPermissionsAgainstGrantedPolicies(t *testing.T) {
+	required := []string{"arn:aws:iam::aws:policy/ReadOnlyAccess", "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"}
+
+	t.Run("all present passes", func(t *testing.T) {
+		v := NewPermissionsValidator(required,
+			WithGrantedPolicySource(&fakeGrantSource{policies: append([]string{"extra"}, required...)}))
+		got := v.Validate(context.Background(), MechanismRef{ID: "r"})
+		if got.Status != CheckStatusPassed {
+			t.Errorf("status = %s, want passed (message=%q)", got.Status, got.Message)
+		}
+	})
+
+	t.Run("missing one fails and names it", func(t *testing.T) {
+		v := NewPermissionsValidator(required,
+			WithGrantedPolicySource(&fakeGrantSource{policies: required[:1]}))
+		got := v.Validate(context.Background(), MechanismRef{ID: "r"})
+		if got.Status != CheckStatusFailed {
+			t.Fatalf("status = %s, want failed", got.Status)
+		}
+		if !strings.Contains(got.Message, "AmazonS3ReadOnlyAccess") {
+			t.Errorf("message %q must name the missing policy", got.Message)
+		}
+	})
+}
+
+// Without a source both remain honestly skipped — the pre-existing behaviour.
+func TestValidatorsSkipWithoutSource(t *testing.T) {
+	for _, v := range []Validator{
+		NewTrustPolicyMatchValidator("i", "a", "s"),
+		NewPermissionsValidator([]string{"p"}),
+	} {
+		if got := v.Validate(context.Background(), MechanismRef{ID: "r"}); got.Status != CheckStatusSkipped {
+			t.Errorf("%s: status = %s, want skipped without a source", v.ID(), got.Status)
 		}
 	}
 }

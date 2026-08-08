@@ -298,8 +298,13 @@ Validation checks, and their **current** implementation status:
 | OIDC provider configuration | ✅ implemented — fetches the issuer's `.well-known/openid-configuration` |
 | Token acquisition | ✅ implemented (opt-in via `--include-token-test`) |
 | Clock skew | ✅ implemented — requires a remote time source; reports **skipped** without one |
-| Trust policy configuration | ⚠️ **not yet automated** — reported as *skipped*, never as passed |
-| Permission policies | ⚠️ **not yet automated** — reported as *skipped*, never as passed |
+| Trust policy configuration | ✅ implemented for **AWS** — reads the live assume-role policy and checks the issuer, audience and subject still match what was configured, and flags an unscoped (`sub: "*"`) trust. *Skipped* on providers that don't yet supply a `TrustPolicySource` |
+| Permission policies | ✅ implemented for **AWS** — confirms the expected policies are still attached. *Skipped* elsewhere |
+
+> **Trust-policy and permission checks compare against the intent recorded at
+> setup.** Mechanisms created before cloud-auth persisted that intent have
+> nothing to compare against, so those checks report *skipped* rather than
+> failing — re-run `setup` to record it.
 
 > **Read the result carefully.** `Valid: true` means *nothing failed*, not
 > *everything was checked*. Checks that cannot run are reported as **skipped**

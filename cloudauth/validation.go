@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -141,20 +142,113 @@ func (v *OIDCIssuerReachableValidator) Validate(ctx context.Context, ref Mechani
 	return check
 }
 
-// TrustPolicyMatchValidator checks if a trust policy matches expected values.
+// TrustPolicy is the live, provider-neutral trust configuration of a mechanism:
+// who is trusted to assume it, for which audience, and scoped to which subjects.
+type TrustPolicy struct {
+	// Issuer is the trusted OIDC issuer (or federated principal).
+	Issuer string
+	// Audiences are the accepted `aud` values.
+	Audiences []string
+	// Subjects are the accepted `sub` values or patterns. IAM StringLike
+	// wildcards ("repo:org/repo:*") are preserved verbatim.
+	Subjects []string
+	// Raw is the provider's original policy document, for evidence.
+	Raw string
+}
+
+// TrustPolicySource supplies the live trust policy for a mechanism.
+//
+// It exists so the core can read provider-specific state without importing
+// providers: cloudauth is the leaf package and providers import it, so the
+// dependency is inverted through this interface and implemented provider-side.
+type TrustPolicySource interface {
+	TrustPolicy(ctx context.Context, ref MechanismRef) (*TrustPolicy, error)
+}
+
+// TrustPolicyMatchValidator checks the live trust policy against expectations.
 type TrustPolicyMatchValidator struct {
 	expectedIssuer   string
 	expectedAudience string
 	expectedSubject  string
+	source           TrustPolicySource
+}
+
+// TrustPolicyOption configures a TrustPolicyMatchValidator.
+type TrustPolicyOption func(*TrustPolicyMatchValidator)
+
+// WithTrustPolicySource supplies the live policy to compare against. Without
+// it the check cannot run and reports Skipped rather than a hollow pass.
+func WithTrustPolicySource(s TrustPolicySource) TrustPolicyOption {
+	return func(v *TrustPolicyMatchValidator) { v.source = s }
 }
 
 // NewTrustPolicyMatchValidator creates a new trust policy validator.
-func NewTrustPolicyMatchValidator(issuer, audience, subject string) *TrustPolicyMatchValidator {
-	return &TrustPolicyMatchValidator{
+func NewTrustPolicyMatchValidator(issuer, audience, subject string, opts ...TrustPolicyOption) *TrustPolicyMatchValidator {
+	v := &TrustPolicyMatchValidator{
 		expectedIssuer:   issuer,
 		expectedAudience: audience,
 		expectedSubject:  subject,
 	}
+	for _, o := range opts {
+		o(v)
+	}
+	return v
+}
+
+// wildcardMatch reports whether s matches an IAM StringLike pattern, in which
+// `*` matches any run of characters and `?` any single one. Written out rather
+// than using path.Match because that treats "/" specially, and subjects are
+// full of slashes ("repo:org/repo:ref:refs/heads/main").
+func wildcardMatch(pattern, s string) bool {
+	if pattern == s {
+		return true
+	}
+	if !strings.ContainsAny(pattern, "*?") {
+		return false
+	}
+	var match func(p, v string) bool
+	match = func(p, v string) bool {
+		for {
+			if p == "" {
+				return v == ""
+			}
+			switch p[0] {
+			case '*':
+				// Collapse runs of '*', then try every split point.
+				for len(p) > 0 && p[0] == '*' {
+					p = p[1:]
+				}
+				if p == "" {
+					return true
+				}
+				for i := 0; i <= len(v); i++ {
+					if match(p, v[i:]) {
+						return true
+					}
+				}
+				return false
+			case '?':
+				if v == "" {
+					return false
+				}
+				p, v = p[1:], v[1:]
+			default:
+				if v == "" || v[0] != p[0] {
+					return false
+				}
+				p, v = p[1:], v[1:]
+			}
+		}
+	}
+	return match(pattern, s)
+}
+
+// isUnscoped reports whether a subject pattern admits essentially anything.
+// A trust that accepts any subject is the classic confused-deputy hole: any
+// workload from that issuer can assume the target identity.
+func isUnscoped(pattern string) bool {
+	trimmed := strings.TrimSpace(pattern)
+	return trimmed == "*" || trimmed == "" || trimmed == "?*"
 }
 
 func (v *TrustPolicyMatchValidator) ID() string {
@@ -179,33 +273,141 @@ func (v *TrustPolicyMatchValidator) Validate(ctx context.Context, ref MechanismR
 		Evidence:    make(map[string]interface{}),
 	}
 
-	// NOT IMPLEMENTED: fetching and diffing the live trust policy needs a
-	// provider-specific API call. Reported as Skipped (never Passed) so the
-	// report cannot imply the policy was checked — ValidationReport.IsComplete
-	// surfaces this to callers.
 	check.Evidence["expected_issuer"] = v.expectedIssuer
 	check.Evidence["expected_audience"] = v.expectedAudience
 	check.Evidence["expected_subject"] = v.expectedSubject
 
-	check.Status = CheckStatusSkipped
-	check.Message = "trust policy was NOT verified"
-	check.Remediation = "Not yet automated. Manually confirm the target trust policy pins " +
-		"issuer, audience and subject to the values in Evidence — an unpinned trust is a " +
-		"confused-deputy risk."
+	// No source means no live policy to compare against. Skipped, never Passed.
+	if v.source == nil {
+		check.Status = CheckStatusSkipped
+		check.Message = "trust policy was NOT verified"
+		check.Remediation = "This provider does not supply a TrustPolicySource. Manually confirm " +
+			"the target trust policy pins issuer, audience and subject to the values in Evidence — " +
+			"an unpinned trust is a confused-deputy risk."
+		check.Duration = time.Since(start)
+		return check
+	}
+
+	live, err := v.source.TrustPolicy(ctx, ref)
+	if err != nil {
+		check.Status = CheckStatusFailed
+		check.Message = fmt.Sprintf("could not read the live trust policy: %v", err)
+		check.Remediation = "Ensure the caller can read the target identity's trust policy."
+		check.Duration = time.Since(start)
+		return check
+	}
+	if live == nil {
+		check.Status = CheckStatusFailed
+		check.Message = "no trust policy found on the target identity"
+		check.Remediation = "The mechanism may have been deleted or was never created."
+		check.Duration = time.Since(start)
+		return check
+	}
+
+	check.Evidence["actual_issuer"] = live.Issuer
+	check.Evidence["actual_audiences"] = live.Audiences
+	check.Evidence["actual_subjects"] = live.Subjects
+	if live.Raw != "" {
+		check.Evidence["raw_policy"] = live.Raw
+	}
+
+	var problems []string
+
+	// Issuer: exact. A different issuer means a different identity provider is
+	// trusted than the one intended.
+	if v.expectedIssuer != "" && live.Issuer != v.expectedIssuer {
+		problems = append(problems, fmt.Sprintf(
+			"issuer mismatch: policy trusts %q, expected %q", live.Issuer, v.expectedIssuer))
+	}
+
+	// Audience: exact membership. Audience pinning is what stops a token minted
+	// for one target being replayed at another.
+	if v.expectedAudience != "" {
+		found := false
+		for _, a := range live.Audiences {
+			if a == v.expectedAudience {
+				found = true
+				break
+			}
+		}
+		if !found {
+			problems = append(problems, fmt.Sprintf(
+				"audience %q is not accepted (policy accepts %v)", v.expectedAudience, live.Audiences))
+		}
+	}
+
+	// Subject: an unscoped pattern is a finding in its own right, even though it
+	// would "match" — it admits every workload from the issuer.
+	for _, s := range live.Subjects {
+		if isUnscoped(s) {
+			problems = append(problems, fmt.Sprintf(
+				"trust is unscoped: subject pattern %q admits any workload from this issuer "+
+					"(confused-deputy risk)", s))
+		}
+	}
+	if v.expectedSubject != "" && len(problems) == 0 {
+		admitted := false
+		for _, s := range live.Subjects {
+			if wildcardMatch(s, v.expectedSubject) {
+				admitted = true
+				break
+			}
+		}
+		if !admitted {
+			problems = append(problems, fmt.Sprintf(
+				"subject %q is not admitted by the policy (policy allows %v)",
+				v.expectedSubject, live.Subjects))
+		}
+	}
+
+	if len(problems) > 0 {
+		check.Status = CheckStatusFailed
+		check.Message = strings.Join(problems, "; ")
+		check.Remediation = "Update the target trust policy so it pins the expected issuer, " +
+			"audience and subject, then re-run validate."
+	} else {
+		check.Status = CheckStatusPassed
+		check.Message = "trust policy pins the expected issuer, audience and subject"
+	}
 	check.Duration = time.Since(start)
 	return check
 }
 
-// PermissionsValidator checks if required permissions are present.
+// GrantedPolicySource lists the policies actually attached to a mechanism's
+// target identity. Like TrustPolicySource, it inverts the dependency so the
+// core can read provider state without importing providers.
+type GrantedPolicySource interface {
+	GrantedPolicies(ctx context.Context, ref MechanismRef) ([]string, error)
+}
+
+// PermissionsValidator checks that the expected policies are actually attached.
+//
+// Scope note: this verifies *attachment* — that the policies the spec asked for
+// are present on the identity — which is what catches drift and accidental
+// detachment. It is deliberately not a full effective-permission simulation
+// (AWS SimulatePrincipalPolicy and friends), so it will not detect a policy
+// whose contents were edited to grant less than its name implies.
 type PermissionsValidator struct {
 	requiredPermissions []string
+	source              GrantedPolicySource
+}
+
+// PermissionsOption configures a PermissionsValidator.
+type PermissionsOption func(*PermissionsValidator)
+
+// WithGrantedPolicySource supplies the live attachment list to compare against.
+// Without it the check reports Skipped.
+func WithGrantedPolicySource(s GrantedPolicySource) PermissionsOption {
+	return func(v *PermissionsValidator) { v.source = s }
 }
 
 // NewPermissionsValidator creates a new permissions validator.
-func NewPermissionsValidator(permissions []string) *PermissionsValidator {
-	return &PermissionsValidator{
-		requiredPermissions: permissions,
+func NewPermissionsValidator(permissions []string, opts ...PermissionsOption) *PermissionsValidator {
+	v := &PermissionsValidator{requiredPermissions: permissions}
+	for _, o := range opts {
+		o(v)
 	}
+	return v
 }
 
 func (v *PermissionsValidator) ID() string {
@@ -230,14 +432,49 @@ func (v *PermissionsValidator) Validate(ctx context.Context, ref MechanismRef) V
 		Evidence:    make(map[string]interface{}),
 	}
 
-	// NOT IMPLEMENTED: needs a provider-specific policy-simulation call.
-	// Skipped, never Passed — see TrustPolicyMatchValidator for the rationale.
 	check.Evidence["required_permissions"] = v.requiredPermissions
 
-	check.Status = CheckStatusSkipped
-	check.Message = "permissions were NOT verified"
-	check.Remediation = "Not yet automated. Manually confirm the target identity grants " +
-		"the permissions listed in Evidence, and no more."
+	if v.source == nil {
+		check.Status = CheckStatusSkipped
+		check.Message = "permissions were NOT verified"
+		check.Remediation = "This provider does not supply a GrantedPolicySource. Manually confirm " +
+			"the target identity grants the permissions listed in Evidence, and no more."
+		check.Duration = time.Since(start)
+		return check
+	}
+
+	granted, err := v.source.GrantedPolicies(ctx, ref)
+	if err != nil {
+		check.Status = CheckStatusFailed
+		check.Message = fmt.Sprintf("could not list attached policies: %v", err)
+		check.Remediation = "Ensure the caller can list the target identity's policies."
+		check.Duration = time.Since(start)
+		return check
+	}
+	check.Evidence["granted_policies"] = granted
+
+	have := make(map[string]struct{}, len(granted))
+	for _, g := range granted {
+		have[g] = struct{}{}
+	}
+	var missing []string
+	for _, want := range v.requiredPermissions {
+		if _, ok := have[want]; !ok {
+			missing = append(missing, want)
+		}
+	}
+
+	if len(missing) > 0 {
+		check.Evidence["missing_policies"] = missing
+		check.Status = CheckStatusFailed
+		check.Message = fmt.Sprintf("%d expected policy/policies not attached: %s",
+			len(missing), strings.Join(missing, ", "))
+		check.Remediation = "Attach the missing policies to the target identity, or update the " +
+			"spec if they are no longer required."
+	} else {
+		check.Status = CheckStatusPassed
+		check.Message = fmt.Sprintf("all %d expected policy/policies are attached", len(v.requiredPermissions))
+	}
 	check.Duration = time.Since(start)
 	return check
 }
