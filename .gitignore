@@ -225,3 +225,6 @@ test/harness/tofu/**/harness.auto.tfvars
 test/harness/state/*
 !test/harness/state/.gitkeep
 !test/harness/state/*.example.json
+
+# Compiled CLI binary (build artifact)
+/cloud-auth

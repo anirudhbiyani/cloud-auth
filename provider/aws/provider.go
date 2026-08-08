@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anirudhbiyani/cloud-auth/cloudauth"
@@ -13,8 +14,31 @@ import (
 
 // Provider implements cloudauth.LifecycleProvider for AWS.
 type Provider struct {
+	mu        sync.Mutex
 	client    IAMClient
 	stsClient STSClient
+}
+
+// iam returns the IAM client, building a real one from the ambient AWS
+// configuration on first use.
+//
+// Construction is lazy because init() registers the provider at package load —
+// long before anyone has asked to talk to AWS. Building eagerly there would make
+// every import of this package depend on resolvable credentials, and would
+// surface a credential problem as an import-time failure rather than at the
+// operation that needed it. An injected client (tests, custom config) always wins.
+func (p *Provider) iam(ctx context.Context) (IAMClient, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.client != nil {
+		return p.client, nil
+	}
+	c, err := NewIAMClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+	p.client = c
+	return c, nil
 }
 
 // STSClient abstracts AWS STS operations for token acquisition.
@@ -254,9 +278,17 @@ func (p *Provider) setupRoleTrustOIDC(ctx context.Context, spec *cloudauth.AWSRo
 	}
 
 	// Step 1: Handle OIDC provider
-	if spec.OIDCProviderARN != "" {
+	//
+	// Built-in IdPs (Google, Cognito, Login with Amazon, Facebook) are trusted by
+	// AWS natively: creating an iam:OpenIDConnectProvider for them is unnecessary
+	// and, for Google, actively wrong — the trust principal is the bare host, so
+	// a provider ARN would never be referenced.
+	switch {
+	case spec.OIDCProviderARN != "":
 		oidcProviderARN = spec.OIDCProviderARN
-	} else if spec.OIDCProviderURL != "" {
+	case spec.OIDCProviderURL != "" && !needsOIDCProviderResource(spec.OIDCProviderURL):
+		// Nothing to create; buildTrustPolicy uses the bare host as principal.
+	case spec.OIDCProviderURL != "":
 		// Check if provider already exists
 		existingARN, err := p.findOIDCProviderByURL(ctx, spec.OIDCProviderURL)
 		if err != nil {
@@ -332,11 +364,13 @@ func (p *Provider) setupRoleTrustOIDC(ctx context.Context, spec *cloudauth.AWSRo
 
 	var roleARN string
 	if !opts.DryRun {
-		// Require client for non-dry-run operations
-		if p.client == nil {
+		// Resolve the IAM client (building one from the ambient AWS config if
+		// none was injected) before doing anything that touches AWS.
+		if _, err := p.iam(ctx); err != nil {
 			return nil, cloudauth.ErrValidation("AWS IAM client not configured").
+				WithCause(err).
 				WithProvider(cloudauth.AWS).
-				WithDetail("hint", "Configure AWS credentials or use --dry-run")
+				WithDetail("hint", "Configure AWS credentials (env, shared config, or SSO) or use --dry-run")
 		}
 
 		// Build trust policy
@@ -462,6 +496,16 @@ func (p *Provider) setupRoleTrustOIDC(ctx context.Context, spec *cloudauth.AWSRo
 
 // Validate implements cloudauth.LifecycleProvider.
 func (p *Provider) Validate(ctx context.Context, ref cloudauth.MechanismRef, opts cloudauth.ValidateOptions) (*cloudauth.ValidationReport, error) {
+	// Resolve the IAM client BEFORE constructing validators: they capture it,
+	// and a nil client would panic inside the check rather than reporting a
+	// clean "could not reach AWS".
+	if _, err := p.iam(ctx); err != nil {
+		return nil, cloudauth.ErrValidation("AWS IAM client not configured").
+			WithCause(err).
+			WithProvider(cloudauth.AWS).
+			WithDetail("hint", "Configure AWS credentials (env, shared config, or SSO)")
+	}
+
 	var validators []cloudauth.Validator
 
 	// Add standard validators based on mechanism type
@@ -796,12 +840,14 @@ func sanitizeSessionName(name string) string {
 // Helper functions
 
 func (p *Provider) findOIDCProviderByURL(ctx context.Context, url string) (string, error) {
-	// If no client configured, return empty (will create new provider)
-	if p.client == nil {
+	// Without a usable client (e.g. a dry run with no credentials) we cannot
+	// look, so report "not found" and let the caller plan a create.
+	client, err := p.iam(ctx)
+	if err != nil || client == nil {
 		return "", nil
 	}
 
-	providers, err := p.client.ListOpenIDConnectProviders(ctx)
+	providers, err := client.ListOpenIDConnectProviders(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -836,10 +882,60 @@ func (p *Provider) rollback(ctx context.Context, resources []string, roleExisted
 	return errors
 }
 
+// oidcConditionPrefix returns the IAM condition-key prefix for an OIDC issuer:
+// the provider NAME (host plus any path), with the scheme stripped.
+//
+// AWS: "Define condition keys using the name of the OIDC provider
+// (token.actions.githubusercontent.com) followed by a claim (:aud)". Building
+// the key from the provider ARN instead yields a key that IAM never populates,
+// so StringEquals fails and the role can never be assumed.
+func oidcConditionPrefix(issuerURL string) string {
+	s := strings.TrimPrefix(issuerURL, "https://")
+	s = strings.TrimPrefix(s, "http://")
+	return strings.TrimSuffix(s, "/")
+}
+
+// builtInOIDCProviders are identity providers AWS trusts natively. They need no
+// iam:OpenIDConnectProvider resource, and the trust principal is the bare host
+// rather than a provider ARN.
+var builtInOIDCProviders = map[string]bool{
+	"accounts.google.com":            true,
+	"cognito-identity.amazonaws.com": true,
+	"www.amazon.com":                 true,
+	"graph.facebook.com":             true,
+}
+
+// needsOIDCProviderResource reports whether an IAM OIDC provider must be created
+// for this issuer.
+func needsOIDCProviderResource(issuerURL string) bool {
+	return !builtInOIDCProviders[oidcConditionPrefix(issuerURL)]
+}
+
+// audienceConditionClaim returns the claim to pin the audience with.
+//
+// Normally that is "aud". For accounts.google.com it must be "oaud": AWS maps
+// the :aud key to the token's azp claim whenever azp is set, and Google service
+// account tokens do set azp — so pinning :aud to the audience would never match.
+// :oaud always carries the real aud.
+func audienceConditionClaim(issuerURL string) string {
+	if oidcConditionPrefix(issuerURL) == "accounts.google.com" {
+		return "oaud"
+	}
+	return "aud"
+}
+
 func buildTrustPolicy(oidcProviderARN string, spec *cloudauth.AWSRoleTrustOIDCSpec) map[string]interface{} {
+	prefix := oidcConditionPrefix(spec.OIDCProviderURL)
+
+	// A built-in IdP has no provider resource; the principal is the bare host.
+	principal := oidcProviderARN
+	if !needsOIDCProviderResource(spec.OIDCProviderURL) || principal == "" {
+		principal = prefix
+	}
+
 	condition := map[string]interface{}{
 		"StringEquals": map[string]string{
-			oidcProviderARN + ":aud": spec.Audience,
+			prefix + ":" + audienceConditionClaim(spec.OIDCProviderURL): spec.Audience,
 		},
 	}
 
@@ -848,7 +944,10 @@ func buildTrustPolicy(oidcProviderARN string, spec *cloudauth.AWSRoleTrustOIDCSp
 		if spec.SubjectCondition != "" {
 			conditionKey = spec.SubjectCondition
 		}
-		condition[conditionKey].(map[string]string)[oidcProviderARN+":sub"] = spec.Subject
+		if _, ok := condition[conditionKey]; !ok {
+			condition[conditionKey] = map[string]string{}
+		}
+		condition[conditionKey].(map[string]string)[prefix+":sub"] = spec.Subject
 	}
 
 	return map[string]interface{}{
@@ -857,7 +956,7 @@ func buildTrustPolicy(oidcProviderARN string, spec *cloudauth.AWSRoleTrustOIDCSp
 			{
 				"Effect": "Allow",
 				"Principal": map[string]string{
-					"Federated": oidcProviderARN,
+					"Federated": principal,
 				},
 				"Action":    "sts:AssumeRoleWithWebIdentity",
 				"Condition": condition,

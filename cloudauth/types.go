@@ -237,6 +237,13 @@ func (r *ValidationReport) IsComplete() bool {
 	return true
 }
 
+// HasChecks reports whether the report contains any check at all.
+//
+// An empty report satisfies IsValid and IsComplete vacuously — nothing failed
+// and nothing was skipped, because nothing ran. Callers must distinguish that
+// from a genuine pass, or "Valid: true" ends up meaning "we did not look".
+func (r *ValidationReport) HasChecks() bool { return len(r.Checks) > 0 }
+
 // SkippedChecks returns the checks that did not run, so callers can report what
 // was left unverified rather than silently treating it as fine.
 func (r *ValidationReport) SkippedChecks() []ValidationCheck {

@@ -114,9 +114,49 @@ func (m *DefaultManager) Validate(ctx context.Context, ref MechanismRef, opts Va
 		defer cancel()
 	}
 
-	// Run validation
+	// Run any registry-registered validators.
 	report := RunValidation(ctx, ref, validators)
+
+	// Delegate to the provider as well.
+	//
+	// The registry alone is not enough: nothing populates it for the built-in
+	// mechanism types, so relying on it made every `validate` return
+	// "Valid: true" with zero checks while the provider's real checks — role
+	// existence, trust-policy match, attached permissions — never ran at all.
+	if provider, err := m.registry.GetLifecycleProvider(ref.Provider); err == nil && provider != nil {
+		if pr, perr := provider.Validate(ctx, ref, opts); perr != nil {
+			return nil, perr
+		} else if pr != nil {
+			report.Checks = append(report.Checks, pr.Checks...)
+			report.Summary = summarize(report.Checks)
+		}
+	}
+
 	return report, nil
+}
+
+// summarize recomputes the counts after merging provider checks in.
+func summarize(checks []ValidationCheck) ValidationSummary {
+	var s ValidationSummary
+	s.TotalChecks = len(checks)
+	for _, c := range checks {
+		switch c.Status {
+		case CheckStatusPassed:
+			s.PassedChecks++
+		case CheckStatusFailed:
+			s.FailedChecks++
+		case CheckStatusSkipped, CheckStatusUnknown:
+			s.SkippedChecks++
+		}
+	}
+	s.IsValid = true
+	for _, c := range checks {
+		if c.Status == CheckStatusFailed && c.Severity.Rank() >= SeverityError.Rank() {
+			s.IsValid = false
+			break
+		}
+	}
+	return s
 }
 
 // Delete implements MechanismManager.
