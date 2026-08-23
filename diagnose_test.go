@@ -67,8 +67,27 @@ func TestDiagnoseNoFirstClassPath(t *testing.T) {
 	if !strings.Contains(out, "no first-class keyless path") {
 		t.Errorf("want ErrNoFirstClassPath message, got:\n%s", out)
 	}
+	// AWS has a first-class remedy now, so the guidance must name it rather than
+	// send the operator off to build a bridge.
+	if !strings.Contains(out, "outbound identity federation") {
+		t.Errorf("want AWS outbound-federation guidance, got:\n%s", out)
+	}
+	if strings.Contains(out, "OIDC bridge") {
+		t.Errorf("AWS guidance should no longer recommend building a bridge, got:\n%s", out)
+	}
+}
+
+// A source with no first-class remedy still gets the generic bridge guidance.
+func TestDiagnoseNoFirstClassPathNonAWS(t *testing.T) {
+	p := preflight{
+		runtime: &core.Runtime{Cloud: core.GCP, SubRuntime: "gce", Federatable: true},
+		mintErr: fmt.Errorf("bridge: %w", core.ErrNoFirstClassPath),
+		target:  core.AzureTarget{Tenant: "11111111-1111-1111-1111-111111111111", ClientID: "22222222-2222-2222-2222-222222222222", Scope: "https://storage.azure.com/.default", TokenAudience: "api://AzureADTokenExchange"},
+		now:     refNow,
+	}
+	out := joinFindings(diagnose(p))
 	if !strings.Contains(out, "OIDC bridge") {
-		t.Errorf("want bridge guidance, got:\n%s", out)
+		t.Errorf("want generic bridge guidance, got:\n%s", out)
 	}
 }
 
@@ -140,6 +159,11 @@ func TestDiagnoseHappyPath(t *testing.T) {
 	}
 	if !strings.Contains(out, "minted successfully") || !strings.Contains(out, "audience matches") {
 		t.Errorf("want success findings, got:\n%s", out)
+	}
+	// The proof kind decides which target-side trust applies, so "it minted" on
+	// its own is not enough for an operator to act on.
+	if !strings.Contains(out, "kind ") {
+		t.Errorf("want the minted proof kind reported, got:\n%s", out)
 	}
 }
 

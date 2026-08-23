@@ -21,7 +21,8 @@ import (
 )
 
 // DefaultSTSEndpoint is the global AWS STS endpoint used to build the
-// GetCallerIdentity proof.
+// GetCallerIdentity proof. It is not used by the outbound-federation path:
+// sts:GetWebIdentityToken is only served regionally.
 const DefaultSTSEndpoint = "https://sts.amazonaws.com"
 
 // defaultSigningRegion is used when no region is configured or discoverable. The
@@ -40,9 +41,13 @@ var emptyPayloadHash = func() string {
 	return hex.EncodeToString(sum[:])
 }()
 
-// AWS is the Source Identity Provider for EC2, ECS, and EKS. EC2/ECS mint a
-// SigV4-signed GetCallerIdentity proof; EKS-IRSA mints a projected OIDC token.
-// EKS Pod Identity is detected but flagged non-federatable.
+// AWS is the Source Identity Provider for EC2, ECS, Lambda, and EKS.
+//
+// EKS-IRSA presents its projected OIDC token. EC2, ECS and Lambda have no token
+// of their own, so they mint one: an STS-vended OIDC JWT where the account has
+// enabled outbound identity federation, otherwise a SigV4-signed
+// GetCallerIdentity proof. See AWSProof to pin the choice. EKS Pod Identity is
+// detected but flagged non-federatable.
 type AWS struct {
 	getenv      func(string) string
 	readFile    func(string) ([]byte, error)
@@ -51,6 +56,14 @@ type AWS struct {
 	creds       aws.CredentialsProvider
 	stsEndpoint string
 	k8sClient   k8sTokenMinter // injected for tests; nil => derive in-cluster
+
+	// proof selects the EC2/ECS/Lambda proof kind; see AWSProof.
+	proof AWSProof
+	// proofErr holds an unparseable AWSProofEnv value, surfaced by Mint.
+	proofErr error
+	// stsAPI, when non-nil, is the injected outbound-federation STS client.
+	stsAPI   webIdentityTokenAPI
+	outbound outboundState
 
 	// The ambient config is resolved once and reused. It used to be re-loaded on
 	// every mint, which re-read the shared config file and the SSO cache each
@@ -89,6 +102,7 @@ func NewAWS(opts ...AWSOption) *AWS {
 	for _, o := range opts {
 		o(a)
 	}
+	a.resolveProof()
 	return a
 }
 
@@ -149,8 +163,8 @@ func (a *AWS) Mint(ctx context.Context, audience string) (*core.SourceToken, err
 		return nil, fmt.Errorf("%w: EKS Pod Identity vends AWS-internal credentials that are not an "+
 			"externally-verifiable token; use an OIDC-native source such as EKS IRSA for cross-cloud federation",
 			core.ErrNonFederatableSource)
-	default: // ec2, ecs
-		return a.mintSigV4(ctx, audience)
+	default: // ec2, ecs, lambda
+		return a.mintPrincipalProof(ctx, audience)
 	}
 }
 

@@ -756,19 +756,23 @@ func (p *Provider) GenerateGCPWorkloadIdentityToken(ctx context.Context, input *
 	}, nil
 }
 
-// GenerateAzureFederatedToken attempts to generate a token for Azure federation.
-// Note: AWS does not expose an OIDC token endpoint, so direct AWS → Azure federation
-// is not natively supported. This method returns an error explaining the limitation.
+// GenerateAzureFederatedToken is not implemented here, and deliberately so.
 //
-// For AWS → Azure authentication, consider:
-//  1. Using an intermediate identity broker (e.g., HashiCorp Vault)
-//  2. Running your workload in a container with an OIDC-capable identity provider
-//  3. Using AWS Lambda with GitHub Actions OIDC as an intermediary
+// It used to report that AWS → Azure federation was impossible because AWS
+// exposed no OIDC token endpoint. That is no longer true: with outbound identity
+// federation enabled, sts:GetWebIdentityToken vends an RS256 JWT that Entra
+// accepts as a client assertion.
+//
+// Minting that JWT is a data-plane operation — it asserts the identity of the
+// caller, so it belongs to the workload, not to a control-plane provider holding
+// administrative IAM credentials. Use source.NewAWS().Mint, or broker.Exchange to
+// mint and exchange in one step.
 func (p *Provider) GenerateAzureFederatedToken(ctx context.Context, input *AzureFederatedTokenInput) (*CrossCloudTokenOutput, error) {
-	return nil, core.ErrValidation("AWS → Azure direct federation is not supported").
+	return nil, core.ErrValidation("minting an AWS identity token is a data-plane operation, not a provider one").
 		WithProvider(core.AWS).
-		WithDetail("reason", "AWS does not expose an OIDC token endpoint that Azure can consume").
-		WithDetail("alternatives", "Use an identity broker like Vault, or use a service that provides OIDC tokens")
+		WithDetail("reason", "this provider holds administrative credentials; a proof of identity must be minted by the workload it identifies").
+		WithDetail("use_instead", "source.NewAWS().Mint(ctx, \"api://AzureADTokenExchange\"), then target.NewAzureExchanger().Exchange — or broker.Exchange for both").
+		WithDetail("prerequisite", "the account must have outbound identity federation enabled: aws iam enable-outbound-web-identity-federation")
 }
 
 // sanitizeSessionName removes invalid characters from role session name.

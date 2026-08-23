@@ -18,6 +18,9 @@ type scaffoldInput struct {
 	issuer string
 	// subject is the source subject/principal (from the detected runtime).
 	subject string
+	// sourceCloud is the detected source cloud, used only to make the issuer
+	// placeholder actionable when the issuer itself could not be resolved.
+	sourceCloud core.Cloud
 }
 
 // scaffoldTrust returns the print-only, target-side trust setup (Terraform and
@@ -26,7 +29,7 @@ type scaffoldInput struct {
 func scaffoldTrust(in scaffoldInput) (string, error) {
 	issuer := in.issuer
 	if issuer == "" {
-		issuer = "<SOURCE_OIDC_ISSUER_URL>"
+		issuer = issuerPlaceholder(in.sourceCloud)
 	}
 	subject := in.subject
 	if subject == "" {
@@ -42,6 +45,18 @@ func scaffoldTrust(in scaffoldInput) (string, error) {
 	default:
 		return "", fmt.Errorf("init: unsupported target %T", in.target)
 	}
+}
+
+// issuerPlaceholder is what goes in the scaffold when the source issuer could not
+// be resolved. On AWS it is worth being specific: the issuer for outbound
+// identity federation contains a per-account opaque identifier that cannot be
+// derived from the account ID or region, so an operator told only
+// "<SOURCE_OIDC_ISSUER_URL>" has no way to work out what belongs there.
+func issuerPlaceholder(source core.Cloud) string {
+	if source == core.AWS {
+		return "<https://GUID.tokens.sts.global.api.aws — run: aws iam get-outbound-web-identity-federation-info>"
+	}
+	return "<SOURCE_OIDC_ISSUER_URL>"
 }
 
 func scaffoldAWS(t core.AWSTarget, issuer, subject string) string {
@@ -195,6 +210,7 @@ func cmdInit(ctx context.Context, args []string, w io.Writer) error {
 	if _, rt, err := source.Default().Detect(ctx); err == nil && rt != nil {
 		in.issuer = rt.Issuer
 		in.subject = rt.Subject
+		in.sourceCloud = rt.Cloud
 	}
 
 	out, err := scaffoldTrust(in)

@@ -75,7 +75,7 @@ func diagnose(p preflight) []diagnosis {
 		out = append(out, diagnoseMintError(p)...)
 		return out
 	}
-	out = append(out, diagnosis{true, "source proof minted successfully"})
+	out = append(out, diagnosis{true, mintedProofSummary(p.token)})
 
 	// Token-level checks (only meaningful when a token exists).
 	if p.token != nil {
@@ -99,6 +99,25 @@ func diagnoseMintError(p preflight) []diagnosis {
 	default:
 		return []diagnosis{{false, fmt.Sprintf("minting source proof failed: %v", p.mintErr)}}
 	}
+}
+
+// mintedProofSummary names the proof that was actually minted. On AWS this is
+// the difference between an STS-vended OIDC JWT and a SigV4 GetCallerIdentity
+// proof — the same principal either way, but verified by the target against
+// completely different trust configuration, so "it minted" is not enough to know
+// whether the exchange can work.
+func mintedProofSummary(tok *core.SourceToken) string {
+	if tok == nil {
+		return "source proof minted successfully"
+	}
+	msg := fmt.Sprintf("source proof minted successfully (kind %s)", tok.Kind)
+	if tok.Issuer != "" {
+		msg += fmt.Sprintf(" from issuer %s", tok.Issuer)
+	}
+	if tok.Subject != "" {
+		msg += fmt.Sprintf(" for subject %s", tok.Subject)
+	}
+	return msg
 }
 
 // diagnoseToken performs the checks that require an actual minted token:
@@ -150,6 +169,15 @@ func diagnoseToken(p preflight) []diagnosis {
 // bridgeGuidance returns the human guidance for a source→target pair that has
 // no first-class keyless path (e.g. AWS EC2 SigV4 → Azure OIDC-only STS).
 func bridgeGuidance(source, target core.Cloud) string {
+	if source == core.AWS {
+		return fmt.Sprintf(
+			"AWS presented a SigV4 GetCallerIdentity proof, which %s's STS does not accept. "+
+				"Enable outbound identity federation on the account "+
+				"(aws iam enable-outbound-web-identity-federation) — EC2, ECS and Lambda can then "+
+				"mint a real OIDC token via sts:GetWebIdentityToken, and this path becomes "+
+				"first-class. Otherwise run the workload on an OIDC-native source such as EKS IRSA.",
+			target)
+	}
 	return fmt.Sprintf(
 		"%s presents a SigV4/native proof that %s's STS does not accept directly. "+
 			"Introduce an OIDC bridge (mint an RS256 OIDC token the target trusts), or run the workload on an OIDC-native source.",

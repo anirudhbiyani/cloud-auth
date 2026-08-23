@@ -58,8 +58,10 @@ func NewAzureExchanger(opts ...AzureExchangerOption) *AzureExchanger {
 func (e *AzureExchanger) Exchange(ctx context.Context, tok *core.SourceToken, target core.Target) (*core.Credentials, error) {
 	if tok.Kind != core.OIDC {
 		return nil, fmt.Errorf("%w: Azure Entra accepts only RS256 OIDC JWTs, but the source produced a "+
-			"%s proof. Bridge the AWS EC2/ECS identity to OIDC via one of: Amazon Cognito, an EKS/IRSA "+
-			"OIDC source, or a self-hosted OIDC broker", core.ErrNoFirstClassPath, tok.Kind)
+			"%s proof. On AWS, enable outbound identity federation for the account "+
+			"(iam:EnableOutboundWebIdentityFederation) so EC2, ECS and Lambda can mint a real OIDC "+
+			"token via sts:GetWebIdentityToken; failing that, use an OIDC-native source such as EKS "+
+			"IRSA, or a self-hosted OIDC broker", core.ErrNoFirstClassPath, tok.Kind)
 	}
 	t, ok := target.(core.AzureTarget)
 	if !ok {

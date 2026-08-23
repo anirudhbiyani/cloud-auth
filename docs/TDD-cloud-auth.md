@@ -202,7 +202,9 @@ Config `source.detect` may force a sub-runtime, skipping probes (dev/CI).
 **SigV4 proof construction:** build a canonical `GetCallerIdentity` request to the regional STS endpoint, SigV4-sign with IMDSv2-obtained instance creds, and serialize the signed headers + URL as the `SourceToken.Value`. GCP WIF replays this (`subject_token_type = urn:ietf:params:aws:token-type:aws4_request`). This is the highest-risk path — de-risked in the Phase 0 spike.
 
 ### 5.4 The EC2→Azure gap [P0-7]
-A SigV4 `SourceToken` targeting Azure is a **compile-time-impossible / runtime-guarded** combination: Azure TE inspects `SourceToken.Kind`; if `AWSSigV4`, it returns `ErrNoFirstClassPath` describing the three OIDC-bridge options (Amazon Cognito, EKS-IRSA source, self-hosted OIDC broker). Surfaced identically in `cloud-auth doctor` when config declares such a pair. No silent failure.
+A SigV4 `SourceToken` targeting Azure is a **runtime-guarded** combination: Azure TE inspects `SourceToken.Kind`; if `AWSSigV4`, it returns `ErrNoFirstClassPath`. Surfaced identically in `cloud-auth doctor` when config declares such a pair. No silent failure.
+
+**Amended.** AWS IAM outbound identity federation removed the underlying gap. With it enabled on the account, `sts:GetWebIdentityToken` vends an RS256 JWT that Entra accepts as a client assertion, so EC2, ECS and Lambda now have a first-class AWS→Azure path and the guard above is reached only when the account has not enabled the feature. The guard's message names the enablement command rather than the old bridge options. See "AWS proof selection" below.
 
 ---
 
@@ -366,7 +368,17 @@ Coverage target: unit ≥ 80% on `source`/`target`/`adapters`/`config`; the 6 pa
 
 ## 14. Resolved decisions (were open questions; carried from PRD §12)
 1. **Credential sink → in-memory only by default; opt-in `0600` file sink behind an explicit flag.** No credential is ever written to disk unless the operator explicitly opts in, in which case the file is created `0600`. **Decided.**
-2. **EC2→Azure gap → document-only for v1.** Detect the SigV4→Azure pairing and return an actionable message pointing to the OIDC-bridge options (Cognito / EKS-IRSA / self-hosted broker). No bridge helper ships in v1. **Decided.**
+2. **EC2→Azure gap → document-only for v1.** Detect the SigV4→Azure pairing and return an actionable message pointing to the OIDC-bridge options (Cognito / EKS-IRSA / self-hosted broker). No bridge helper ships in v1. **Decided — then superseded, see 2a.**
+
+2a. **AWS proof selection.** AWS IAM outbound identity federation makes the bridge unnecessary, so the EC2/ECS/Lambda source now mints an STS-vended RS256 JWT where the account allows it. Design decisions, each of which is a trust boundary rather than a detail:
+
+   - **`AWSProofAuto` is the default and prefers OIDC**, falling back to SigV4 only on `OutboundWebIdentityFederationDisabled`. Both proofs assert the same IAM principal, so this selects a format, not an identity — which is why a fallback here is not the silent credential substitution the audit forbade in the ambient chain. `AccessDenied` on `sts:GetWebIdentityToken` does *not* fall back: the feature is on and this principal is not permitted, which is a policy the operator needs to see. The disabled verdict is cached, so the probe costs one call per process.
+   - **Exactly one audience, always**, though the API accepts ten. A JWT bound to ten audiences is a valid bearer proof at all ten, so any one recipient can replay it against the other nine. There is no option to widen it, and the mint path re-checks the returned `aud` and refuses a token bound to more parties than were requested.
+   - **`DurationSeconds` is explicit (900s).** STS defaults to 300s, which the target exchange's jittered retry budget plus stale-while-refresh caching can eat into.
+   - **`Tags` is never set.** STS copies request tags into the JWT as `request_tags` claims, and the target authorizes on claims — a caller-supplied claim on a proof of identity is a claim-injection surface, so no parameter for it is offered.
+   - **Region is load-bearing.** Unlike the SigV4 proof, where the region only has to match what was signed, `GetWebIdentityToken` is not served by the global `sts.amazonaws.com` endpoint.
+   - **`sub` is the role ARN, not the session.** Two workloads sharing a role are one subject to the target, so subject pinning cannot separate them. Give them separate roles if it must.
+   - **Existing GCP pools can break.** A pool carrying only an `aws` provider will start refusing the exchange the day someone enables outbound federation on the account, because the source then presents an OIDC JWT. Pin `AWSProofSigV4` (option, or `CLOUD_AUTH_AWS_PROOF=sigv4`) for such a pool, or add an `oidc` provider alongside. `cloud-auth doctor` reports which proof was actually minted, so the flip is visible rather than mysterious.
 3. **GCP target → direct resource access is the default**, with `impersonate_service_account` as an explicit opt-in for APIs lacking direct-federation support. Both paths are implemented. (Non-blocking follow-up: reconfirm direct-access service coverage against Google's list at release.) **Decided.**
 4. **Azure flexible FIC (preview) → not depended on for v1.** Static-subject FICs are the v1 default; flexible-FIC support is a post-v1 follow-up, not a launch dependency. **Decided.**
 5. **Telemetry → none, ever.** See §12. **Decided.**

@@ -136,6 +136,10 @@ func TestAWSMintEC2ProducesSigV4Proof(t *testing.T) {
 		WithAWSEnv(envFunc(nil)),
 		WithAWSRegion("us-east-1"),
 		WithAWSCredentials(credentials.NewStaticCredentialsProvider("AKIDEXAMPLE", "secret", "session-tok")),
+		// Pin the proof. The default prefers the STS-vended OIDC JWT, which needs
+		// a live sts:GetWebIdentityToken call; this test is about the SigV4 proof,
+		// so it says so rather than relying on whatever the default happens to be.
+		WithAWSProof(AWSProofSigV4),
 	)
 	tok, err := a.Mint(context.Background(), "//iam.googleapis.com/projects/1/locations/global/workloadIdentityPools/p/providers/aws")
 	if err != nil {
