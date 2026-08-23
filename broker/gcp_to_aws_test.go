@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 	"github.com/anirudhbiyani/cloud-auth/source"
 	"github.com/anirudhbiyani/cloud-auth/target"
 )
@@ -60,6 +60,9 @@ func TestGCPToAWSEndToEnd(t *testing.T) {
 			w.WriteHeader(http.StatusForbidden)
 			return
 		}
+		// The real server echoes the header back, and the client requires it:
+		// that round trip is how a spoofed metadata.google.internal is detected.
+		w.Header().Set("Metadata-Flavor", "Google")
 		switch {
 		case strings.Contains(r.URL.Path, "/identity"):
 			gotAudienceParam = r.URL.Query().Get("audience")
@@ -100,7 +103,7 @@ func TestGCPToAWSEndToEnd(t *testing.T) {
 	)
 	b := New(
 		WithRegistry(source.NewRegistry(gcp)),
-		WithExchangerFor(func(cloudauth.Cloud) (cloudauth.Exchanger, error) {
+		WithExchangerFor(func(core.Cloud) (core.Exchanger, error) {
 			return target.NewAWSExchanger(
 				target.WithAWSEndpoint(sts.URL),
 				target.WithAWSHTTPClient(sts.Client()),
@@ -108,17 +111,16 @@ func TestGCPToAWSEndToEnd(t *testing.T) {
 		}),
 	)
 
-	creds, rt, err := b.Exchange(context.Background(), cloudauth.Target{
-		Cloud:    cloudauth.AWS,
-		Role:     roleARN,
-		Audience: audience,
+	creds, rt, err := b.Exchange(context.Background(), core.AWSTarget{
+		RoleARN:       roleARN,
+		TokenAudience: audience,
 	})
 	if err != nil {
 		t.Fatalf("GCP->AWS exchange: %v", err)
 	}
 
 	// Source half.
-	if rt.Cloud != cloudauth.GCP {
+	if rt.Cloud != core.GCP {
 		t.Errorf("detected cloud = %s, want gcp", rt.Cloud)
 	}
 	if gotAudienceParam != audience {

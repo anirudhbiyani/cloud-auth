@@ -29,16 +29,26 @@ jobs:
           version: latest
           args: --timeout=5m
 
-      # Test
-      - name: Run tests
-        run: go test -v ./...
+      # Test. One pass with the race detector and coverage, rather than three
+      # separate runs of the same suite.
+      - name: Test
+        run: go test -race -covermode=atomic -coverprofile=coverage.out ./...
 
-      - name: Run tests with race detector
-        run: go test -race -v ./...
+      # The architecture tests shell out to `go list`, so they are worth naming
+      # separately: a failure here is a layering regression, not a logic bug, and
+      # the distinction saves a reviewer a minute.
+      - name: Architecture invariants
+        run: go test ./test/architecture/ -v
 
-      # Coverage
-      - name: Run tests with coverage
-        run: go test -coverprofile=coverage.out -covermode=atomic ./...
+      # Compile the build-tagged integration suite. It needs real cloud
+      # credentials to run, but it must at least keep compiling.
+      - name: Vet integration-tagged tests
+        run: go vet -tags integration ./...
+
+      # Seed corpora only: fuzzing proper is not a CI-duration activity, but a
+      # target that no longer compiles or fails its seeds should break the build.
+      - name: Fuzz seed corpora
+        run: go test -run 'Fuzz' ./...
 
       # Build
       - name: Build
@@ -46,6 +56,16 @@ jobs:
 
       # Security
       #
+      # Known vulnerabilities in dependencies, gated. govulncheck reports only
+      # advisories whose vulnerable symbols this code actually reaches, so a
+      # finding here is a real call path and not a version-range warning —
+      # which is why it is allowed to fail the build. The tool version is
+      # pinned for reproducibility; the advisory database is always fetched
+      # live, so a newly-published advisory can turn this red without any
+      # change to the code. That is the intended behaviour.
+      - name: Run govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
+
       # Gated on medium-or-higher severity AND confidence. Rationale: this
       # codebase is full of OAuth/RFC 8693 URN constants, IMDS header names, and
       # token-shaped identifiers, so G101 ("hardcoded credentials") fires ~20

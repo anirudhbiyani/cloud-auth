@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
+	"github.com/anirudhbiyani/cloud-auth/internal/httpx"
+	"github.com/anirudhbiyani/cloud-auth/internal/redact"
 )
 
 const (
@@ -55,7 +57,7 @@ func NewGCPExchanger(opts ...GCPExchangerOption) *GCPExchanger {
 	e := &GCPExchanger{
 		stsEndpoint: DefaultGCPSTSEndpoint,
 		iamEndpoint: DefaultGCPIAMEndpoint,
-		httpClient:  &http.Client{Timeout: 10 * time.Second},
+		httpClient:  httpx.NewSTSClient(10 * time.Second),
 		maxRetries:  2,
 		backoff:     100 * time.Millisecond,
 	}
@@ -65,25 +67,32 @@ func NewGCPExchanger(opts ...GCPExchangerOption) *GCPExchanger {
 	return e
 }
 
-func subjectTokenType(k cloudauth.Kind) string {
-	if k == cloudauth.AWSSigV4 {
+func subjectTokenType(k core.Kind) string {
+	if k == core.AWSSigV4 {
 		return subjectTypeAWS4
 	}
 	return subjectTypeJWT
 }
 
 // Exchange performs the RFC 8693 token exchange, then optional impersonation.
-func (e *GCPExchanger) Exchange(ctx context.Context, tok *cloudauth.SourceToken, target cloudauth.Target) (*cloudauth.Credentials, error) {
-	audience := target.Audience
-	if audience == "" {
-		audience = target.WorkloadIdentityPool
+func (e *GCPExchanger) Exchange(ctx context.Context, tok *core.SourceToken, target core.Target) (*core.Credentials, error) {
+	t, ok := target.(core.GCPTarget)
+	if !ok {
+		return nil, fmt.Errorf("gcp: expected a GCPTarget, got %T", target)
+	}
+	if err := t.Validate(); err != nil {
+		return nil, err
+	}
+	audience := t.Audience()
+	if err := checkAudienceBinding(tok, audience); err != nil {
+		return nil, fmt.Errorf("gcp: %w", err)
 	}
 	form := url.Values{
 		"grant_type":           {grantTypeTokenExch},
 		"audience":             {audience},
 		"scope":                {gcpScope},
 		"requested_token_type": {requestedTokenAccess},
-		"subject_token":        {tok.Value},
+		"subject_token":        {tok.Reveal()},
 		"subject_token_type":   {subjectTokenType(tok.Kind)},
 	}
 	body, status, err := doWithRetry(ctx, e.httpClient, e.maxRetries, e.backoff, func() (*http.Request, error) {
@@ -95,7 +104,7 @@ func (e *GCPExchanger) Exchange(ctx context.Context, tok *cloudauth.SourceToken,
 		return req, nil
 	})
 	if err != nil {
-		return nil, e.classify(status, err)
+		return nil, categorize(err, e.classify(status, err))
 	}
 
 	var sts struct {
@@ -105,20 +114,32 @@ func (e *GCPExchanger) Exchange(ctx context.Context, tok *cloudauth.SourceToken,
 	if err := json.Unmarshal(body, &sts); err != nil {
 		return nil, fmt.Errorf("gcp: parsing STS response: %w", err)
 	}
-	federated := &cloudauth.Credentials{
-		Cloud:       cloudauth.GCP,
+	if sts.AccessToken == "" {
+		return nil, fmt.Errorf("gcp: STS returned %d with no access_token in the body", status)
+	}
+	// expires_in is required for a token we are about to cache. Absent, it would
+	// become an already-expired credential and every caller would re-exchange.
+	if sts.ExpiresIn <= 0 {
+		return nil, fmt.Errorf("gcp: STS returned no usable expires_in (%d); refusing to cache "+
+			"a token of unknown lifetime", sts.ExpiresIn)
+	}
+	federated := &core.Credentials{
+		Cloud:       core.GCP,
 		AccessToken: sts.AccessToken,
 		Expiry:      time.Now().Add(time.Duration(sts.ExpiresIn) * time.Second),
 	}
-	if target.ImpersonateServiceAccount == "" {
+	if t.ImpersonateServiceAccount == "" {
 		return federated, nil // direct resource access (recommended default)
 	}
-	return e.impersonate(ctx, sts.AccessToken, target.ImpersonateServiceAccount)
+	return e.impersonate(ctx, sts.AccessToken, t.ImpersonateServiceAccount)
 }
 
 // impersonate exchanges the federated token for a service-account access token.
-func (e *GCPExchanger) impersonate(ctx context.Context, federatedToken, sa string) (*cloudauth.Credentials, error) {
-	endpoint := fmt.Sprintf("%s/v1/projects/-/serviceAccounts/%s:generateAccessToken", e.iamEndpoint, sa)
+func (e *GCPExchanger) impersonate(ctx context.Context, federatedToken, sa string) (*core.Credentials, error) {
+	// PathEscape the account: it reaches here from configuration, and it is being
+	// interpolated into a URL that carries a live federated token as its bearer.
+	endpoint := fmt.Sprintf("%s/v1/projects/-/serviceAccounts/%s:generateAccessToken",
+		e.iamEndpoint, url.PathEscape(sa))
 	reqBody := fmt.Sprintf(`{"scope":[%q]}`, gcpScope)
 	body, status, err := doWithRetry(ctx, e.httpClient, e.maxRetries, e.backoff, func() (*http.Request, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(reqBody))
@@ -130,7 +151,7 @@ func (e *GCPExchanger) impersonate(ctx context.Context, federatedToken, sa strin
 		return req, nil
 	})
 	if err != nil {
-		return nil, e.classify(status, err)
+		return nil, categorize(err, e.classify(status, err))
 	}
 	var out struct {
 		AccessToken string `json:"accessToken"`
@@ -139,8 +160,16 @@ func (e *GCPExchanger) impersonate(ctx context.Context, federatedToken, sa strin
 	if err := json.Unmarshal(body, &out); err != nil {
 		return nil, fmt.Errorf("gcp: parsing generateAccessToken response: %w", err)
 	}
-	exp, _ := time.Parse(time.RFC3339, out.ExpireTime)
-	return &cloudauth.Credentials{Cloud: cloudauth.GCP, AccessToken: out.AccessToken, Expiry: exp}, nil
+	if out.AccessToken == "" {
+		return nil, fmt.Errorf("gcp: generateAccessToken returned %d with no accessToken for %s",
+			status, sa)
+	}
+	exp, err := time.Parse(time.RFC3339, out.ExpireTime)
+	if err != nil {
+		return nil, fmt.Errorf("gcp: generateAccessToken returned an unparseable expireTime %q "+
+			"for %s: %w", out.ExpireTime, sa, err)
+	}
+	return &core.Credentials{Cloud: core.GCP, AccessToken: out.AccessToken, Expiry: exp}, nil
 }
 
 func (e *GCPExchanger) classify(status int, err error) error {
@@ -149,7 +178,8 @@ func (e *GCPExchanger) classify(status int, err error) error {
 		return fmt.Errorf("gcp: exchange failed: %w", err)
 	}
 	if status == http.StatusBadRequest || status == http.StatusUnauthorized || status == http.StatusForbidden {
-		return fmt.Errorf("gcp: STS rejected the exchange (status %d): %s: %w", status, he.body, cloudauth.ErrTrustMissing)
+		return fmt.Errorf("gcp: STS rejected the exchange (status %d): %s: %w",
+			status, redact.Body(string(he.body), maxErrorBody), core.ErrTrustMissing)
 	}
-	return fmt.Errorf("gcp: STS error (status %d): %s", status, he.body)
+	return fmt.Errorf("gcp: STS error (status %d): %s", status, redact.Body(string(he.body), maxErrorBody))
 }

@@ -12,7 +12,10 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
+
+	"github.com/anirudhbiyani/cloud-auth/internal/httpx"
 )
 
 // DefaultBaseURL is the link-local IMDS endpoint.
@@ -31,6 +34,13 @@ type Client struct {
 	baseURL    string
 	httpClient *http.Client
 	tokenTTL   time.Duration
+
+	// The session token is cached for its TTL. Minting one per read meant two
+	// round trips per metadata field — Detect alone made four — against a
+	// service that rate-limits.
+	mu       sync.Mutex
+	token    string
+	tokenExp time.Time
 }
 
 // Option configures a Client.
@@ -49,7 +59,7 @@ func WithTokenTTL(d time.Duration) Option { return func(c *Client) { c.tokenTTL 
 func New(opts ...Option) *Client {
 	c := &Client{
 		baseURL:    DefaultBaseURL,
-		httpClient: &http.Client{Timeout: defaultTimeout},
+		httpClient: httpx.NewMetadataClient(defaultTimeout),
 		tokenTTL:   defaultTokenTTL,
 	}
 	for _, o := range opts {
@@ -58,8 +68,29 @@ func New(opts ...Option) *Client {
 	return c
 }
 
-// token mints a fresh IMDSv2 session token.
-func (c *Client) token(ctx context.Context) (string, error) {
+// sessionToken returns a cached session token, minting one if none is valid.
+//
+// The lock is held across the mint so concurrent readers share one token rather
+// than each minting their own. IMDS is local and fast, so serializing here costs
+// far less than the extra round trips did.
+func (c *Client) sessionToken(ctx context.Context) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Renew a little early: a token that expires mid-request is a failed read.
+	if c.token != "" && time.Now().Before(c.tokenExp.Add(-5*time.Second)) {
+		return c.token, nil
+	}
+	tok, err := c.mintToken(ctx)
+	if err != nil {
+		return "", err
+	}
+	c.token, c.tokenExp = tok, time.Now().Add(c.tokenTTL)
+	return tok, nil
+}
+
+// mintToken mints a fresh IMDSv2 session token.
+func (c *Client) mintToken(ctx context.Context) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.baseURL+tokenPath, nil)
 	if err != nil {
 		return "", err
@@ -88,7 +119,7 @@ func (c *Client) token(ctx context.Context) (string, error) {
 // Get reads a metadata path over IMDSv2. It mints a token first and never
 // issues a token-less request.
 func (c *Client) Get(ctx context.Context, path string) ([]byte, error) {
-	tok, err := c.token(ctx)
+	tok, err := c.sessionToken(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -7,18 +7,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
 func TestGetFetchesThenCaches(t *testing.T) {
 	base := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
-	clk := cloudauth.NewFakeClock(base)
+	clk := core.NewFakeClock(base)
 	var fetches int32
-	fetch := func(ctx context.Context) (*cloudauth.Credentials, error) {
+	fetch := func(ctx context.Context) (*core.Credentials, error) {
 		atomic.AddInt32(&fetches, 1)
-		return &cloudauth.Credentials{AccessToken: "tok", Expiry: base.Add(time.Hour)}, nil
+		return &core.Credentials{AccessToken: "tok", Expiry: base.Add(time.Hour)}, nil
 	}
-	c := New(fetch, WithClock(clk), WithBuffer(5*time.Minute))
+	c := New(fetch, WithClock(clk), WithBuffer(5*time.Minute), WithJitter(0))
 
 	for i := 0; i < 3; i++ {
 		got, err := c.Get(context.Background())
@@ -36,40 +36,56 @@ func TestGetFetchesThenCaches(t *testing.T) {
 
 func TestGetRefreshesWithinBuffer(t *testing.T) {
 	base := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
-	clk := cloudauth.NewFakeClock(base)
+	clk := core.NewFakeClock(base)
 	var fetches int32
-	fetch := func(ctx context.Context) (*cloudauth.Credentials, error) {
+	fetch := func(ctx context.Context) (*core.Credentials, error) {
 		atomic.AddInt32(&fetches, 1)
-		return &cloudauth.Credentials{
+		return &core.Credentials{
 			AccessToken: "tok",
 			Expiry:      clk.Now().Add(time.Hour),
 		}, nil
 	}
-	c := New(fetch, WithClock(clk), WithBuffer(5*time.Minute))
+	c := New(fetch, WithClock(clk), WithBuffer(5*time.Minute), WithJitter(0))
 
 	if _, err := c.Get(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	// Advance to within the 5m refresh buffer of the 1h expiry.
+	// Advance to within the 5m refresh buffer of the 1h expiry. The credentials
+	// are still valid, so Get must return immediately and refresh in the
+	// background — blocking here is what turned a transient STS blip inside the
+	// buffer into a stall for every caller.
 	clk.Advance(56 * time.Minute)
 	if _, err := c.Get(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if n := atomic.LoadInt32(&fetches); n != 2 {
-		t.Errorf("fetched %d times, want 2 (proactive refresh inside buffer)", n)
+	if !eventually(func() bool { return atomic.LoadInt32(&fetches) == 2 }) {
+		t.Errorf("fetched %d times, want 2 (background refresh inside buffer)", atomic.LoadInt32(&fetches))
 	}
+}
+
+// eventually polls for a condition the background refresh satisfies
+// asynchronously. Serve-stale means Get returns before the refresh completes.
+func eventually(cond func() bool) bool {
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return true
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return false
 }
 
 func TestGetSingleFlightOnColdCache(t *testing.T) {
 	base := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
-	clk := cloudauth.NewFakeClock(base)
+	clk := core.NewFakeClock(base)
 	var fetches int32
-	fetch := func(ctx context.Context) (*cloudauth.Credentials, error) {
+	fetch := func(ctx context.Context) (*core.Credentials, error) {
 		atomic.AddInt32(&fetches, 1)
 		time.Sleep(20 * time.Millisecond) // widen the race window
-		return &cloudauth.Credentials{AccessToken: "tok", Expiry: base.Add(time.Hour)}, nil
+		return &core.Credentials{AccessToken: "tok", Expiry: base.Add(time.Hour)}, nil
 	}
-	c := New(fetch, WithClock(clk), WithBuffer(time.Minute))
+	c := New(fetch, WithClock(clk), WithBuffer(time.Minute), WithJitter(0))
 
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {

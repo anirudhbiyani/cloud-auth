@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
 // contractPlan is the example from test/harness/CONTRACT.md, verbatim. If this
@@ -126,15 +126,15 @@ func TestCanonicalRuntime(t *testing.T) {
 func TestRuntimeKeyFromDetection(t *testing.T) {
 	tests := []struct {
 		name string
-		rt   *cloudauth.Runtime
+		rt   *core.Runtime
 		want string
 	}{
-		{"eks irsa", &cloudauth.Runtime{Cloud: cloudauth.AWS, SubRuntime: "eks-irsa"}, RuntimeAWSEKSIRSA},
-		{"ec2", &cloudauth.Runtime{Cloud: cloudauth.AWS, SubRuntime: "ec2"}, RuntimeAWSEC2},
-		{"gce", &cloudauth.Runtime{Cloud: cloudauth.GCP, SubRuntime: "gce"}, RuntimeGCPGCE},
-		{"aks wi", &cloudauth.Runtime{Cloud: cloudauth.Azure, SubRuntime: "aks-workload-identity"}, RuntimeAzureAKSWI},
+		{"eks irsa", &core.Runtime{Cloud: core.AWS, SubRuntime: "eks-irsa"}, RuntimeAWSEKSIRSA},
+		{"ec2", &core.Runtime{Cloud: core.AWS, SubRuntime: "ec2"}, RuntimeAWSEC2},
+		{"gce", &core.Runtime{Cloud: core.GCP, SubRuntime: "gce"}, RuntimeGCPGCE},
+		{"aks wi", &core.Runtime{Cloud: core.Azure, SubRuntime: "aks-workload-identity"}, RuntimeAzureAKSWI},
 		{"nil", nil, ""},
-		{"unknown sub", &cloudauth.Runtime{Cloud: cloudauth.AWS, SubRuntime: "outposts"}, ""},
+		{"unknown sub", &core.Runtime{Cloud: core.AWS, SubRuntime: "outposts"}, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -181,11 +181,11 @@ func TestSentinelFor(t *testing.T) {
 		want error
 		ok   bool
 	}{
-		{"ErrNoFirstClassPath", cloudauth.ErrNoFirstClassPath, true},
-		{"errnofirstclasspath", cloudauth.ErrNoFirstClassPath, true},
-		{"ErrTrustMissing", cloudauth.ErrTrustMissing, true},
-		{"ErrNonFederatableSource", cloudauth.ErrNonFederatableSource, true},
-		{"ErrNotThisRuntime", cloudauth.ErrNotThisRuntime, true},
+		{"ErrNoFirstClassPath", core.ErrNoFirstClassPath, true},
+		{"errnofirstclasspath", core.ErrNoFirstClassPath, true},
+		{"ErrTrustMissing", core.ErrTrustMissing, true},
+		{"ErrNonFederatableSource", core.ErrNonFederatableSource, true},
+		{"ErrNotThisRuntime", core.ErrNotThisRuntime, true},
 		{"ErrSomethingElse", nil, false},
 		{"", nil, false},
 	}
@@ -204,27 +204,27 @@ func TestTargetSpecToTarget(t *testing.T) {
 	tests := []struct {
 		name string
 		spec TargetSpec
-		want cloudauth.Target
+		want core.Target
 	}{
 		{
 			"aws",
-			TargetSpec{Cloud: "aws", Role: "arn:aws:iam::123:role/x", Audience: "sts.amazonaws.com"},
-			cloudauth.Target{Cloud: cloudauth.AWS, Role: "arn:aws:iam::123:role/x", Audience: "sts.amazonaws.com"},
+			TargetSpec{Cloud: "aws", Role: "arn:aws:iam::123456789012:role/x"},
+			core.AWSTarget{RoleARN: "arn:aws:iam::123456789012:role/x"},
 		},
 		{
 			"gcp pool key",
-			TargetSpec{Cloud: "gcp", Pool: "//iam.googleapis.com/p/1", Audience: "//iam.googleapis.com/p/1"},
-			cloudauth.Target{Cloud: cloudauth.GCP, WorkloadIdentityPool: "//iam.googleapis.com/p/1", Audience: "//iam.googleapis.com/p/1"},
+			TargetSpec{Cloud: "gcp", Pool: "//iam.googleapis.com/projects/1/p1"},
+			core.GCPTarget{WorkloadIdentityPool: "//iam.googleapis.com/projects/1/p1"},
 		},
 		{
 			"gcp provider alias",
-			TargetSpec{Cloud: "gcp", Provider: "//iam.googleapis.com/p/2", Audience: "a", Impersonate: "sa@p.iam.gserviceaccount.com"},
-			cloudauth.Target{Cloud: cloudauth.GCP, WorkloadIdentityPool: "//iam.googleapis.com/p/2", Audience: "a", ImpersonateServiceAccount: "sa@p.iam.gserviceaccount.com"},
+			TargetSpec{Cloud: "gcp", Provider: "//iam.googleapis.com/projects/1/p2", Audience: "a", Impersonate: "sa@p.iam.gserviceaccount.com"},
+			core.GCPTarget{WorkloadIdentityPool: "//iam.googleapis.com/projects/1/p2", TokenAudience: "a", ImpersonateServiceAccount: "sa@p.iam.gserviceaccount.com"},
 		},
 		{
 			"azure",
-			TargetSpec{Cloud: "azure", Tenant: "t", ClientID: "c", Audience: "api://AzureADTokenExchange"},
-			cloudauth.Target{Cloud: cloudauth.Azure, Tenant: "t", ClientID: "c", Audience: "api://AzureADTokenExchange"},
+			TargetSpec{Cloud: "azure", Tenant: "11111111-1111-1111-1111-111111111111", ClientID: "22222222-2222-2222-2222-222222222222", Scope: "https://storage.azure.com/.default"},
+			core.AzureTarget{Tenant: "11111111-1111-1111-1111-111111111111", ClientID: "22222222-2222-2222-2222-222222222222", Scope: "https://storage.azure.com/.default"},
 		},
 	}
 	for _, tt := range tests {

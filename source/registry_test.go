@@ -5,18 +5,18 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
 // fakeProvider records detection order and returns a canned result.
 type fakeProvider struct {
 	name    string
-	runtime *cloudauth.Runtime
+	runtime *core.Runtime
 	err     error
 	order   *[]string
 }
 
-func (f *fakeProvider) Detect(ctx context.Context) (*cloudauth.Runtime, error) {
+func (f *fakeProvider) Detect(ctx context.Context) (*core.Runtime, error) {
 	*f.order = append(*f.order, f.name)
 	if f.err != nil {
 		return nil, f.err
@@ -24,18 +24,18 @@ func (f *fakeProvider) Detect(ctx context.Context) (*cloudauth.Runtime, error) {
 	return f.runtime, nil
 }
 
-func (f *fakeProvider) Mint(ctx context.Context, audience string) (*cloudauth.SourceToken, error) {
-	return &cloudauth.SourceToken{Audience: audience}, nil
+func (f *fakeProvider) Mint(ctx context.Context, audience string) (*core.SourceToken, error) {
+	return &core.SourceToken{Audience: audience}, nil
 }
 
 func TestRegistryDetectReturnsFirstMatchInOrder(t *testing.T) {
 	var order []string
 	notHere := func(name string) *fakeProvider {
-		return &fakeProvider{name: name, err: cloudauth.ErrNotThisRuntime, order: &order}
+		return &fakeProvider{name: name, err: core.ErrNotThisRuntime, order: &order}
 	}
 	match := &fakeProvider{
 		name:    "gcp",
-		runtime: &cloudauth.Runtime{Cloud: cloudauth.GCP, SubRuntime: "gke", Federatable: true},
+		runtime: &core.Runtime{Cloud: core.GCP, SubRuntime: "gke", Federatable: true},
 		order:   &order,
 	}
 
@@ -44,7 +44,7 @@ func TestRegistryDetectReturnsFirstMatchInOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Detect: %v", err)
 	}
-	if rt.Cloud != cloudauth.GCP {
+	if rt.Cloud != core.GCP {
 		t.Errorf("detected cloud = %v, want gcp", rt.Cloud)
 	}
 	if prov != match {
@@ -60,8 +60,8 @@ func TestRegistryDetectReturnsFirstMatchInOrder(t *testing.T) {
 func TestRegistryDetectNoMatch(t *testing.T) {
 	var order []string
 	reg := NewRegistry(
-		&fakeProvider{name: "aws", err: cloudauth.ErrNotThisRuntime, order: &order},
-		&fakeProvider{name: "gcp", err: cloudauth.ErrNotThisRuntime, order: &order},
+		&fakeProvider{name: "aws", err: core.ErrNotThisRuntime, order: &order},
+		&fakeProvider{name: "gcp", err: core.ErrNotThisRuntime, order: &order},
 	)
 	_, _, err := reg.Detect(context.Background())
 	if err == nil {

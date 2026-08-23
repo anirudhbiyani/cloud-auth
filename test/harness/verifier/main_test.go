@@ -8,18 +8,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 	"github.com/anirudhbiyani/cloud-auth/test/harness/verifier/verify"
 )
 
 // stubExchanger returns a canned outcome for every target.
 type stubExchanger struct {
-	creds *cloudauth.Credentials
+	creds *core.Credentials
 	err   error
 }
 
-func (s stubExchanger) Exchange(context.Context, cloudauth.Target) (*cloudauth.Credentials, *cloudauth.Runtime, error) {
-	return s.creds, &cloudauth.Runtime{Cloud: cloudauth.GCP, SubRuntime: "gce", Issuer: "https://accounts.google.com"}, s.err
+func (s stubExchanger) Exchange(context.Context, core.Target) (*core.Credentials, *core.Runtime, error) {
+	return s.creds, &core.Runtime{Cloud: core.GCP, SubRuntime: "gce", Issuer: "https://accounts.google.com"}, s.err
 }
 
 const twoCasePlan = `{
@@ -42,8 +42,8 @@ func envWith(plan string) func(string) string {
 }
 
 func TestRunSelectsOnlyThisRuntimesCases(t *testing.T) {
-	creds := &cloudauth.Credentials{
-		Cloud: cloudauth.AWS, AccessKeyID: "ASIATESTKEYID0000000",
+	creds := &core.Credentials{
+		Cloud: core.AWS, AccessKeyID: "ASIATESTKEYID0000000",
 		SecretAccessKey: "secret-value-not-in-report", SessionToken: "session-token-not-in-report",
 		Expiry: time.Now().Add(time.Hour), STSRequestID: "req-9",
 	}
@@ -78,7 +78,7 @@ func TestRunFailsWhenAnExpectedSuccessFails(t *testing.T) {
 	code := run(context.Background(),
 		[]string{"--runtime", "gce"},
 		&stdout, &stderr, envWith(twoCasePlan),
-		func() verify.Exchanger { return stubExchanger{err: cloudauth.ErrTrustMissing} })
+		func() verify.Exchanger { return stubExchanger{err: core.ErrTrustMissing} })
 
 	if code != verify.ExitFailure {
 		t.Fatalf("exit = %d, want %d", code, verify.ExitFailure)
@@ -93,7 +93,7 @@ func TestRunPassesTheDocumentedGapCase(t *testing.T) {
 	code := run(context.Background(),
 		[]string{"--runtime", "aws-ec2"},
 		&stdout, &stderr, envWith(twoCasePlan),
-		func() verify.Exchanger { return stubExchanger{err: cloudauth.ErrNoFirstClassPath} })
+		func() verify.Exchanger { return stubExchanger{err: core.ErrNoFirstClassPath} })
 
 	if code != verify.ExitOK {
 		t.Fatalf("exit = %d, want %d\n%s", code, verify.ExitOK, stderr.String())

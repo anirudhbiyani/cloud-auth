@@ -9,15 +9,15 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"golang.org/x/oauth2"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
 func TestGCPAdapterTokenSource(t *testing.T) {
 	base := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
-	ex := &fakeExchanger{creds: &cloudauth.Credentials{Cloud: cloudauth.GCP, AccessToken: "gcp-tok", Expiry: base.Add(time.Hour)}}
-	target := cloudauth.Target{Cloud: cloudauth.GCP, Audience: "//iam..."}
+	ex := &fakeExchanger{creds: &core.Credentials{Cloud: core.GCP, AccessToken: "gcp-tok", Expiry: base.Add(time.Hour)}}
+	target := core.GCPTarget{WorkloadIdentityPool: "//iam.googleapis.com/projects/1/x"}
 
-	p := NewGCP(&fakeSource{}, ex, target, WithClock(cloudauth.NewFakeClock(base)))
+	p := NewGCP(&fakeSource{}, ex, target, WithClock(core.NewFakeClock(base)))
 	tok, err := p.Token()
 	if err != nil {
 		t.Fatalf("Token: %v", err)
@@ -32,10 +32,14 @@ func TestGCPAdapterTokenSource(t *testing.T) {
 
 func TestAzureAdapterGetToken(t *testing.T) {
 	base := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
-	ex := &fakeExchanger{creds: &cloudauth.Credentials{Cloud: cloudauth.Azure, AccessToken: "entra-tok", Expiry: base.Add(time.Hour)}}
-	target := cloudauth.Target{Cloud: cloudauth.Azure, Tenant: "t", ClientID: "c", Audience: "api://AzureADTokenExchange"}
+	ex := &fakeExchanger{creds: &core.Credentials{Cloud: core.Azure, AccessToken: "entra-tok", Expiry: base.Add(time.Hour)}}
+	target := core.AzureTarget{
+		Tenant:   "11111111-1111-1111-1111-111111111111",
+		ClientID: "22222222-2222-2222-2222-222222222222",
+		Scope:    "https://storage.azure.com/.default",
+	}
 
-	p := NewAzure(&fakeSource{}, ex, target, WithClock(cloudauth.NewFakeClock(base)))
+	p := NewAzure(&fakeSource{}, ex, target, WithClock(core.NewFakeClock(base)))
 	at, err := p.GetToken(context.Background(), policy.TokenRequestOptions{Scopes: []string{"https://storage.azure.com/.default"}})
 	if err != nil {
 		t.Fatalf("GetToken: %v", err)

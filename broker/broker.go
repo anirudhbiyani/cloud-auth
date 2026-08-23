@@ -8,7 +8,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 	"github.com/anirudhbiyani/cloud-auth/source"
 	"github.com/anirudhbiyani/cloud-auth/target"
 )
@@ -16,7 +16,7 @@ import (
 // Broker performs detect→mint→exchange.
 type Broker struct {
 	registry     *source.Registry
-	exchangerFor func(cloudauth.Cloud) (cloudauth.Exchanger, error)
+	exchangerFor func(core.Cloud) (core.Exchanger, error)
 }
 
 // Option configures a Broker.
@@ -26,7 +26,7 @@ type Option func(*Broker)
 func WithRegistry(r *source.Registry) Option { return func(b *Broker) { b.registry = r } }
 
 // WithExchangerFor overrides how target exchangers are resolved.
-func WithExchangerFor(f func(cloudauth.Cloud) (cloudauth.Exchanger, error)) Option {
+func WithExchangerFor(f func(core.Cloud) (core.Exchanger, error)) Option {
 	return func(b *Broker) { b.exchangerFor = f }
 }
 
@@ -43,19 +43,25 @@ func New(opts ...Option) *Broker {
 // Exchange detects the runtime, mints a proof pinned to target.Audience, and
 // exchanges it. It fails closed when the audience is missing. It returns the
 // detected Runtime alongside the credentials for diagnostics.
-func (b *Broker) Exchange(ctx context.Context, target cloudauth.Target) (*cloudauth.Credentials, *cloudauth.Runtime, error) {
-	if target.Audience == "" {
+func (b *Broker) Exchange(ctx context.Context, target core.Target) (*core.Credentials, *core.Runtime, error) {
+	if target == nil {
+		return nil, nil, fmt.Errorf("cloud-auth: a target is required")
+	}
+	if err := target.Validate(); err != nil {
+		return nil, nil, err
+	}
+	if target.Audience() == "" {
 		return nil, nil, fmt.Errorf("cloud-auth: target audience is required and must be pinned per target")
 	}
 	prov, rt, err := b.registry.Detect(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
-	ex, err := b.exchangerFor(target.Cloud)
+	ex, err := b.exchangerFor(target.Cloud())
 	if err != nil {
 		return nil, rt, err
 	}
-	tok, err := prov.Mint(ctx, target.Audience)
+	tok, err := prov.Mint(ctx, target.Audience())
 	if err != nil {
 		return nil, rt, err
 	}

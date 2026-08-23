@@ -15,7 +15,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
+
+	"github.com/anirudhbiyani/cloud-auth/internal/httpx"
 )
 
 // In-cluster credential/config file locations, exported so callers can reuse
@@ -52,7 +55,7 @@ func WithServiceAccount(ns, sa string) Option {
 // service account are configured (see the source package for in-cluster wiring).
 func New(opts ...Option) *Client {
 	c := &Client{
-		httpClient: &http.Client{Timeout: 5 * time.Second},
+		httpClient: httpx.NewSTSClient(5 * time.Second),
 		expirySecs: 3600,
 	}
 	for _, o := range opts {
@@ -78,7 +81,11 @@ func (c *Client) Mint(ctx context.Context, audience string) (string, error) {
 		return "", fmt.Errorf("k8stoken: marshaling request: %w", err)
 	}
 
-	u := fmt.Sprintf("%s/api/v1/namespaces/%s/serviceaccounts/%s/token", c.baseURL, c.namespace, c.serviceAcct)
+	// PathEscape both: the caller derives them from a JWT it did not verify, and
+	// source/k8stoken validates them as DNS labels — but this package is exported
+	// and cannot assume that happened.
+	u := fmt.Sprintf("%s/api/v1/namespaces/%s/serviceaccounts/%s/token",
+		c.baseURL, url.PathEscape(c.namespace), url.PathEscape(c.serviceAcct))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(reqBody))
 	if err != nil {
 		return "", err

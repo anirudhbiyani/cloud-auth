@@ -3,20 +3,29 @@ package aws
 
 import (
 	"context"
+	"crypto/sha1"
+	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
+	neturl "net/url"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// Provider implements cloudauth.LifecycleProvider for AWS.
+// Provider implements core.LifecycleProvider for AWS.
 type Provider struct {
 	mu        sync.Mutex
 	client    IAMClient
 	stsClient STSClient
+
+	// tlsConfig is used only when reading an OIDC issuer's certificate chain to
+	// compute its thumbprint. nil means the platform defaults.
+	tlsConfig *tls.Config
 }
 
 // iam returns the IAM client, building a real one from the ambient AWS
@@ -217,6 +226,19 @@ func WithSTSClient(client STSClient) ProviderOption {
 	}
 }
 
+// WithThumbprintTLSConfig sets the TLS configuration used when reading an OIDC
+// issuer's certificate chain.
+//
+// The chain is verified by default, because the thumbprint computed from it
+// becomes a pin: an unverified handshake would let anyone in the path decide
+// what gets pinned. An issuer fronted by a private CA is a legitimate case, so
+// supply its roots here rather than disabling verification.
+func WithThumbprintTLSConfig(cfg *tls.Config) ProviderOption {
+	return func(p *Provider) {
+		p.tlsConfig = cfg
+	}
+}
+
 // New creates a new AWS provider.
 func New(opts ...ProviderOption) *Provider {
 	p := &Provider{}
@@ -226,25 +248,24 @@ func New(opts ...ProviderOption) *Provider {
 	return p
 }
 
-// Name implements cloudauth.Provider.
-func (p *Provider) Name() cloudauth.Cloud {
-	return cloudauth.AWS
+// Name implements core.Provider.
+func (p *Provider) Name() core.Cloud {
+	return core.AWS
 }
 
-// Capabilities implements cloudauth.Provider.
-func (p *Provider) Capabilities() []cloudauth.Capability {
-	return []cloudauth.Capability{
-		cloudauth.CapabilityToken,
-		cloudauth.CapabilitySetup,
-		cloudauth.CapabilityValidate,
-		cloudauth.CapabilityDelete,
-		cloudauth.CapabilityDryRun,
-		cloudauth.CapabilityFederationOIDC,
+// Capabilities implements core.Provider.
+func (p *Provider) Capabilities() []core.Capability {
+	return []core.Capability{
+		core.CapabilitySetup,
+		core.CapabilityValidate,
+		core.CapabilityDelete,
+		core.CapabilityDryRun,
+		core.CapabilityFederationOIDC,
 	}
 }
 
-// HasCapability implements cloudauth.Provider.
-func (p *Provider) HasCapability(cap cloudauth.Capability) bool {
+// HasCapability implements core.Provider.
+func (p *Provider) HasCapability(cap core.Capability) bool {
 	for _, c := range p.Capabilities() {
 		if c == cap {
 			return true
@@ -253,20 +274,32 @@ func (p *Provider) HasCapability(cap cloudauth.Capability) bool {
 	return false
 }
 
-// Setup implements cloudauth.LifecycleProvider.
-func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts cloudauth.SetupOptions) (*cloudauth.Outputs, error) {
+// Setup implements core.LifecycleProvider.
+func (p *Provider) Setup(ctx context.Context, spec core.MechanismSpec, opts core.SetupOptions) (*core.Outputs, error) {
 	switch s := spec.(type) {
-	case *cloudauth.AWSRoleTrustOIDCSpec:
+	case *core.AWSRoleTrustOIDCSpec:
 		return p.setupRoleTrustOIDC(ctx, s, opts)
 	default:
-		return nil, cloudauth.ErrValidation(fmt.Sprintf("unsupported spec type: %T", spec)).
-			WithProvider(cloudauth.AWS)
+		return nil, core.ErrValidation(fmt.Sprintf("unsupported spec type: %T", spec)).
+			WithProvider(core.AWS)
 	}
 }
 
 // setupRoleTrustOIDC creates or updates an AWS IAM role with OIDC trust.
-func (p *Provider) setupRoleTrustOIDC(ctx context.Context, spec *cloudauth.AWSRoleTrustOIDCSpec, opts cloudauth.SetupOptions) (*cloudauth.Outputs, error) {
-	var plan cloudauth.Plan
+func (p *Provider) setupRoleTrustOIDC(ctx context.Context, spec *core.AWSRoleTrustOIDCSpec, opts core.SetupOptions) (*core.Outputs, error) {
+	// Step 1 below can reach the OIDC-provider calls before the lazy resolve
+	// further down, so resolve up front for anything that will touch AWS. A dry
+	// run is exempt: describing a plan must not require credentials.
+	if !opts.DryRun {
+		if _, err := p.iam(ctx); err != nil {
+			return nil, core.ErrValidation("AWS IAM client not configured").
+				WithCause(err).
+				WithProvider(core.AWS).
+				WithDetail("hint", "Configure AWS credentials (env, shared config, or SSO), or use --dry-run")
+		}
+	}
+
+	var plan core.Plan
 	var createdResources []string
 	var oidcProviderARN string
 
@@ -299,7 +332,7 @@ func (p *Provider) setupRoleTrustOIDC(ctx context.Context, spec *cloudauth.AWSRo
 			oidcProviderARN = existingARN
 		} else {
 			// Need to create OIDC provider
-			action := cloudauth.PlannedAction{
+			action := core.PlannedAction{
 				Operation:    "create",
 				ResourceType: "iam:oidc-provider",
 				Details: map[string]interface{}{
@@ -311,9 +344,9 @@ func (p *Provider) setupRoleTrustOIDC(ctx context.Context, spec *cloudauth.AWSRo
 			plan.Actions = append(plan.Actions, action)
 
 			if !opts.DryRun {
-				thumbprint, err := getOIDCThumbprint(spec.OIDCProviderURL)
+				thumbprint, err := p.oidcThumbprint(ctx, spec.OIDCProviderURL)
 				if err != nil {
-					return nil, cloudauth.ErrNetwork("failed to get OIDC thumbprint").WithCause(err)
+					return nil, core.ErrNetwork("failed to get OIDC thumbprint").WithCause(err)
 				}
 
 				arn, err := p.client.CreateOpenIDConnectProvider(ctx, &CreateOIDCProviderInput{
@@ -323,8 +356,8 @@ func (p *Provider) setupRoleTrustOIDC(ctx context.Context, spec *cloudauth.AWSRo
 					Tags:           mergeTags(spec.Tags, opts.Tags),
 				})
 				if err != nil {
-					return nil, cloudauth.ErrPermission("failed to create OIDC provider").
-						WithCause(err).WithProvider(cloudauth.AWS)
+					return nil, core.ErrPermission("failed to create OIDC provider").
+						WithCause(err).WithProvider(core.AWS)
 				}
 				oidcProviderARN = arn
 				createdResources = append(createdResources, oidcProviderARN)
@@ -338,12 +371,26 @@ func (p *Provider) setupRoleTrustOIDC(ctx context.Context, spec *cloudauth.AWSRo
 	if p.client != nil {
 		var roleErr error
 		existingRole, roleErr = p.client.GetRole(ctx, roleName)
-		roleExists = roleErr == nil && existingRole != nil
+		// A permission or network failure is not "the role is absent". Treating
+		// it as absent sends the flow to CreateRole, which then fails on
+		// EntityAlreadyExists — a confusing error for what is really "we could
+		// not read the role".
+		switch {
+		case roleErr == nil:
+			roleExists = existingRole != nil
+		case isNotFoundError(roleErr):
+			roleExists = false
+		default:
+			return nil, core.ErrPermission("could not determine whether role exists").
+				WithCause(roleErr).
+				WithResource("iam:role", roleName).
+				WithProvider(core.AWS)
+		}
 	}
 
 	if roleExists && existingRole != nil {
 		// Update existing role
-		action := cloudauth.PlannedAction{
+		action := core.PlannedAction{
 			Operation:    "update",
 			ResourceType: "iam:role",
 			ResourceID:   existingRole.ARN,
@@ -353,7 +400,7 @@ func (p *Provider) setupRoleTrustOIDC(ctx context.Context, spec *cloudauth.AWSRo
 		plan.Actions = append(plan.Actions, action)
 	} else {
 		// Create new role
-		action := cloudauth.PlannedAction{
+		action := core.PlannedAction{
 			Operation:    "create",
 			ResourceType: "iam:role",
 			Details:      map[string]interface{}{"role_name": roleName},
@@ -367,23 +414,26 @@ func (p *Provider) setupRoleTrustOIDC(ctx context.Context, spec *cloudauth.AWSRo
 		// Resolve the IAM client (building one from the ambient AWS config if
 		// none was injected) before doing anything that touches AWS.
 		if _, err := p.iam(ctx); err != nil {
-			return nil, cloudauth.ErrValidation("AWS IAM client not configured").
+			return nil, core.ErrValidation("AWS IAM client not configured").
 				WithCause(err).
-				WithProvider(cloudauth.AWS).
+				WithProvider(core.AWS).
 				WithDetail("hint", "Configure AWS credentials (env, shared config, or SSO) or use --dry-run")
 		}
 
 		// Build trust policy
-		trustPolicy := buildTrustPolicy(oidcProviderARN, spec)
+		trustPolicy, err := buildTrustPolicy(oidcProviderARN, spec)
+		if err != nil {
+			return nil, err
+		}
 		trustPolicyJSON, err := json.Marshal(trustPolicy)
 		if err != nil {
-			return nil, cloudauth.ErrInternal("failed to marshal trust policy").WithCause(err)
+			return nil, core.ErrInternal("failed to marshal trust policy").WithCause(err)
 		}
 
 		if roleExists {
 			// Update trust policy
 			if err := p.client.UpdateAssumeRolePolicy(ctx, roleName, string(trustPolicyJSON)); err != nil {
-				return nil, cloudauth.ErrPermission("failed to update role trust policy").
+				return nil, core.ErrPermission("failed to update role trust policy").
 					WithCause(err).WithResource("iam:role", roleName)
 			}
 			roleARN = existingRole.ARN
@@ -414,7 +464,7 @@ func (p *Provider) setupRoleTrustOIDC(ctx context.Context, spec *cloudauth.AWSRo
 						_ = p.client.DeleteOpenIDConnectProvider(ctx, res)
 					}
 				}
-				return nil, cloudauth.ErrPermission("failed to create role").
+				return nil, core.ErrPermission("failed to create role").
 					WithCause(err).WithResource("iam:role", roleName)
 			}
 			roleARN = role.ARN
@@ -426,8 +476,8 @@ func (p *Provider) setupRoleTrustOIDC(ctx context.Context, spec *cloudauth.AWSRo
 			if err := p.client.AttachRolePolicy(ctx, roleName, policyARN); err != nil {
 				// Rollback on error
 				rollbackErr := p.rollback(ctx, createdResources, roleExists)
-				return nil, &cloudauth.RollbackError{
-					OriginalError:     cloudauth.ErrPermission("failed to attach policy").WithCause(err),
+				return nil, &core.RollbackError{
+					OriginalError:     core.ErrPermission("failed to attach policy").WithCause(err),
 					RollbackErrors:    rollbackErr,
 					CleanedResources:  nil, // Would be populated by rollback
 					OrphanedResources: createdResources,
@@ -439,8 +489,8 @@ func (p *Provider) setupRoleTrustOIDC(ctx context.Context, spec *cloudauth.AWSRo
 		if spec.InlinePolicy != "" {
 			if err := p.client.PutRolePolicy(ctx, roleName, "cloud-auth-inline-policy", spec.InlinePolicy); err != nil {
 				rollbackErr := p.rollback(ctx, createdResources, roleExists)
-				return nil, &cloudauth.RollbackError{
-					OriginalError:  cloudauth.ErrPermission("failed to add inline policy").WithCause(err),
+				return nil, &core.RollbackError{
+					OriginalError:  core.ErrPermission("failed to add inline policy").WithCause(err),
 					RollbackErrors: rollbackErr,
 				}
 			}
@@ -473,11 +523,11 @@ func (p *Provider) setupRoleTrustOIDC(ctx context.Context, spec *cloudauth.AWSRo
 		resourceIDs["expected_policy_arns"] = strings.Join(spec.PolicyARNs, ",")
 	}
 
-	ref := cloudauth.CreateMechanismRef(cloudauth.MechanismAWSRoleTrustOIDC, cloudauth.AWS, resourceIDs)
+	ref := core.CreateMechanismRef(core.MechanismAWSRoleTrustOIDC, core.AWS, resourceIDs)
 
 	if opts.DryRun {
 		plan.Summary = fmt.Sprintf("Would create/update %d resources for AWS OIDC trust", len(plan.Actions))
-		return &cloudauth.Outputs{
+		return &core.Outputs{
 			Ref: ref,
 			Values: map[string]string{
 				"plan": plan.Summary,
@@ -485,7 +535,7 @@ func (p *Provider) setupRoleTrustOIDC(ctx context.Context, spec *cloudauth.AWSRo
 		}, nil
 	}
 
-	return &cloudauth.Outputs{
+	return &core.Outputs{
 		Ref: ref,
 		Values: map[string]string{
 			"role_arn":          roleARN,
@@ -494,26 +544,26 @@ func (p *Provider) setupRoleTrustOIDC(ctx context.Context, spec *cloudauth.AWSRo
 	}, nil
 }
 
-// Validate implements cloudauth.LifecycleProvider.
-func (p *Provider) Validate(ctx context.Context, ref cloudauth.MechanismRef, opts cloudauth.ValidateOptions) (*cloudauth.ValidationReport, error) {
+// Validate implements core.LifecycleProvider.
+func (p *Provider) Validate(ctx context.Context, ref core.MechanismRef, opts core.ValidateOptions) (*core.ValidationReport, error) {
 	// Resolve the IAM client BEFORE constructing validators: they capture it,
 	// and a nil client would panic inside the check rather than reporting a
 	// clean "could not reach AWS".
 	if _, err := p.iam(ctx); err != nil {
-		return nil, cloudauth.ErrValidation("AWS IAM client not configured").
+		return nil, core.ErrValidation("AWS IAM client not configured").
 			WithCause(err).
-			WithProvider(cloudauth.AWS).
+			WithProvider(core.AWS).
 			WithDetail("hint", "Configure AWS credentials (env, shared config, or SSO)")
 	}
 
-	var validators []cloudauth.Validator
+	var validators []core.Validator
 
 	// Add standard validators based on mechanism type
 	switch ref.Type {
-	case cloudauth.MechanismAWSRoleTrustOIDC:
+	case core.MechanismAWSRoleTrustOIDC:
 		roleName := ref.ResourceIDs["role_name"]
 		if roleName == "" {
-			return nil, cloudauth.ErrValidation("role_name not found in mechanism ref")
+			return nil, core.ErrValidation("role_name not found in mechanism ref")
 		}
 
 		// Role exists validator
@@ -531,37 +581,46 @@ func (p *Provider) Validate(ctx context.Context, ref cloudauth.MechanismRef, opt
 		expAudience := ref.ResourceIDs["expected_audience"]
 		expSubject := ref.ResourceIDs["expected_subject"]
 		if expIssuer != "" || expAudience != "" || expSubject != "" {
-			validators = append(validators, cloudauth.NewTrustPolicyMatchValidator(
+			validators = append(validators, core.NewTrustPolicyMatchValidator(
 				expIssuer, expAudience, expSubject,
-				cloudauth.WithTrustPolicySource(p)))
+				core.WithTrustPolicySource(p)))
 		}
 
 		// Confirm the policies the spec asked for are still attached.
 		if raw := ref.ResourceIDs["expected_policy_arns"]; raw != "" {
-			validators = append(validators, cloudauth.NewPermissionsValidator(
+			validators = append(validators, core.NewPermissionsValidator(
 				strings.Split(raw, ","),
-				cloudauth.WithGrantedPolicySource(p)))
+				core.WithGrantedPolicySource(p)))
 		}
 	}
 
-	report := cloudauth.RunValidation(ctx, ref, validators)
+	report := core.RunValidation(ctx, ref, validators)
 	return report, nil
 }
 
-// Delete implements cloudauth.LifecycleProvider.
-func (p *Provider) Delete(ctx context.Context, ref cloudauth.MechanismRef, opts cloudauth.DeleteOptions) error {
+// Delete implements core.LifecycleProvider.
+func (p *Provider) Delete(ctx context.Context, ref core.MechanismRef, opts core.DeleteOptions) error {
+	// Resolve the client before dispatching. Delete used to dereference p.client
+	// directly, and init() registers a Provider with no client at all — so
+	// core.Delete on the global registry panicked instead of returning an error.
+	if _, err := p.iam(ctx); err != nil {
+		return core.ErrValidation("AWS IAM client not configured").
+			WithCause(err).
+			WithProvider(core.AWS).
+			WithDetail("hint", "Configure AWS credentials (env, shared config, or SSO)")
+	}
 	switch ref.Type {
-	case cloudauth.MechanismAWSRoleTrustOIDC:
+	case core.MechanismAWSRoleTrustOIDC:
 		return p.deleteRoleTrustOIDC(ctx, ref, opts)
 	default:
-		return cloudauth.ErrValidation(fmt.Sprintf("unsupported mechanism type: %s", ref.Type))
+		return core.ErrValidation(fmt.Sprintf("unsupported mechanism type: %s", ref.Type))
 	}
 }
 
-func (p *Provider) deleteRoleTrustOIDC(ctx context.Context, ref cloudauth.MechanismRef, opts cloudauth.DeleteOptions) error {
+func (p *Provider) deleteRoleTrustOIDC(ctx context.Context, ref core.MechanismRef, opts core.DeleteOptions) error {
 	roleName := ref.ResourceIDs["role_name"]
 	if roleName == "" {
-		return cloudauth.ErrValidation("role_name not found in mechanism ref")
+		return core.ErrValidation("role_name not found in mechanism ref")
 	}
 
 	if opts.DryRun {
@@ -573,7 +632,7 @@ func (p *Provider) deleteRoleTrustOIDC(ctx context.Context, ref cloudauth.Mechan
 	if err == nil {
 		for _, policyARN := range attachedPolicies {
 			if err := p.client.DetachRolePolicy(ctx, roleName, policyARN); err != nil {
-				return cloudauth.ErrPermission("failed to detach policy").
+				return core.ErrPermission("failed to detach policy").
 					WithCause(err).WithResource("iam:policy", policyARN)
 			}
 		}
@@ -584,7 +643,7 @@ func (p *Provider) deleteRoleTrustOIDC(ctx context.Context, ref cloudauth.Mechan
 	if err == nil {
 		for _, policyName := range inlinePolicies {
 			if err := p.client.DeleteRolePolicy(ctx, roleName, policyName); err != nil {
-				return cloudauth.ErrPermission("failed to delete inline policy").
+				return core.ErrPermission("failed to delete inline policy").
 					WithCause(err).WithResource("iam:inline-policy", policyName)
 			}
 		}
@@ -594,7 +653,7 @@ func (p *Provider) deleteRoleTrustOIDC(ctx context.Context, ref cloudauth.Mechan
 	if err := p.client.DeleteRole(ctx, roleName); err != nil {
 		// Check if already deleted (idempotent)
 		if !isNotFoundError(err) {
-			return cloudauth.ErrPermission("failed to delete role").
+			return core.ErrPermission("failed to delete role").
 				WithCause(err).WithResource("iam:role", roleName)
 		}
 	}
@@ -604,7 +663,7 @@ func (p *Provider) deleteRoleTrustOIDC(ctx context.Context, ref cloudauth.Mechan
 		if oidcARN := ref.ResourceIDs["oidc_provider_arn"]; oidcARN != "" {
 			if err := p.client.DeleteOpenIDConnectProvider(ctx, oidcARN); err != nil {
 				if !isNotFoundError(err) {
-					return cloudauth.ErrPermission("failed to delete OIDC provider").
+					return core.ErrPermission("failed to delete OIDC provider").
 						WithCause(err).WithResource("iam:oidc-provider", oidcARN)
 				}
 			}
@@ -612,110 +671,6 @@ func (p *Provider) deleteRoleTrustOIDC(ctx context.Context, ref cloudauth.Mechan
 	}
 
 	return nil
-}
-
-// Token implements cloudauth.TokenProvider.
-// It exchanges an OIDC/JWT token for AWS credentials using AssumeRoleWithWebIdentity.
-//
-// TokenRequest fields:
-//   - TargetIdentity: The ARN of the IAM role to assume (required)
-//   - SourceIdentity: Used as the role session name (optional, defaults to "cloud-auth-session")
-//   - Audience: The web identity token/JWT to exchange (required - passed via Audience field)
-//   - Duration: Session duration in seconds (optional, defaults to 3600)
-//
-// Returns AWS credentials as a JSON-encoded string in TokenResponse.Token containing:
-//   - access_key_id, secret_access_key, session_token
-func (p *Provider) Token(ctx context.Context, req cloudauth.TokenRequest) (*cloudauth.TokenResponse, error) {
-	if p.stsClient == nil {
-		return nil, cloudauth.ErrValidation("AWS STS client not configured").
-			WithProvider(cloudauth.AWS).
-			WithDetail("hint", "Configure AWS STS client using WithSTSClient option")
-	}
-
-	// Validate required fields
-	if req.TargetIdentity == "" {
-		return nil, cloudauth.ErrValidation("TargetIdentity (role ARN) is required").
-			WithProvider(cloudauth.AWS)
-	}
-
-	// The web identity token should be passed - we use Audience field for the token
-	// since it's the most semantically appropriate field in TokenRequest
-	webIdentityToken := req.Audience
-	if webIdentityToken == "" {
-		return nil, cloudauth.ErrValidation("Audience (web identity token) is required").
-			WithProvider(cloudauth.AWS).
-			WithDetail("hint", "Pass the OIDC/JWT token in the Audience field")
-	}
-
-	// Set defaults
-	roleSessionName := req.SourceIdentity
-	if roleSessionName == "" {
-		roleSessionName = "cloud-auth-session"
-	}
-
-	// Sanitize session name (must match [\w+=,.@-]*)
-	roleSessionName = sanitizeSessionName(roleSessionName)
-
-	// Clamp before narrowing to int32: req.Duration is a plain int, so on 64-bit
-	// platforms an out-of-range value would silently wrap and could produce a
-	// negative or absurdly short session. AWS accepts 900s..43200s (the upper
-	// bound is further capped by the role's own MaxSessionDuration).
-	const (
-		minSessionSeconds     = 900
-		maxSessionSeconds     = 43200
-		defaultSessionSeconds = 3600
-	)
-	durationSeconds := int32(defaultSessionSeconds)
-	switch {
-	case req.Duration == 0: // unset — keep the default
-	case req.Duration < minSessionSeconds:
-		durationSeconds = minSessionSeconds
-	case req.Duration > maxSessionSeconds:
-		durationSeconds = maxSessionSeconds
-	default:
-		durationSeconds = int32(req.Duration)
-	}
-
-	// Call STS AssumeRoleWithWebIdentity
-	input := &AssumeRoleWithWebIdentityInput{
-		RoleARN:          req.TargetIdentity,
-		RoleSessionName:  roleSessionName,
-		WebIdentityToken: webIdentityToken,
-		DurationSeconds:  durationSeconds,
-	}
-
-	output, err := p.stsClient.AssumeRoleWithWebIdentity(ctx, input)
-	if err != nil {
-		return nil, cloudauth.ErrAuth("failed to assume role with web identity").
-			WithCause(err).
-			WithProvider(cloudauth.AWS).
-			WithResource("iam:role", req.TargetIdentity)
-	}
-
-	// Build credentials response as JSON
-	credentials := map[string]interface{}{
-		"access_key_id":     output.AccessKeyID,
-		"secret_access_key": output.SecretAccessKey,
-		"session_token":     output.SessionToken,
-		"expiration":        output.Expiration.Format(time.RFC3339),
-	}
-
-	if output.AssumedRoleUser != nil {
-		credentials["assumed_role_arn"] = output.AssumedRoleUser.ARN
-		credentials["assumed_role_id"] = output.AssumedRoleUser.AssumedRoleID
-	}
-
-	credentialsJSON, err := json.Marshal(credentials)
-	if err != nil {
-		return nil, cloudauth.ErrInternal("failed to marshal credentials").WithCause(err)
-	}
-
-	return &cloudauth.TokenResponse{
-		Token:     string(credentialsJSON),
-		ExpiresAt: output.Expiration.Unix(),
-		TokenType: "aws-credentials",
-		Scopes:    req.Scopes,
-	}, nil
 }
 
 // GenerateGCPWorkloadIdentityToken creates a signed AWS STS GetCallerIdentity request
@@ -734,20 +689,20 @@ func (p *Provider) Token(ctx context.Context, req cloudauth.TokenRequest) (*clou
 //	// Use token.Token with GCP provider's Token() method
 func (p *Provider) GenerateGCPWorkloadIdentityToken(ctx context.Context, input *GCPWorkloadIdentityInput) (*CrossCloudTokenOutput, error) {
 	if p.stsClient == nil {
-		return nil, cloudauth.ErrValidation("AWS STS client not configured").
-			WithProvider(cloudauth.AWS).
+		return nil, core.ErrValidation("AWS STS client not configured").
+			WithProvider(core.AWS).
 			WithDetail("hint", "Configure AWS STS client using WithSTSClient option")
 	}
 
 	// Validate input
 	if input.ProjectNumber == "" {
-		return nil, cloudauth.ErrValidation("ProjectNumber is required").WithProvider(cloudauth.AWS)
+		return nil, core.ErrValidation("ProjectNumber is required").WithProvider(core.AWS)
 	}
 	if input.PoolID == "" {
-		return nil, cloudauth.ErrValidation("PoolID is required").WithProvider(cloudauth.AWS)
+		return nil, core.ErrValidation("PoolID is required").WithProvider(core.AWS)
 	}
 	if input.ProviderID == "" {
-		return nil, cloudauth.ErrValidation("ProviderID is required").WithProvider(cloudauth.AWS)
+		return nil, core.ErrValidation("ProviderID is required").WithProvider(core.AWS)
 	}
 
 	// Build the GCP audience (full resource name of the WIF provider)
@@ -776,8 +731,8 @@ func (p *Provider) GenerateGCPWorkloadIdentityToken(ctx context.Context, input *
 
 	signOutput, err := p.stsClient.SignRequest(ctx, signInput)
 	if err != nil {
-		return nil, cloudauth.ErrAuth("failed to sign request for GCP WIF").
-			WithCause(err).WithProvider(cloudauth.AWS)
+		return nil, core.ErrAuth("failed to sign request for GCP WIF").
+			WithCause(err).WithProvider(core.AWS)
 	}
 
 	// Build the token in the format expected by GCP
@@ -789,7 +744,7 @@ func (p *Provider) GenerateGCPWorkloadIdentityToken(ctx context.Context, input *
 
 	tokenJSON, err := json.Marshal(token)
 	if err != nil {
-		return nil, cloudauth.ErrInternal("failed to marshal GCP WIF token").WithCause(err)
+		return nil, core.ErrInternal("failed to marshal GCP WIF token").WithCause(err)
 	}
 
 	return &CrossCloudTokenOutput{
@@ -810,8 +765,8 @@ func (p *Provider) GenerateGCPWorkloadIdentityToken(ctx context.Context, input *
 //  2. Running your workload in a container with an OIDC-capable identity provider
 //  3. Using AWS Lambda with GitHub Actions OIDC as an intermediary
 func (p *Provider) GenerateAzureFederatedToken(ctx context.Context, input *AzureFederatedTokenInput) (*CrossCloudTokenOutput, error) {
-	return nil, cloudauth.ErrValidation("AWS → Azure direct federation is not supported").
-		WithProvider(cloudauth.AWS).
+	return nil, core.ErrValidation("AWS → Azure direct federation is not supported").
+		WithProvider(core.AWS).
 		WithDetail("reason", "AWS does not expose an OIDC token endpoint that Azure can consume").
 		WithDetail("alternatives", "Use an identity broker like Vault, or use a service that provides OIDC tokens")
 }
@@ -924,7 +879,14 @@ func audienceConditionClaim(issuerURL string) string {
 	return "aud"
 }
 
-func buildTrustPolicy(oidcProviderARN string, spec *cloudauth.AWSRoleTrustOIDCSpec) map[string]interface{} {
+// buildTrustPolicy renders the role's assume-role policy document.
+//
+// It refuses to emit a statement with no `:sub` condition unless the spec opted
+// into that explicitly. The same rule lives in AWSRoleTrustOIDCSpec.Validate,
+// but a caller can construct a spec directly and skip it, and the cost of
+// getting this wrong is a role any workload the issuer serves can assume — so
+// the document builder enforces it too rather than trusting its input.
+func buildTrustPolicy(oidcProviderARN string, spec *core.AWSRoleTrustOIDCSpec) (map[string]interface{}, error) {
 	prefix := oidcConditionPrefix(spec.OIDCProviderURL)
 
 	// A built-in IdP has no provider resource; the principal is the bare host.
@@ -939,7 +901,8 @@ func buildTrustPolicy(oidcProviderARN string, spec *cloudauth.AWSRoleTrustOIDCSp
 		},
 	}
 
-	if spec.Subject != "" {
+	switch {
+	case spec.Subject != "":
 		conditionKey := "StringEquals"
 		if spec.SubjectCondition != "" {
 			conditionKey = spec.SubjectCondition
@@ -948,6 +911,14 @@ func buildTrustPolicy(oidcProviderARN string, spec *cloudauth.AWSRoleTrustOIDCSp
 			condition[conditionKey] = map[string]string{}
 		}
 		condition[conditionKey].(map[string]string)[prefix+":sub"] = spec.Subject
+	case spec.AllowUnscopedSubject:
+		// Deliberate and justified; Validate already required the justification.
+	default:
+		return nil, core.ErrValidation(fmt.Sprintf(
+			"refusing to build a trust policy for role %q with no subject condition: it would be "+
+				"assumable by every workload %s issues a token for. Set Subject, or set "+
+				"AllowUnscopedSubject with UnscopedJustification",
+			spec.RoleName, prefix)).WithProvider(core.AWS)
 	}
 
 	return map[string]interface{}{
@@ -962,7 +933,7 @@ func buildTrustPolicy(oidcProviderARN string, spec *cloudauth.AWSRoleTrustOIDCSp
 				"Condition": condition,
 			},
 		},
-	}
+	}, nil
 }
 
 func mergeTags(base, overlay map[string]string) map[string]string {
@@ -978,29 +949,78 @@ func mergeTags(base, overlay map[string]string) map[string]string {
 	return result
 }
 
-func getOIDCThumbprint(url string) (string, error) {
-	// Simplified - in production would actually fetch and compute thumbprint
-	// For well-known providers, use known thumbprints
-	knownThumbprints := map[string]string{
-		"https://token.actions.githubusercontent.com": "6938fd4d98bab03faadb97b34396831e3780aea1",
-		"https://accounts.google.com":                 "08745487e891c19e3078c1f2a07e452950ef36f6",
+// thumbprintDialTimeout bounds the TLS handshake used to read an issuer's chain.
+const thumbprintDialTimeout = 10 * time.Second
+
+// getOIDCThumbprint computes the SHA-1 thumbprint AWS stores for an OIDC
+// provider: the fingerprint of the root-most certificate in the issuer's TLS
+// chain.
+//
+// This used to return a hardcoded value for two issuers and forty zeroes, with a
+// nil error, for everything else — which is every EKS cluster, every self-hosted
+// IdP, every Okta or Auth0 tenant. The thumbprint is the pin on the issuer's
+// certificate chain, so a constant silently disabled the control it exists to
+// provide, and a hardcoded literal cannot follow a CA rotation. It is computed
+// or it is an error; there is no useful third answer.
+func (p *Provider) oidcThumbprint(ctx context.Context, issuer string) (string, error) {
+	u, err := neturl.Parse(issuer)
+	if err != nil {
+		return "", fmt.Errorf("oidc thumbprint: issuer %q is not a URL: %w", issuer, err)
+	}
+	if u.Scheme != "https" {
+		return "", fmt.Errorf("oidc thumbprint: issuer %q must use https; an http issuer cannot be "+
+			"pinned and its tokens cannot be trusted", issuer)
+	}
+	host := u.Host
+	if u.Port() == "" {
+		host = net.JoinHostPort(u.Hostname(), "443")
 	}
 
-	if thumb, ok := knownThumbprints[url]; ok {
-		return thumb, nil
-	}
+	ctx, cancel := context.WithTimeout(ctx, thumbprintDialTimeout)
+	defer cancel()
 
-	// TODO: Implement actual thumbprint calculation
-	return "0000000000000000000000000000000000000000", nil
+	cfg := p.tlsConfig.Clone()
+	if cfg == nil {
+		cfg = &tls.Config{}
+	}
+	if cfg.MinVersion == 0 {
+		cfg.MinVersion = tls.VersionTLS12
+	}
+	if cfg.ServerName == "" {
+		cfg.ServerName = u.Hostname()
+	}
+	d := &tls.Dialer{Config: cfg}
+	conn, err := d.DialContext(ctx, "tcp", host)
+	if err != nil {
+		return "", fmt.Errorf("oidc thumbprint: connecting to %s: %w", host, err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	chain := conn.(*tls.Conn).ConnectionState().PeerCertificates
+	if len(chain) == 0 {
+		return "", fmt.Errorf("oidc thumbprint: %s presented no certificate", host)
+	}
+	// AWS pins the last certificate in the chain the server sends — the
+	// root-most one it offers, not the leaf.
+	sum := sha1.Sum(chain[len(chain)-1].Raw) // #nosec G401 -- AWS defines this thumbprint as SHA-1
+	return hex.EncodeToString(sum[:]), nil
 }
 
+// isNotFoundError reports whether err means "the resource is absent", as opposed
+// to "we could not tell".
+//
+// The typed check comes first and is the one that matters: IsNotFound unwraps to
+// IAM's NoSuchEntityException. Substring matching on error text is how a
+// create-or-update decision silently inverts after an SDK message change, so it
+// remains only as a fallback for errors that reached here already stringified.
 func isNotFoundError(err error) bool {
 	if err == nil {
 		return false
 	}
-	return strings.Contains(err.Error(), "NoSuchEntity") ||
-		strings.Contains(err.Error(), "not found") ||
-		cloudauth.IsCategory(err, cloudauth.ErrCategoryNotFound)
+	if IsNotFound(err) || core.IsCategory(err, core.ErrCategoryNotFound) {
+		return true
+	}
+	return strings.Contains(err.Error(), "NoSuchEntity")
 }
 
 // Validators
@@ -1014,24 +1034,24 @@ func (v *roleExistsValidator) ID() string          { return "aws_role_exists" }
 func (v *roleExistsValidator) Name() string        { return "AWS Role Exists" }
 func (v *roleExistsValidator) Description() string { return "Checks if the IAM role exists" }
 
-func (v *roleExistsValidator) Validate(ctx context.Context, ref cloudauth.MechanismRef) cloudauth.ValidationCheck {
-	check := cloudauth.ValidationCheck{
+func (v *roleExistsValidator) Validate(ctx context.Context, ref core.MechanismRef) core.ValidationCheck {
+	check := core.ValidationCheck{
 		ID:          v.ID(),
 		Name:        v.Name(),
 		Description: v.Description(),
-		Severity:    cloudauth.SeverityCritical,
+		Severity:    core.SeverityCritical,
 		Evidence:    map[string]interface{}{"role_name": v.roleName},
 	}
 
 	role, err := v.client.GetRole(ctx, v.roleName)
 	if err != nil {
-		check.Status = cloudauth.CheckStatusFailed
+		check.Status = core.CheckStatusFailed
 		check.Evidence["error"] = err.Error()
 		check.Remediation = "Create the IAM role or run setup again"
 		return check
 	}
 
-	check.Status = cloudauth.CheckStatusPassed
+	check.Status = core.CheckStatusPassed
 	check.Evidence["role_arn"] = role.ARN
 	return check
 }
@@ -1047,29 +1067,29 @@ func (v *oidcProviderExistsValidator) Description() string {
 	return "Checks if the OIDC provider exists"
 }
 
-func (v *oidcProviderExistsValidator) Validate(ctx context.Context, ref cloudauth.MechanismRef) cloudauth.ValidationCheck {
-	check := cloudauth.ValidationCheck{
+func (v *oidcProviderExistsValidator) Validate(ctx context.Context, ref core.MechanismRef) core.ValidationCheck {
+	check := core.ValidationCheck{
 		ID:          v.ID(),
 		Name:        v.Name(),
 		Description: v.Description(),
-		Severity:    cloudauth.SeverityCritical,
+		Severity:    core.SeverityCritical,
 		Evidence:    map[string]interface{}{"oidc_provider_arn": v.arn},
 	}
 
 	provider, err := v.client.GetOpenIDConnectProvider(ctx, v.arn)
 	if err != nil {
-		check.Status = cloudauth.CheckStatusFailed
+		check.Status = core.CheckStatusFailed
 		check.Evidence["error"] = err.Error()
 		check.Remediation = "Create the OIDC provider or run setup again"
 		return check
 	}
 
-	check.Status = cloudauth.CheckStatusPassed
+	check.Status = core.CheckStatusPassed
 	check.Evidence["url"] = provider.URL
 	return check
 }
 
 func init() {
 	// Register with default registry
-	cloudauth.Register(New())
+	core.Register(New())
 }

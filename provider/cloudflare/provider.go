@@ -3,13 +3,15 @@ package cloudflare
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// Provider implements cloudauth.Provider for Cloudflare Access.
+// Provider implements core.Provider for Cloudflare Access.
 type Provider struct {
 	client APIClient
 }
@@ -119,15 +121,15 @@ type CloudflareAccessSpec struct {
 	ApplicationDomain string `json:"application_domain,omitempty" yaml:"application_domain,omitempty"`
 
 	// Source identifies where this token will be used from.
-	Source cloudauth.Cloud `json:"source" yaml:"source"`
+	Source core.Cloud `json:"source" yaml:"source"`
 }
 
-// Type implements cloudauth.MechanismSpec.
-func (s *CloudflareAccessSpec) Type() cloudauth.MechanismType {
+// Type implements core.MechanismSpec.
+func (s *CloudflareAccessSpec) Type() core.MechanismType {
 	return "cloudflare_access"
 }
 
-// Validate implements cloudauth.MechanismSpec.
+// Validate implements core.MechanismSpec.
 func (s *CloudflareAccessSpec) Validate() error {
 	if s.AccountID == "" {
 		return fmt.Errorf("account_id is required")
@@ -141,14 +143,14 @@ func (s *CloudflareAccessSpec) Validate() error {
 	return nil
 }
 
-// SourceProvider implements cloudauth.MechanismSpec.
-func (s *CloudflareAccessSpec) SourceProvider() cloudauth.Cloud {
+// SourceProvider implements core.MechanismSpec.
+func (s *CloudflareAccessSpec) SourceProvider() core.Cloud {
 	return s.Source
 }
 
-// TargetProvider implements cloudauth.MechanismSpec.
-func (s *CloudflareAccessSpec) TargetProvider() cloudauth.Cloud {
-	return cloudauth.Cloudflare
+// TargetProvider implements core.MechanismSpec.
+func (s *CloudflareAccessSpec) TargetProvider() core.Cloud {
+	return core.Cloudflare
 }
 
 // ProviderOption configures the Provider.
@@ -170,24 +172,23 @@ func New(opts ...ProviderOption) *Provider {
 	return p
 }
 
-// Name implements cloudauth.Provider.
-func (p *Provider) Name() cloudauth.Cloud {
-	return cloudauth.Cloudflare
+// Name implements core.Provider.
+func (p *Provider) Name() core.Cloud {
+	return core.Cloudflare
 }
 
-// Capabilities implements cloudauth.Provider.
-func (p *Provider) Capabilities() []cloudauth.Capability {
-	return []cloudauth.Capability{
-		cloudauth.CapabilityToken,
-		cloudauth.CapabilitySetup,
-		cloudauth.CapabilityValidate,
-		cloudauth.CapabilityDelete,
-		cloudauth.CapabilityDryRun,
+// Capabilities implements core.Provider.
+func (p *Provider) Capabilities() []core.Capability {
+	return []core.Capability{
+		core.CapabilitySetup,
+		core.CapabilityValidate,
+		core.CapabilityDelete,
+		core.CapabilityDryRun,
 	}
 }
 
-// HasCapability implements cloudauth.Provider.
-func (p *Provider) HasCapability(cap cloudauth.Capability) bool {
+// HasCapability implements core.Provider.
+func (p *Provider) HasCapability(cap core.Capability) bool {
 	for _, c := range p.Capabilities() {
 		if c == cap {
 			return true
@@ -196,19 +197,39 @@ func (p *Provider) HasCapability(cap cloudauth.Capability) bool {
 	return false
 }
 
-// Setup implements cloudauth.LifecycleProvider.
-func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts cloudauth.SetupOptions) (*cloudauth.Outputs, error) {
+// requireClient reports whether this provider can reach the Cloudflare API.
+//
+// The client is injected and init() registers a Provider without one, so every
+// entry point used to dereference nil and panic — the same class of bug already
+// fixed in the aws, gcp and azure providers, and still present here because
+// nothing tested this package.
+func (p *Provider) requireClient() error {
+	if p.client == nil {
+		return core.ErrValidation("Cloudflare API client not configured").
+			WithProvider(core.Cloudflare).
+			WithDetail("hint", "Pass cloudflare.WithAPIClient, or use --dry-run")
+	}
+	return nil
+}
+
+// Setup implements core.LifecycleProvider.
+func (p *Provider) Setup(ctx context.Context, spec core.MechanismSpec, opts core.SetupOptions) (*core.Outputs, error) {
+	if !opts.DryRun {
+		if err := p.requireClient(); err != nil {
+			return nil, err
+		}
+	}
 	cfSpec, ok := spec.(*CloudflareAccessSpec)
 	if !ok {
-		return nil, cloudauth.ErrValidation(fmt.Sprintf("unsupported spec type: %T", spec)).
-			WithProvider(cloudauth.Cloudflare)
+		return nil, core.ErrValidation(fmt.Sprintf("unsupported spec type: %T", spec)).
+			WithProvider(core.Cloudflare)
 	}
 
-	var plan cloudauth.Plan
+	var plan core.Plan
 	resourceIDs := make(map[string]string)
 
 	// Step 1: Create service token
-	action := cloudauth.PlannedAction{
+	action := core.PlannedAction{
 		Operation:    "create",
 		ResourceType: "access-service-token",
 		Details: map[string]interface{}{
@@ -229,8 +250,8 @@ func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts
 		var err error
 		token, err = p.client.CreateAccessServiceToken(ctx, cfSpec.AccountID, cfSpec.TokenName, duration)
 		if err != nil {
-			return nil, cloudauth.ErrPermission("failed to create service token").
-				WithCause(err).WithProvider(cloudauth.Cloudflare)
+			return nil, core.ErrPermission("failed to create service token").
+				WithCause(err).WithProvider(core.Cloudflare)
 		}
 		resourceIDs["token_id"] = token.ID
 		resourceIDs["account_id"] = cfSpec.AccountID
@@ -241,7 +262,7 @@ func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts
 			if err != nil {
 				// Delete the token on failure
 				_ = p.client.DeleteAccessServiceToken(ctx, cfSpec.AccountID, token.ID)
-				return nil, cloudauth.ErrInternal("failed to store token secret").WithCause(err)
+				return nil, core.ErrInternal("failed to store token secret").WithCause(err)
 			}
 			resourceIDs["client_secret_ref"] = secretRef.ID
 		}
@@ -250,7 +271,7 @@ func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts
 	// Step 2: Create application if specified
 	var appID string
 	if cfSpec.ApplicationName != "" && cfSpec.ApplicationDomain != "" {
-		action := cloudauth.PlannedAction{
+		action := core.PlannedAction{
 			Operation:    "create",
 			ResourceType: "access-application",
 			Details: map[string]interface{}{
@@ -270,8 +291,8 @@ func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts
 			if err != nil {
 				// Cleanup token
 				_ = p.client.DeleteAccessServiceToken(ctx, cfSpec.AccountID, token.ID)
-				return nil, cloudauth.ErrPermission("failed to create application").
-					WithCause(err).WithProvider(cloudauth.Cloudflare)
+				return nil, core.ErrPermission("failed to create application").
+					WithCause(err).WithProvider(core.Cloudflare)
 			}
 			appID = app.ID
 			resourceIDs["application_id"] = appID
@@ -289,17 +310,17 @@ func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts
 				// Cleanup
 				_ = p.client.DeleteAccessApplication(ctx, cfSpec.AccountID, appID)
 				_ = p.client.DeleteAccessServiceToken(ctx, cfSpec.AccountID, token.ID)
-				return nil, cloudauth.ErrPermission("failed to create policy").
-					WithCause(err).WithProvider(cloudauth.Cloudflare)
+				return nil, core.ErrPermission("failed to create policy").
+					WithCause(err).WithProvider(core.Cloudflare)
 			}
 		}
 	}
 
-	ref := cloudauth.CreateMechanismRef("cloudflare_access", cloudauth.Cloudflare, resourceIDs)
+	ref := core.CreateMechanismRef("cloudflare_access", core.Cloudflare, resourceIDs)
 
 	if opts.DryRun {
 		plan.Summary = fmt.Sprintf("Would create %d Cloudflare Access resources", len(plan.Actions))
-		return &cloudauth.Outputs{
+		return &core.Outputs{
 			Ref: ref,
 			Values: map[string]string{
 				"plan": plan.Summary,
@@ -307,7 +328,7 @@ func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts
 		}, nil
 	}
 
-	outputs := &cloudauth.Outputs{
+	outputs := &core.Outputs{
 		Ref: ref,
 		Values: map[string]string{
 			"token_id":  token.ID,
@@ -326,9 +347,12 @@ func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts
 	return outputs, nil
 }
 
-// Validate implements cloudauth.LifecycleProvider.
-func (p *Provider) Validate(ctx context.Context, ref cloudauth.MechanismRef, opts cloudauth.ValidateOptions) (*cloudauth.ValidationReport, error) {
-	var validators []cloudauth.Validator
+// Validate implements core.LifecycleProvider.
+func (p *Provider) Validate(ctx context.Context, ref core.MechanismRef, opts core.ValidateOptions) (*core.ValidationReport, error) {
+	if err := p.requireClient(); err != nil {
+		return nil, err
+	}
+	var validators []core.Validator
 
 	accountID := ref.ResourceIDs["account_id"]
 	tokenID := ref.ResourceIDs["token_id"]
@@ -340,14 +364,17 @@ func (p *Provider) Validate(ctx context.Context, ref cloudauth.MechanismRef, opt
 		})
 	}
 
-	report := cloudauth.RunValidation(ctx, ref, validators)
+	report := core.RunValidation(ctx, ref, validators)
 	return report, nil
 }
 
-// Delete implements cloudauth.LifecycleProvider.
-func (p *Provider) Delete(ctx context.Context, ref cloudauth.MechanismRef, opts cloudauth.DeleteOptions) error {
+// Delete implements core.LifecycleProvider.
+func (p *Provider) Delete(ctx context.Context, ref core.MechanismRef, opts core.DeleteOptions) error {
 	if opts.DryRun {
 		return nil
+	}
+	if err := p.requireClient(); err != nil {
+		return err
 	}
 
 	accountID := ref.ResourceIDs["account_id"]
@@ -356,7 +383,7 @@ func (p *Provider) Delete(ctx context.Context, ref cloudauth.MechanismRef, opts 
 	if appID := ref.ResourceIDs["application_id"]; appID != "" {
 		if err := p.client.DeleteAccessApplication(ctx, accountID, appID); err != nil {
 			if !isNotFoundError(err) {
-				return cloudauth.ErrPermission("failed to delete application").WithCause(err)
+				return core.ErrPermission("failed to delete application").WithCause(err)
 			}
 		}
 	}
@@ -365,21 +392,12 @@ func (p *Provider) Delete(ctx context.Context, ref cloudauth.MechanismRef, opts 
 	if tokenID := ref.ResourceIDs["token_id"]; tokenID != "" {
 		if err := p.client.DeleteAccessServiceToken(ctx, accountID, tokenID); err != nil {
 			if !isNotFoundError(err) {
-				return cloudauth.ErrPermission("failed to delete service token").WithCause(err)
+				return core.ErrPermission("failed to delete service token").WithCause(err)
 			}
 		}
 	}
 
 	return nil
-}
-
-// Token implements cloudauth.TokenProvider.
-// Note: Cloudflare Access uses static service tokens, not dynamic token acquisition.
-// Use GetServiceTokenCredentials to retrieve stored service token credentials.
-func (p *Provider) Token(ctx context.Context, req cloudauth.TokenRequest) (*cloudauth.TokenResponse, error) {
-	return nil, cloudauth.ErrValidation("Cloudflare Access uses static service tokens, not dynamic token acquisition").
-		WithProvider(cloudauth.Cloudflare).
-		WithDetail("hint", "Use GetServiceTokenCredentials() to retrieve stored service token credentials")
 }
 
 // ServiceTokenCredentials contains Cloudflare Access service token credentials.
@@ -423,24 +441,24 @@ type GetServiceTokenCredentialsInput struct {
 // Simply include the headers in your requests from AWS Lambda, GCP Cloud Functions, Azure Functions, etc.
 func (p *Provider) GetServiceTokenCredentials(ctx context.Context, input *GetServiceTokenCredentialsInput) (*ServiceTokenCredentials, error) {
 	if p.client == nil {
-		return nil, cloudauth.ErrValidation("Cloudflare API client not configured").
-			WithProvider(cloudauth.Cloudflare).
+		return nil, core.ErrValidation("Cloudflare API client not configured").
+			WithProvider(core.Cloudflare).
 			WithDetail("hint", "Configure Cloudflare API client using WithAPIClient option")
 	}
 
 	// Validate input
 	if input.AccountID == "" {
-		return nil, cloudauth.ErrValidation("AccountID is required").WithProvider(cloudauth.Cloudflare)
+		return nil, core.ErrValidation("AccountID is required").WithProvider(core.Cloudflare)
 	}
 	if input.TokenID == "" {
-		return nil, cloudauth.ErrValidation("TokenID is required").WithProvider(cloudauth.Cloudflare)
+		return nil, core.ErrValidation("TokenID is required").WithProvider(core.Cloudflare)
 	}
 
 	token, err := p.client.GetAccessServiceToken(ctx, input.AccountID, input.TokenID)
 	if err != nil {
-		return nil, cloudauth.ErrAuth("failed to retrieve service token").
+		return nil, core.ErrAuth("failed to retrieve service token").
 			WithCause(err).
-			WithProvider(cloudauth.Cloudflare).
+			WithProvider(core.Cloudflare).
 			WithResource("cloudflare:service-token", input.TokenID)
 	}
 
@@ -474,8 +492,28 @@ func (p *Provider) GenerateServiceTokenHeaders(clientID, clientSecret string) ma
 
 // Helper
 
+// isNotFoundError reports whether err means "already gone", which Delete relies
+// on to be idempotent.
+//
+// It previously recognised only the typed category, and the APIClient interface
+// has no typed errors — a real implementation's 404 arrives as a plain error. So
+// deleting an already-absent token failed, and a re-run of `delete` could never
+// succeed.
 func isNotFoundError(err error) bool {
-	return cloudauth.IsCategory(err, cloudauth.ErrCategoryNotFound)
+	if err == nil {
+		return false
+	}
+	if core.IsCategory(err, core.ErrCategoryNotFound) {
+		return true
+	}
+	var apiErr interface{ NotFound() bool }
+	if errors.As(err, &apiErr) && apiErr.NotFound() {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "not found") ||
+		strings.Contains(msg, "notfound") ||
+		strings.Contains(msg, "404")
 }
 
 // Validators
@@ -492,29 +530,29 @@ func (v *tokenExistsValidator) Description() string {
 	return "Checks if the Cloudflare Access service token exists"
 }
 
-func (v *tokenExistsValidator) Validate(ctx context.Context, ref cloudauth.MechanismRef) cloudauth.ValidationCheck {
-	check := cloudauth.ValidationCheck{
+func (v *tokenExistsValidator) Validate(ctx context.Context, ref core.MechanismRef) core.ValidationCheck {
+	check := core.ValidationCheck{
 		ID:          v.ID(),
 		Name:        v.Name(),
 		Description: v.Description(),
-		Severity:    cloudauth.SeverityCritical,
+		Severity:    core.SeverityCritical,
 		Evidence:    map[string]interface{}{"token_id": v.tokenID},
 	}
 
 	token, err := v.client.GetAccessServiceToken(ctx, v.accountID, v.tokenID)
 	if err != nil {
-		check.Status = cloudauth.CheckStatusFailed
+		check.Status = core.CheckStatusFailed
 		check.Evidence["error"] = err.Error()
 		check.Remediation = "Create a new service token or run setup again"
 		return check
 	}
 
-	check.Status = cloudauth.CheckStatusPassed
+	check.Status = core.CheckStatusPassed
 	check.Evidence["name"] = token.Name
 	check.Evidence["expires_at"] = token.ExpiresAt
 	return check
 }
 
 func init() {
-	cloudauth.Register(New())
+	core.Register(New())
 }

@@ -8,13 +8,13 @@ import (
 	"context"
 	"time"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 	"github.com/anirudhbiyani/cloud-auth/internal/cache"
 )
 
 // options are shared across adapters.
 type options struct {
-	clock  cloudauth.Clock
+	clock  core.Clock
 	buffer time.Duration
 }
 
@@ -22,13 +22,13 @@ type options struct {
 type Option func(*options)
 
 // WithClock sets the clock used for cache expiry (defaults to system clock).
-func WithClock(c cloudauth.Clock) Option { return func(o *options) { o.clock = c } }
+func WithClock(c core.Clock) Option { return func(o *options) { o.clock = c } }
 
 // WithBuffer sets the pre-expiry refresh buffer.
 func WithBuffer(d time.Duration) Option { return func(o *options) { o.buffer = d } }
 
 func resolve(opts []Option) options {
-	o := options{clock: cloudauth.SystemClock{}, buffer: 5 * time.Minute}
+	o := options{clock: core.SystemClock{}, buffer: 5 * time.Minute}
 	for _, f := range opts {
 		f(&o)
 	}
@@ -38,9 +38,9 @@ func resolve(opts []Option) options {
 // newCache builds a credential cache whose fetch mints a source proof and
 // exchanges it at the target. This is the single mint→exchange pipeline every
 // adapter shares.
-func newCache(src cloudauth.SourceProvider, ex cloudauth.Exchanger, target cloudauth.Target, o options) *cache.Cache {
-	fetch := func(ctx context.Context) (*cloudauth.Credentials, error) {
-		tok, err := src.Mint(ctx, target.Audience)
+func newCache(src core.SourceProvider, ex core.Exchanger, target core.Target, o options) *cache.Cache {
+	fetch := func(ctx context.Context) (*core.Credentials, error) {
+		tok, err := src.Mint(ctx, target.Audience())
 		if err != nil {
 			return nil, err
 		}

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
 // decode the generated policy into something assertable.
@@ -16,9 +16,13 @@ type builtPolicy struct {
 	} `json:"Statement"`
 }
 
-func build(t *testing.T, spec *cloudauth.AWSRoleTrustOIDCSpec, arn string) builtPolicy {
+func build(t *testing.T, spec *core.AWSRoleTrustOIDCSpec, arn string) builtPolicy {
 	t.Helper()
-	raw, err := json.Marshal(buildTrustPolicy(arn, spec))
+	doc, err := buildTrustPolicy(arn, spec)
+	if err != nil {
+		t.Fatalf("buildTrustPolicy: %v", err)
+	}
+	raw, err := json.Marshal(doc)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -38,12 +42,12 @@ func build(t *testing.T, spec *cloudauth.AWSRoleTrustOIDCSpec, arn string) built
 // ARN produces a key that never exists in the request context, so StringEquals
 // fails and the role can never be assumed.
 func TestTrustPolicyConditionKeysUseProviderNameNotARN(t *testing.T) {
-	spec := &cloudauth.AWSRoleTrustOIDCSpec{
+	spec := &core.AWSRoleTrustOIDCSpec{
 		OIDCProviderURL:  "https://token.actions.githubusercontent.com",
 		Audience:         "sts.amazonaws.com",
 		Subject:          "repo:myorg/myrepo:ref:refs/heads/main",
 		SubjectCondition: "StringEquals",
-		Source:           cloudauth.GitHubOIDC,
+		Source:           core.GitHubOIDC,
 	}
 	bp := build(t, spec, "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com")
 
@@ -68,7 +72,7 @@ func TestTrustPolicyConditionKeysUseProviderNameNotARN(t *testing.T) {
 
 func TestTrustPolicyEKSIssuerWithPath(t *testing.T) {
 	// An EKS issuer has a path component; the whole host+path is the prefix.
-	spec := &cloudauth.AWSRoleTrustOIDCSpec{
+	spec := &core.AWSRoleTrustOIDCSpec{
 		OIDCProviderURL: "https://oidc.eks.us-east-1.amazonaws.com/id/ABC123",
 		Audience:        "sts.amazonaws.com",
 		Subject:         "system:serviceaccount:ns:sa",
@@ -88,7 +92,7 @@ func TestTrustPolicyEKSIssuerWithPath(t *testing.T) {
 // Google is a BUILT-IN AWS identity provider: the principal is the bare issuer
 // host, not a provider ARN.
 func TestTrustPolicyGooglePrincipalIsBareHost(t *testing.T) {
-	spec := &cloudauth.AWSRoleTrustOIDCSpec{
+	spec := &core.AWSRoleTrustOIDCSpec{
 		OIDCProviderURL: "https://accounts.google.com",
 		Audience:        "sts.amazonaws.com",
 		Subject:         "109876543210987654321",
@@ -103,7 +107,7 @@ func TestTrustPolicyGooglePrincipalIsBareHost(t *testing.T) {
 // azp is set — and GCE service-account tokens set it. The audience must
 // therefore be pinned with :oaud, or the condition can never match.
 func TestTrustPolicyGooglePinsAudienceWithOaud(t *testing.T) {
-	spec := &cloudauth.AWSRoleTrustOIDCSpec{
+	spec := &core.AWSRoleTrustOIDCSpec{
 		OIDCProviderURL: "https://accounts.google.com",
 		Audience:        "sts.amazonaws.com",
 		Subject:         "109876543210987654321",
@@ -140,6 +144,51 @@ func TestNeedsOIDCProviderResource(t *testing.T) {
 	for _, tc := range tests {
 		if got := needsOIDCProviderResource(tc.url); got != tc.want {
 			t.Errorf("needsOIDCProviderResource(%q) = %v, want %v", tc.url, got, tc.want)
+		}
+	}
+}
+
+// A spec with no subject must not produce a policy at all. Pinning only `aud`
+// leaves the role assumable by every workload the issuer serves, and for GitHub
+// Actions the audience (sts.amazonaws.com) is requestable by any repository on
+// GitHub — so this is the difference between "our deploy role" and "a role the
+// internet can assume".
+func TestTrustPolicyRefusesUnscopedSubject(t *testing.T) {
+	spec := &core.AWSRoleTrustOIDCSpec{
+		RoleName:        "deploy",
+		AccountID:       "123456789012",
+		OIDCProviderURL: "https://token.actions.githubusercontent.com",
+		Audience:        "sts.amazonaws.com",
+		Source:          core.GitHubOIDC,
+		// Subject deliberately omitted.
+	}
+	doc, err := buildTrustPolicy("arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com", spec)
+	if err == nil {
+		raw, _ := json.Marshal(doc)
+		t.Fatalf("built a world-assumable trust policy instead of refusing: %s", raw)
+	}
+	if !strings.Contains(err.Error(), "no subject condition") {
+		t.Errorf("error should name the problem, got: %v", err)
+	}
+}
+
+// The escape hatch still works, and still emits no sub condition — the point is
+// that reaching it takes a deliberate flag, not an omission.
+func TestTrustPolicyAllowsUnscopedWhenExplicit(t *testing.T) {
+	spec := &core.AWSRoleTrustOIDCSpec{
+		RoleName:              "internal-idp-role",
+		AccountID:             "123456789012",
+		OIDCProviderURL:       "https://idp.internal.example.com",
+		Audience:              "sts.amazonaws.com",
+		AllowUnscopedSubject:  true,
+		UnscopedJustification: "issuer is operated by us and mints tokens for one workload only",
+	}
+	bp := build(t, spec, "arn:aws:iam::123456789012:oidc-provider/idp.internal.example.com")
+	for op, kv := range bp.Statement[0].Condition {
+		for key := range kv {
+			if strings.HasSuffix(key, ":sub") {
+				t.Errorf("%s pinned %s but the spec opted out of subject scoping", op, key)
+			}
 		}
 	}
 }

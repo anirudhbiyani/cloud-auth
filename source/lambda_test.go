@@ -7,7 +7,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/credentials"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
 func TestAWSDetectLambda(t *testing.T) {
@@ -39,7 +39,7 @@ func TestAWSMintLambdaUsesSigV4(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Mint: %v", err)
 	}
-	if tok.Kind != cloudauth.AWSSigV4 {
+	if tok.Kind != core.AWSSigV4 {
 		t.Fatalf("kind = %v, want AWSSigV4", tok.Kind)
 	}
 	if !strings.Contains(tok.Value, "GetCallerIdentity") {

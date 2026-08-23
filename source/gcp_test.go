@@ -9,7 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
 func gcpJWT(aud string) string {
@@ -26,6 +26,10 @@ func fakeGCPMetadata(t *testing.T, requireFlavor bool) *httptest.Server {
 			w.WriteHeader(http.StatusForbidden)
 			return
 		}
+		// The real metadata server echoes this back, and the client now requires
+		// it — that round trip is what distinguishes the metadata server from
+		// anything else answering on metadata.google.internal.
+		w.Header().Set("Metadata-Flavor", "Google")
 		switch r.URL.Path {
 		case "/computeMetadata/v1/":
 			w.Write([]byte("ok"))
@@ -50,7 +54,7 @@ func TestGCPDetect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Detect: %v", err)
 	}
-	if rt.Cloud != cloudauth.GCP || rt.SubRuntime != "gce" {
+	if rt.Cloud != core.GCP || rt.SubRuntime != "gce" {
 		t.Errorf("runtime = %+v, want gcp/gce", rt)
 	}
 	if !rt.Federatable {
@@ -88,7 +92,7 @@ func TestGCPDetectNotHere(t *testing.T) {
 	g := NewGCP(WithGCPMetadataURL(srv.URL), WithGCPHTTPClient(srv.Client()),
 		WithGCPEnv(func(string) string { return "" }))
 	_, err := g.Detect(context.Background())
-	if !errors.Is(err, cloudauth.ErrNotThisRuntime) {
+	if !errors.Is(err, core.ErrNotThisRuntime) {
 		t.Errorf("err = %v, want ErrNotThisRuntime", err)
 	}
 }
@@ -102,7 +106,7 @@ func TestGCPMintPinsAudience(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Mint: %v", err)
 	}
-	if tok.Kind != cloudauth.OIDC {
+	if tok.Kind != core.OIDC {
 		t.Errorf("kind = %v, want OIDC", tok.Kind)
 	}
 	if tok.Audience != "sts.amazonaws.com" {

@@ -91,14 +91,14 @@ Full lifecycle support for major cloud providers:
 
 **Using Go:**
 ```bash
-go install github.com/anirudhbiyani/cloud-auth/cmd/cloud-auth@latest
+go install github.com/anirudhbiyani/cloud-auth@latest
 ```
 
 **From Source:**
 ```bash
 git clone https://github.com/anirudhbiyani/cloud-auth.git
 cd cloud-auth
-go build -o cloud-auth ./cmd/cloud-auth
+go build -o cloud-auth .
 ```
 
 ### Library
@@ -348,7 +348,7 @@ import (
     "fmt"
     "log"
 
-    "github.com/anirudhbiyani/cloud-auth/cloudauth"
+    "github.com/anirudhbiyani/cloud-auth/core"
     _ "github.com/anirudhbiyani/cloud-auth/provider/aws"
     _ "github.com/anirudhbiyani/cloud-auth/provider/gcp"
 )
@@ -357,32 +357,32 @@ func main() {
     ctx := context.Background()
 
     // Define the mechanism specification
-    spec := &cloudauth.AWSRoleTrustOIDCSpec{
+    spec := &core.AWSRoleTrustOIDCSpec{
         RoleName:         "github-actions-role",
         AccountID:        "123456789012",
         OIDCProviderURL:  "https://token.actions.githubusercontent.com",
         Audience:         "sts.amazonaws.com",
         Subject:          "repo:myorg/myrepo:*",
         SubjectCondition: "StringLike",
-        Source:           cloudauth.GitHubOIDC,
+        Source:           core.GitHubOIDC,
         PolicyARNs: []string{
             "arn:aws:iam::aws:policy/ReadOnlyAccess",
         },
     }
 
     // Create a state store
-    stateStore, err := cloudauth.NewFileStateStore("")
+    stateStore, err := core.NewFileStateStore("")
     if err != nil {
         log.Fatal(err)
     }
 
     // Create a manager
-    manager := cloudauth.NewManager(
-        cloudauth.WithStateStore(stateStore),
+    manager := core.NewManager(
+        core.WithStateStore(stateStore),
     )
 
     // Setup the mechanism
-    outputs, err := manager.Setup(ctx, spec, cloudauth.SetupOptions{})
+    outputs, err := manager.Setup(ctx, spec, core.SetupOptions{})
     if err != nil {
         log.Fatal(err)
     }
@@ -391,7 +391,7 @@ func main() {
     fmt.Printf("Role ARN: %s\n", outputs.Values["role_arn"])
 
     // Validate the mechanism
-    report, err := manager.Validate(ctx, outputs.Ref, cloudauth.ValidateOptions{})
+    report, err := manager.Validate(ctx, outputs.Ref, core.ValidateOptions{})
     if err != nil {
         log.Fatal(err)
     }
@@ -452,8 +452,15 @@ VAULT_TOKEN                # Vault token
 
 ```
 cloud-auth/
-├── cmd/cloud-auth/            # Single CLI binary (control-plane + runtime commands)
-├── cloudauth/                 # Core domain package (one shared vocabulary)
+├── main.go                    # The cloud-auth command lives at the module root,
+├── controlplane.go            #   so `go install github.com/anirudhbiyani/cloud-auth@latest`
+├── runtime.go                 #   installs a binary named cloud-auth.
+├── diagnose.go                #   main.go: entry point and exit codes
+├── scaffold.go                #   controlplane.go: setup/validate/delete/list + argv dispatch
+├── exec.go                    #   runtime.go: doctor/exchange/exec/config-validate
+├── format.go                  #   diagnose.go: doctor's preflight logic (pure, no I/O)
+│                              #   scaffold.go, exec.go, format.go: init, exec, output shapes
+├── core/                      # Core domain package (one shared vocabulary)
 │   ├── federation.go          # Runtime types (Cloud, Target, SourceToken, Credentials)
 │   ├── federation_interfaces.go # SourceProvider, Exchanger, Runtime, sentinel errors
 │   ├── interfaces.go          # Provider and Manager interfaces (control-plane)
@@ -513,7 +520,7 @@ type LifecycleProvider interface {
 Register providers using `init()`:
 ```go
 func init() {
-    cloudauth.Register(&MyProvider{})
+    core.Register(&MyProvider{})
 }
 ```
 
@@ -551,7 +558,7 @@ go mod download
 go test -v ./...
 
 # Build
-go build -o cloud-auth ./cmd/cloud-auth
+go build -o cloud-auth .
 
 # Run linter
 golangci-lint run

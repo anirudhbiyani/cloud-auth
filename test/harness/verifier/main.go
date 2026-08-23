@@ -35,7 +35,7 @@ import (
 	"time"
 
 	"github.com/anirudhbiyani/cloud-auth/broker"
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 	"github.com/anirudhbiyani/cloud-auth/source"
 	"github.com/anirudhbiyani/cloud-auth/test/harness/verifier/verify"
 )
@@ -140,7 +140,7 @@ func parseFlags(args []string, stderr io.Writer) (options, error) {
 // resolveRuntime returns the detected runtime and its canonical key. An
 // explicit override skips detection (useful when driving the binary by hand);
 // an unrecognized runtime is fatal rather than silently selecting nothing.
-func resolveRuntime(ctx context.Context, override string) (*cloudauth.Runtime, string, error) {
+func resolveRuntime(ctx context.Context, override string) (*core.Runtime, string, error) {
 	if override != "" {
 		key := verify.CanonicalRuntime(override)
 		if key == "" {

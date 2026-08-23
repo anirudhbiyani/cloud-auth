@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
+	"github.com/anirudhbiyani/cloud-auth/internal/httpx"
 	"github.com/anirudhbiyani/cloud-auth/internal/jwt"
 )
 
@@ -51,7 +54,7 @@ func WithAzureK8sTokenClient(c k8sTokenMinter) AzureOption {
 func NewAzure(opts ...AzureOption) *Azure {
 	a := &Azure{
 		imdsURL:    DefaultAzureIMDSURL,
-		httpClient: &http.Client{Timeout: 2 * time.Second},
+		httpClient: httpx.NewMetadataClient(2 * time.Second),
 		getenv:     os.Getenv,
 		readFile:   os.ReadFile,
 	}
@@ -107,49 +110,110 @@ func (a *Azure) imdsGet(ctx context.Context, path, rawQuery string) ([]byte, err
 	return body, nil
 }
 
+// localIdentityEndpoint validates IDENTITY_ENDPOINT before the IDENTITY_HEADER
+// secret is sent to it.
+//
+// The variable is a URL taken verbatim from the environment, and the request
+// carries the header secret that authenticates to the local token service.
+// Anything that can influence the environment — a container spec, an operator
+// with a compromised deployment pipeline — could otherwise point it at a remote
+// host and collect both the secret and a managed-identity token on every mint.
+// The real endpoint is always loopback or link-local, so requiring that costs
+// nothing and closes the exfiltration path.
+func localIdentityEndpoint(raw string) (string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return "", fmt.Errorf("IDENTITY_ENDPOINT is empty")
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("IDENTITY_ENDPOINT %q is not a URL: %w", raw, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", fmt.Errorf("IDENTITY_ENDPOINT %q must be http or https", raw)
+	}
+	host := u.Hostname()
+	if host == "localhost" {
+		return raw, nil
+	}
+	ip := net.ParseIP(host)
+	if ip != nil && (ip.IsLoopback() || ip.IsLinkLocalUnicast()) {
+		return raw, nil
+	}
+	return "", fmt.Errorf("refusing to send the IDENTITY_HEADER secret to non-local host %q: "+
+		"the managed-identity endpoint is always loopback or link-local", u.Host)
+}
+
 // Detect resolves AKS Workload Identity (via env) or a VM/VMSS (via IMDS).
-func (a *Azure) Detect(ctx context.Context) (*cloudauth.Runtime, error) {
+func (a *Azure) Detect(ctx context.Context) (*core.Runtime, error) {
 	if a.usesWorkloadIdentity() {
-		return &cloudauth.Runtime{
-			Cloud:       cloudauth.Azure,
+		return &core.Runtime{
+			Cloud:       core.Azure,
 			SubRuntime:  "aks-workload-identity",
 			Federatable: true,
 			Subject:     a.getenv("AZURE_CLIENT_ID"),
 		}, nil
 	}
+	// Managed identity — App Service, Container Apps, a bare VM — vends Entra
+	// ACCESS tokens, which are bearer credentials for a named Azure resource,
+	// not audience-pinned assertions about this workload. They are not a
+	// federation source, and saying so here is what lets `cloud-auth doctor`
+	// tell an operator the truth before they build on it.
 	if sub := a.managedIdentitySubRuntime(); sub != "" {
-		return &cloudauth.Runtime{
-			Cloud:       cloudauth.Azure,
+		return &core.Runtime{
+			Cloud:       core.Azure,
 			SubRuntime:  sub,
-			Federatable: true,
+			Federatable: false,
 			Subject:     a.getenv("AZURE_CLIENT_ID"),
 		}, nil
 	}
 	if _, err := a.imdsGet(ctx, "/metadata/instance", "api-version=2021-02-01"); err != nil {
-		return nil, fmt.Errorf("%w: %v", cloudauth.ErrNotThisRuntime, err)
+		return nil, fmt.Errorf("%w: %v", core.ErrNotThisRuntime, err)
 	}
-	return &cloudauth.Runtime{
-		Cloud:       cloudauth.Azure,
+	return &core.Runtime{
+		Cloud:       core.Azure,
 		SubRuntime:  "vm",
-		Federatable: true,
+		Federatable: false,
 	}, nil
 }
 
 // Mint returns the projected OIDC token (AKS WI) or an IMDS Entra token (VM).
-func (a *Azure) Mint(ctx context.Context, audience string) (*cloudauth.SourceToken, error) {
+func (a *Azure) Mint(ctx context.Context, audience string) (*core.SourceToken, error) {
 	if audience == "" {
 		return nil, fmt.Errorf("azure: audience is required")
 	}
 	if a.usesWorkloadIdentity() {
 		return a.mintFromFile(ctx, audience)
 	}
-	if a.managedIdentitySubRuntime() != "" {
-		return a.mintFromIdentityEndpoint(ctx, audience)
+	// Everything below this point vends an Entra access token, and an access
+	// token is not a proof of identity that another cloud's STS can verify — it
+	// is a live bearer credential for whatever resource was named in the
+	// request. Handing one to a third-party STS discloses a working Azure
+	// credential and still fails the exchange, because the token's aud is an
+	// Azure resource rather than the target's audience.
+	if sub := a.managedIdentitySubRuntime(); sub != "" {
+		return nil, fmt.Errorf("%w: Azure managed identity on %s vends Entra access tokens, not "+
+			"audience-pinned assertions; use AKS Workload Identity (AZURE_FEDERATED_TOKEN_FILE) "+
+			"for cross-cloud federation", core.ErrNonFederatableSource, sub)
 	}
-	return a.mintFromIMDS(ctx, audience)
+	return nil, fmt.Errorf("%w: an Azure VM's IMDS vends Entra access tokens, not audience-pinned "+
+		"assertions; run the workload on AKS with Workload Identity enabled, or bridge this "+
+		"identity through an OIDC issuer", core.ErrNonFederatableSource)
 }
 
-func (a *Azure) mintFromFile(ctx context.Context, audience string) (*cloudauth.SourceToken, error) {
+// mintManagedIdentityToken obtains an Entra access token for resource.
+//
+// This is NOT a federation source — see Mint, which refuses those paths. It
+// exists for same-cloud use and for `cloud-auth doctor`, which reports what the
+// runtime can and cannot do. Both callers are local to this process, so the
+// token never crosses a trust boundary.
+func (a *Azure) mintManagedIdentityToken(ctx context.Context, resource string) (*core.SourceToken, error) {
+	if a.managedIdentitySubRuntime() != "" {
+		return a.mintFromIdentityEndpoint(ctx, resource)
+	}
+	return a.mintFromIMDS(ctx, resource)
+}
+
+func (a *Azure) mintFromFile(ctx context.Context, audience string) (*core.SourceToken, error) {
 	raw, err := a.readFile(a.getenv("AZURE_FEDERATED_TOKEN_FILE"))
 	if err != nil {
 		return nil, fmt.Errorf("azure: reading projected token: %w", err)
@@ -160,8 +224,8 @@ func (a *Azure) mintFromFile(ctx context.Context, audience string) (*cloudauth.S
 	}
 	// Fast path: the on-disk projected token already carries the requested aud.
 	if claims.HasAudience(audience) {
-		return &cloudauth.SourceToken{
-			Kind:     cloudauth.OIDC,
+		return &core.SourceToken{
+			Kind:     core.OIDC,
 			Value:    string(raw),
 			Issuer:   claims.Issuer,
 			Subject:  claims.Subject,
@@ -178,8 +242,8 @@ func (a *Azure) mintFromFile(ctx context.Context, audience string) (*cloudauth.S
 			return nil, fmt.Errorf("azure: %w", err)
 		}
 		minted, _ := jwt.ParseUnverified(token)
-		return &cloudauth.SourceToken{
-			Kind:     cloudauth.OIDC,
+		return &core.SourceToken{
+			Kind:     core.OIDC,
 			Value:    token,
 			Issuer:   minted.Issuer,
 			Subject:  minted.Subject,
@@ -198,10 +262,20 @@ func (a *Azure) mintFromFile(ctx context.Context, audience string) (*cloudauth.S
 // mintFromIdentityEndpoint mints a managed-identity token via the App Service /
 // Container Apps local token endpoint (IDENTITY_ENDPOINT), authenticated with
 // the IDENTITY_HEADER secret rather than the IMDS Metadata header.
-func (a *Azure) mintFromIdentityEndpoint(ctx context.Context, audience string) (*cloudauth.SourceToken, error) {
-	endpoint := a.getenv("IDENTITY_ENDPOINT")
-	q := url.Values{"resource": {audience}, "api-version": {"2019-08-01"}}.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"?"+q, nil)
+func (a *Azure) mintFromIdentityEndpoint(ctx context.Context, audience string) (*core.SourceToken, error) {
+	endpoint, err := localIdentityEndpoint(a.getenv("IDENTITY_ENDPOINT"))
+	if err != nil {
+		return nil, fmt.Errorf("azure: %w", err)
+	}
+	q := url.Values{"resource": {audience}, "api-version": {"2019-08-01"}}
+	// Bind the request to the identity Detect reported. Without this, a host with
+	// several user-assigned identities returns whichever one the platform
+	// considers default, so the SDK would report one identity and authenticate
+	// as another.
+	if id := a.getenv("AZURE_CLIENT_ID"); id != "" {
+		q.Set("client_id", id)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"?"+q.Encode(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -222,8 +296,8 @@ func (a *Azure) mintFromIdentityEndpoint(ctx context.Context, audience string) (
 		return nil, fmt.Errorf("azure: decoding managed-identity token: %w", err)
 	}
 	claims, _ := jwt.ParseUnverified(out.AccessToken)
-	return &cloudauth.SourceToken{
-		Kind:     cloudauth.OIDC,
+	return &core.SourceToken{
+		Kind:     core.OIDC,
 		Value:    out.AccessToken,
 		Issuer:   claims.Issuer,
 		Subject:  claims.Subject,
@@ -232,9 +306,14 @@ func (a *Azure) mintFromIdentityEndpoint(ctx context.Context, audience string) (
 	}, nil
 }
 
-func (a *Azure) mintFromIMDS(ctx context.Context, audience string) (*cloudauth.SourceToken, error) {
-	q := url.Values{"api-version": {"2018-02-01"}, "resource": {audience}}.Encode()
-	body, err := a.imdsGet(ctx, "/metadata/identity/oauth2/token", q)
+func (a *Azure) mintFromIMDS(ctx context.Context, audience string) (*core.SourceToken, error) {
+	q := url.Values{"api-version": {"2018-02-01"}, "resource": {audience}}
+	// Same reason as the identity-endpoint path: name the identity, or a
+	// multi-identity VM silently authenticates as a different one.
+	if id := a.getenv("AZURE_CLIENT_ID"); id != "" {
+		q.Set("client_id", id)
+	}
+	body, err := a.imdsGet(ctx, "/metadata/identity/oauth2/token", q.Encode())
 	if err != nil {
 		return nil, fmt.Errorf("azure: minting IMDS token: %w", err)
 	}
@@ -245,8 +324,8 @@ func (a *Azure) mintFromIMDS(ctx context.Context, audience string) (*cloudauth.S
 		return nil, fmt.Errorf("azure: decoding IMDS token: %w", err)
 	}
 	claims, _ := jwt.ParseUnverified(out.AccessToken)
-	return &cloudauth.SourceToken{
-		Kind:     cloudauth.OIDC,
+	return &core.SourceToken{
+		Kind:     core.OIDC,
 		Value:    out.AccessToken,
 		Issuer:   claims.Issuer,
 		Subject:  claims.Subject,

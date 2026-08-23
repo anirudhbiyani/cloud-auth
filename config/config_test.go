@@ -4,9 +4,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
 const validYAML = `
@@ -102,12 +103,19 @@ func TestResolveTarget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Target: %v", err)
 	}
-	if tgt.Cloud != cloudauth.GCP {
-		t.Errorf("cloud = %v", tgt.Cloud)
+	if tgt.Cloud() != core.GCP {
+		t.Errorf("cloud = %v", tgt.Cloud())
 	}
-	// GCP audience defaults to the workload identity pool when unset.
-	if tgt.Audience == "" || tgt.Audience != tgt.WorkloadIdentityPool {
-		t.Errorf("gcp audience should default to WIP; got %q", tgt.Audience)
+	// GCP audience defaults to the workload identity pool when unset, in the
+	// //iam.googleapis.com/ form the token exchange requires — the config may
+	// carry either spelling.
+	gcp := tgt.(core.GCPTarget)
+	wantAud := gcp.WorkloadIdentityPool
+	if !strings.HasPrefix(wantAud, "//iam.googleapis.com/") {
+		wantAud = "//iam.googleapis.com/" + wantAud
+	}
+	if tgt.Audience() != wantAud {
+		t.Errorf("gcp audience = %q, want the pool resource name %q", tgt.Audience(), wantAud)
 	}
 	if _, err := c.Target("nope"); err == nil {
 		t.Error("expected error for unknown target name")
@@ -335,15 +343,15 @@ func TestSchemaMatchesValidator(t *testing.T) {
 	props, _ := dig(target.(map[string]any), "properties", "cloud")
 	enum := toStringSet(props.(map[string]any)["enum"])
 	wantClouds := []string{
-		string(cloudauth.AWS),
-		string(cloudauth.GCP),
-		string(cloudauth.Azure),
+		string(core.AWS),
+		string(core.GCP),
+		string(core.Azure),
 	}
 	for _, c := range wantClouds {
 		if !enum[c] {
 			t.Errorf("schema cloud enum missing %q; enum = %v", c, enum)
 		}
-		if _, err := cloudauth.ParseCloud(c); err != nil {
+		if _, err := core.ParseCloud(c); err != nil {
 			t.Errorf("validator rejects cloud %q that schema lists: %v", c, err)
 		}
 	}
@@ -351,7 +359,7 @@ func TestSchemaMatchesValidator(t *testing.T) {
 		t.Errorf("schema cloud enum has %d entries, want %d (%v)", len(enum), len(wantClouds), wantClouds)
 	}
 	// Anything the schema does NOT list must be rejected by the validator.
-	if _, err := cloudauth.ParseCloud("oracle"); err == nil {
+	if _, err := core.ParseCloud("oracle"); err == nil {
 		t.Error("validator accepts a cloud not in the schema enum")
 	}
 }
@@ -453,9 +461,98 @@ targets:
 			if rerr != nil {
 				t.Fatalf("accepted config but target %q does not resolve: %v", tg.Name, rerr)
 			}
-			if rt.Audience == "" {
+			if rt.Audience() == "" {
 				t.Fatalf("accepted target %q with empty audience", tg.Name)
 			}
 		}
 	})
+}
+
+// source.detect was parsed, validated, tested — and read by nothing. An operator
+// who pinned it had configured a security control that did not exist. Load must
+// now reject a value the enforcement layer cannot honour.
+func TestLoadRejectsAnUnusableSourceDetect(t *testing.T) {
+	dir := t.TempDir()
+	write := func(detect string) string {
+		path := filepath.Join(dir, strings.ReplaceAll(detect, "/", "_")+".yaml")
+		body := "version: 1\nsource:\n  detect: " + detect + "\ntargets:\n" +
+			"  - name: t\n    cloud: aws\n    role: arn:aws:iam::123456789012:role/r\n    audience: a\n"
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+
+	for _, bad := range []string{"aws-ec3", "kubernetes", "aws-"} {
+		if _, err := Load(write(bad)); err == nil {
+			t.Errorf("Load accepted source.detect %q", bad)
+		}
+	}
+	for _, good := range []string{"auto", "aws", "aws-ec2", "gcp-gke"} {
+		if _, err := Load(write(good)); err != nil {
+			t.Errorf("Load rejected valid source.detect %q: %v", good, err)
+		}
+	}
+}
+
+// And the parsed value must be reachable, or the enforcement layer has nothing
+// to enforce.
+func TestSourceSelectorIsExposed(t *testing.T) {
+	c := &Config{Version: 1, Source: Source{Detect: "aws-eks-irsa"}}
+	sel, err := c.SourceSelector()
+	if err != nil {
+		t.Fatalf("SourceSelector: %v", err)
+	}
+	if sel.Cloud != core.AWS || sel.SubRuntime != "eks-irsa" {
+		t.Errorf("selector = %+v, want aws/eks-irsa", sel)
+	}
+}
+
+// A field belonging to another cloud is now a config error rather than a
+// silently ignored key. Dropping it is how a target ends up pointing somewhere
+// the operator did not intend.
+func TestConfigRejectsForeignCloudFields(t *testing.T) {
+	dir := t.TempDir()
+	load := func(body string) error {
+		path := filepath.Join(dir, "c.yaml")
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Load(path)
+		return err
+	}
+
+	err := load(`version: 1
+targets:
+  - name: t
+    cloud: aws
+    role: arn:aws:iam::123456789012:role/r
+    tenant: 11111111-1111-1111-1111-111111111111
+`)
+	if err == nil || !strings.Contains(err.Error(), "azure setting") {
+		t.Errorf("an azure tenant on an aws target must be rejected, got %v", err)
+	}
+
+	err = load(`version: 1
+targets:
+  - name: t
+    cloud: gcp
+    workload_identity_pool: projects/1/locations/global/workloadIdentityPools/p/providers/x
+    role: arn:aws:iam::123456789012:role/r
+`)
+	if err == nil || !strings.Contains(err.Error(), "aws setting") {
+		t.Errorf("an aws role on a gcp target must be rejected, got %v", err)
+	}
+
+	// The valid shape still loads.
+	if err := load(`version: 1
+targets:
+  - name: t
+    cloud: azure
+    tenant: 11111111-1111-1111-1111-111111111111
+    client_id: 22222222-2222-2222-2222-222222222222
+    scope: https://storage.azure.com/.default
+`); err != nil {
+		t.Errorf("a valid azure target should load: %v", err)
+	}
 }

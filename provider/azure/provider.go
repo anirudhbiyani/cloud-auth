@@ -3,14 +3,13 @@ package azure
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// Provider implements cloudauth.LifecycleProvider for Azure.
+// Provider implements core.LifecycleProvider for Azure.
 type Provider struct {
 	graphClient GraphClient
 	armClient   ARMClient
@@ -230,25 +229,24 @@ func New(opts ...ProviderOption) *Provider {
 	return p
 }
 
-// Name implements cloudauth.Provider.
-func (p *Provider) Name() cloudauth.Cloud {
-	return cloudauth.Azure
+// Name implements core.Provider.
+func (p *Provider) Name() core.Cloud {
+	return core.Azure
 }
 
-// Capabilities implements cloudauth.Provider.
-func (p *Provider) Capabilities() []cloudauth.Capability {
-	return []cloudauth.Capability{
-		cloudauth.CapabilityToken,
-		cloudauth.CapabilitySetup,
-		cloudauth.CapabilityValidate,
-		cloudauth.CapabilityDelete,
-		cloudauth.CapabilityDryRun,
-		cloudauth.CapabilityFederationOIDC,
+// Capabilities implements core.Provider.
+func (p *Provider) Capabilities() []core.Capability {
+	return []core.Capability{
+		core.CapabilitySetup,
+		core.CapabilityValidate,
+		core.CapabilityDelete,
+		core.CapabilityDryRun,
+		core.CapabilityFederationOIDC,
 	}
 }
 
-// HasCapability implements cloudauth.Provider.
-func (p *Provider) HasCapability(cap cloudauth.Capability) bool {
+// HasCapability implements core.Provider.
+func (p *Provider) HasCapability(cap core.Capability) bool {
 	for _, c := range p.Capabilities() {
 		if c == cap {
 			return true
@@ -257,19 +255,44 @@ func (p *Provider) HasCapability(cap cloudauth.Capability) bool {
 	return false
 }
 
-// Setup implements cloudauth.LifecycleProvider.
-func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts cloudauth.SetupOptions) (*cloudauth.Outputs, error) {
+// requireClients reports whether this provider can talk to Azure at all.
+//
+// The clients are injected, so an unconfigured Provider is the one init()
+// registers. Setup's nil-check only covered the create-application branch: the
+// path that fetched an existing application by ID, and the federated-credential
+// call after it, dereferenced the nil field and panicked.
+func (p *Provider) requireClients(needGraph, needARM bool) error {
+	if needGraph && p.graphClient == nil {
+		return core.ErrValidation("Azure Graph client not configured").
+			WithProvider(core.Azure).
+			WithDetail("hint", "Pass azure.WithGraphClient, or use --dry-run")
+	}
+	if needARM && p.armClient == nil {
+		return core.ErrValidation("Azure ARM client not configured").
+			WithProvider(core.Azure).
+			WithDetail("hint", "Pass azure.WithARMClient, or use --dry-run")
+	}
+	return nil
+}
+
+// Setup implements core.LifecycleProvider.
+func (p *Provider) Setup(ctx context.Context, spec core.MechanismSpec, opts core.SetupOptions) (*core.Outputs, error) {
+	if !opts.DryRun {
+		if err := p.requireClients(true, false); err != nil {
+			return nil, err
+		}
+	}
 	switch s := spec.(type) {
-	case *cloudauth.AzureFederatedCredentialSpec:
+	case *core.AzureFederatedCredentialSpec:
 		return p.setupFederatedCredential(ctx, s, opts)
 	default:
-		return nil, cloudauth.ErrValidation(fmt.Sprintf("unsupported spec type: %T", spec)).
-			WithProvider(cloudauth.Azure)
+		return nil, core.ErrValidation(fmt.Sprintf("unsupported spec type: %T", spec)).
+			WithProvider(core.Azure)
 	}
 }
 
-func (p *Provider) setupFederatedCredential(ctx context.Context, spec *cloudauth.AzureFederatedCredentialSpec, opts cloudauth.SetupOptions) (*cloudauth.Outputs, error) {
-	var plan cloudauth.Plan
+func (p *Provider) setupFederatedCredential(ctx context.Context, spec *core.AzureFederatedCredentialSpec, opts core.SetupOptions) (*core.Outputs, error) {
+	var plan core.Plan
 	resourceIDs := make(map[string]string)
 
 	switch spec.IdentityType {
@@ -278,31 +301,41 @@ func (p *Provider) setupFederatedCredential(ctx context.Context, spec *cloudauth
 	case "managed_identity":
 		return p.setupManagedIdentityFederated(ctx, spec, opts, &plan, resourceIDs)
 	default:
-		return nil, cloudauth.ErrValidation("invalid identity_type")
+		return nil, core.ErrValidation("invalid identity_type")
 	}
 }
 
-func (p *Provider) setupAppRegistrationFederated(ctx context.Context, spec *cloudauth.AzureFederatedCredentialSpec, opts cloudauth.SetupOptions, plan *cloudauth.Plan, resourceIDs map[string]string) (*cloudauth.Outputs, error) {
+func (p *Provider) setupAppRegistrationFederated(ctx context.Context, spec *core.AzureFederatedCredentialSpec, opts core.SetupOptions, plan *core.Plan, resourceIDs map[string]string) (*core.Outputs, error) {
 	var appID string
 	var appObjectID string
 	var createdApp bool
 
 	// Step 1: Get or create application
 	if spec.ApplicationID != "" {
-		if p.graphClient != nil {
-			app, err := p.graphClient.GetApplication(ctx, spec.ApplicationID)
-			if err != nil {
-				return nil, cloudauth.ErrNotFound("application", spec.ApplicationID).WithCause(err)
-			}
-			appID = app.AppID
-			appObjectID = app.ID
-		} else {
-			appID = spec.ApplicationID
-			appObjectID = spec.ApplicationID
+		if p.graphClient == nil {
+			// The previous fallback assigned spec.ApplicationID to BOTH ids. In
+			// Graph those are different identifiers — appId is the client id,
+			// id is the object id — and every federated-credential call needs the
+			// object id. Guessing one from the other targeted the wrong resource,
+			// so resolve it or say we cannot.
+			return nil, core.ErrValidation("cannot resolve the application's object id without a Graph client").
+				WithProvider(core.Azure).
+				WithResource("application", spec.ApplicationID).
+				WithDetail("hint", "Pass azure.WithGraphClient, or use --dry-run")
+		}
+		app, err := p.graphClient.GetApplication(ctx, spec.ApplicationID)
+		if err != nil {
+			return nil, core.ErrNotFound("application", spec.ApplicationID).WithCause(err)
+		}
+		appID = app.AppID
+		appObjectID = app.ID
+		if appObjectID == "" {
+			return nil, core.ErrInternal("Graph returned an application with no object id").
+				WithResource("application", spec.ApplicationID)
 		}
 	} else if spec.ApplicationDisplayName != "" {
 		// Create new application
-		action := cloudauth.PlannedAction{
+		action := core.PlannedAction{
 			Operation:    "create",
 			ResourceType: "application",
 			Details:      map[string]interface{}{"display_name": spec.ApplicationDisplayName},
@@ -312,8 +345,8 @@ func (p *Provider) setupAppRegistrationFederated(ctx context.Context, spec *clou
 
 		if !opts.DryRun {
 			if p.graphClient == nil {
-				return nil, cloudauth.ErrValidation("Azure Graph client not configured").
-					WithProvider(cloudauth.Azure).
+				return nil, core.ErrValidation("Azure Graph client not configured").
+					WithProvider(core.Azure).
 					WithDetail("hint", "Configure Azure credentials or use --dry-run")
 			}
 
@@ -322,8 +355,8 @@ func (p *Provider) setupAppRegistrationFederated(ctx context.Context, spec *clou
 				SignInAudience: "AzureADMyOrg",
 			})
 			if err != nil {
-				return nil, cloudauth.ErrPermission("failed to create application").
-					WithCause(err).WithProvider(cloudauth.Azure)
+				return nil, core.ErrPermission("failed to create application").
+					WithCause(err).WithProvider(core.Azure)
 			}
 			appID = app.AppID
 			appObjectID = app.ID
@@ -337,7 +370,7 @@ func (p *Provider) setupAppRegistrationFederated(ctx context.Context, spec *clou
 
 	// Step 2: Create service principal if we created the app
 	if createdApp && !opts.DryRun {
-		action := cloudauth.PlannedAction{
+		action := core.PlannedAction{
 			Operation:    "create",
 			ResourceType: "service-principal",
 			Details:      map[string]interface{}{"app_id": appID},
@@ -349,14 +382,14 @@ func (p *Provider) setupAppRegistrationFederated(ctx context.Context, spec *clou
 		if err != nil {
 			// Rollback: delete application
 			_ = p.graphClient.DeleteApplication(ctx, appObjectID)
-			return nil, cloudauth.ErrPermission("failed to create service principal").
-				WithCause(err).WithProvider(cloudauth.Azure)
+			return nil, core.ErrPermission("failed to create service principal").
+				WithCause(err).WithProvider(core.Azure)
 		}
 		resourceIDs["service_principal_id"] = sp.ID
 	}
 
 	// Step 3: Add federated identity credential
-	action := cloudauth.PlannedAction{
+	action := core.PlannedAction{
 		Operation:    "create",
 		ResourceType: "federated-identity-credential",
 		Details: map[string]interface{}{
@@ -386,15 +419,22 @@ func (p *Provider) setupAppRegistrationFederated(ctx context.Context, spec *clou
 			if createdApp {
 				_ = p.graphClient.DeleteApplication(ctx, appObjectID)
 			}
-			return nil, cloudauth.ErrPermission("failed to create federated credential").
-				WithCause(err).WithProvider(cloudauth.Azure)
+			return nil, core.ErrPermission("failed to create federated credential").
+				WithCause(err).WithProvider(core.Azure)
 		}
 		resourceIDs["federated_credential_id"] = cred.ID
 	}
 
-	// Step 4: Create role assignments if specified
+	// Step 4: Create role assignments if specified.
+	//
+	// Failures are collected rather than printed: the identity exists and can
+	// authenticate, but without these it has none of the permissions the spec
+	// asked for, which surfaces later as a confusing authorization error far from
+	// its cause. Reported through Outputs.Instructions so the caller learns about
+	// it without losing the resource identifiers it needs to finish or clean up.
+	var roleAssignmentErrs []error
 	for _, ra := range spec.RoleAssignments {
-		action := cloudauth.PlannedAction{
+		action := core.PlannedAction{
 			Operation:    "create",
 			ResourceType: "role-assignment",
 			Details: map[string]interface{}{
@@ -409,8 +449,8 @@ func (p *Provider) setupAppRegistrationFederated(ctx context.Context, spec *clou
 			spID := resourceIDs["service_principal_id"]
 			if spID != "" {
 				if err := p.armClient.CreateRoleAssignment(ctx, ra.Scope, ra.RoleDefinitionID, spID); err != nil {
-					// Log warning but don't fail
-					fmt.Printf("warning: failed to create role assignment: %v\n", err)
+					roleAssignmentErrs = append(roleAssignmentErrs,
+						fmt.Errorf("role %s on scope %s: %w", ra.RoleDefinitionID, ra.Scope, err))
 				}
 			}
 		}
@@ -418,12 +458,14 @@ func (p *Provider) setupAppRegistrationFederated(ctx context.Context, spec *clou
 
 	recordExpectedTrust(resourceIDs, spec)
 
-	ref := cloudauth.CreateMechanismRef(cloudauth.MechanismAzureFederatedCredential, cloudauth.Azure, resourceIDs)
+	ref := core.CreateMechanismRef(core.MechanismAzureFederatedCredential, core.Azure, resourceIDs)
 	ref.Owned = createdApp // Only owned if we created the app
+
+	instructions := roleAssignmentWarnings(roleAssignmentErrs)
 
 	if opts.DryRun {
 		plan.Summary = fmt.Sprintf("Would create/update %d resources for Azure federated credential", len(plan.Actions))
-		return &cloudauth.Outputs{
+		return &core.Outputs{
 			Ref: ref,
 			Values: map[string]string{
 				"plan": plan.Summary,
@@ -431,17 +473,37 @@ func (p *Provider) setupAppRegistrationFederated(ctx context.Context, spec *clou
 		}, nil
 	}
 
-	return &cloudauth.Outputs{
+	return &core.Outputs{
 		Ref: ref,
 		Values: map[string]string{
 			"app_id":                    appID,
 			"tenant_id":                 spec.TenantID,
 			"federated_credential_name": spec.FederatedCredentialName,
 		},
+		Instructions: instructions,
 	}, nil
 }
 
-func (p *Provider) setupManagedIdentityFederated(ctx context.Context, spec *cloudauth.AzureFederatedCredentialSpec, opts cloudauth.SetupOptions, plan *cloudauth.Plan, resourceIDs map[string]string) (*cloudauth.Outputs, error) {
+// roleAssignmentWarnings renders collected role-assignment failures as
+// caller-visible instructions.
+//
+// Not returned as an error: the federated credential itself was created, and
+// failing the whole call would discard the resource identifiers the caller needs
+// either to finish the job by hand or to clean up.
+func roleAssignmentWarnings(errs []error) []string {
+	if len(errs) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(errs)+1)
+	out = append(out, fmt.Sprintf("WARNING: the identity was created but %d role assignment(s) "+
+		"failed, so it can authenticate without having the permissions this spec requested:", len(errs)))
+	for _, err := range errs {
+		out = append(out, "  - "+err.Error())
+	}
+	return out
+}
+
+func (p *Provider) setupManagedIdentityFederated(ctx context.Context, spec *core.AzureFederatedCredentialSpec, opts core.SetupOptions, plan *core.Plan, resourceIDs map[string]string) (*core.Outputs, error) {
 	var createdIdentity bool
 
 	// Step 1: Get or create managed identity
@@ -454,7 +516,7 @@ func (p *Provider) setupManagedIdentityFederated(ctx context.Context, spec *clou
 	}
 
 	if !identityExists && spec.CreateManagedIdentity {
-		action := cloudauth.PlannedAction{
+		action := core.PlannedAction{
 			Operation:    "create",
 			ResourceType: "managed-identity",
 			Details: map[string]interface{}{
@@ -467,8 +529,8 @@ func (p *Provider) setupManagedIdentityFederated(ctx context.Context, spec *clou
 
 		if !opts.DryRun {
 			if p.armClient == nil {
-				return nil, cloudauth.ErrValidation("Azure ARM client not configured").
-					WithProvider(cloudauth.Azure).
+				return nil, core.ErrValidation("Azure ARM client not configured").
+					WithProvider(core.Azure).
 					WithDetail("hint", "Configure Azure credentials or use --dry-run")
 			}
 
@@ -476,13 +538,13 @@ func (p *Provider) setupManagedIdentityFederated(ctx context.Context, spec *clou
 			var err error
 			mi, err = p.armClient.CreateManagedIdentity(ctx, spec.SubscriptionID, spec.ResourceGroup, spec.ManagedIdentityName, "eastus")
 			if err != nil {
-				return nil, cloudauth.ErrPermission("failed to create managed identity").
-					WithCause(err).WithProvider(cloudauth.Azure)
+				return nil, core.ErrPermission("failed to create managed identity").
+					WithCause(err).WithProvider(core.Azure)
 			}
 			createdIdentity = true
 		}
 	} else if !identityExists && p.armClient != nil {
-		return nil, cloudauth.ErrNotFound("managed-identity", spec.ManagedIdentityName)
+		return nil, core.ErrNotFound("managed-identity", spec.ManagedIdentityName)
 	}
 
 	if mi != nil {
@@ -496,7 +558,7 @@ func (p *Provider) setupManagedIdentityFederated(ctx context.Context, spec *clou
 	resourceIDs["identity_name"] = spec.ManagedIdentityName
 
 	// Step 2: Add federated credential
-	action := cloudauth.PlannedAction{
+	action := core.PlannedAction{
 		Operation:    "create",
 		ResourceType: "federated-identity-credential",
 		Details: map[string]interface{}{
@@ -526,15 +588,17 @@ func (p *Provider) setupManagedIdentityFederated(ctx context.Context, spec *clou
 			if createdIdentity {
 				_ = p.armClient.DeleteManagedIdentity(ctx, spec.SubscriptionID, spec.ResourceGroup, spec.ManagedIdentityName)
 			}
-			return nil, cloudauth.ErrPermission("failed to create federated credential").
-				WithCause(err).WithProvider(cloudauth.Azure)
+			return nil, core.ErrPermission("failed to create federated credential").
+				WithCause(err).WithProvider(core.Azure)
 		}
 		resourceIDs["federated_credential_id"] = cred.ID
 	}
 
 	// Step 3: Create role assignments
+	// Collected, not printed — see roleAssignmentWarnings.
+	var roleAssignmentErrs []error
 	for _, ra := range spec.RoleAssignments {
-		action := cloudauth.PlannedAction{
+		action := core.PlannedAction{
 			Operation:    "create",
 			ResourceType: "role-assignment",
 			Details: map[string]interface{}{
@@ -547,19 +611,20 @@ func (p *Provider) setupManagedIdentityFederated(ctx context.Context, spec *clou
 
 		if !opts.DryRun && mi != nil {
 			if err := p.armClient.CreateRoleAssignment(ctx, ra.Scope, ra.RoleDefinitionID, mi.PrincipalID); err != nil {
-				fmt.Printf("warning: failed to create role assignment: %v\n", err)
+				roleAssignmentErrs = append(roleAssignmentErrs,
+					fmt.Errorf("role %s on scope %s: %w", ra.RoleDefinitionID, ra.Scope, err))
 			}
 		}
 	}
 
 	recordExpectedTrust(resourceIDs, spec)
 
-	ref := cloudauth.CreateMechanismRef(cloudauth.MechanismAzureFederatedCredential, cloudauth.Azure, resourceIDs)
+	ref := core.CreateMechanismRef(core.MechanismAzureFederatedCredential, core.Azure, resourceIDs)
 	ref.Owned = createdIdentity
 
 	if opts.DryRun {
 		plan.Summary = fmt.Sprintf("Would create/update %d resources for Azure federated credential", len(plan.Actions))
-		return &cloudauth.Outputs{
+		return &core.Outputs{
 			Ref: ref,
 			Values: map[string]string{
 				"plan": plan.Summary,
@@ -567,22 +632,26 @@ func (p *Provider) setupManagedIdentityFederated(ctx context.Context, spec *clou
 		}, nil
 	}
 
-	return &cloudauth.Outputs{
+	return &core.Outputs{
 		Ref: ref,
 		Values: map[string]string{
 			"client_id":                 mi.ClientID,
 			"tenant_id":                 spec.TenantID,
 			"federated_credential_name": spec.FederatedCredentialName,
 		},
+		Instructions: roleAssignmentWarnings(roleAssignmentErrs),
 	}, nil
 }
 
-// Validate implements cloudauth.LifecycleProvider.
-func (p *Provider) Validate(ctx context.Context, ref cloudauth.MechanismRef, opts cloudauth.ValidateOptions) (*cloudauth.ValidationReport, error) {
-	var validators []cloudauth.Validator
+// Validate implements core.LifecycleProvider.
+func (p *Provider) Validate(ctx context.Context, ref core.MechanismRef, opts core.ValidateOptions) (*core.ValidationReport, error) {
+	if err := p.requireClients(true, false); err != nil {
+		return nil, err
+	}
+	var validators []core.Validator
 
 	switch ref.Type {
-	case cloudauth.MechanismAzureFederatedCredential:
+	case core.MechanismAzureFederatedCredential:
 		if appID := ref.ResourceIDs["app_object_id"]; appID != "" {
 			validators = append(validators, &appExistsValidator{client: p.graphClient, appID: appID})
 
@@ -611,30 +680,35 @@ func (p *Provider) Validate(ctx context.Context, ref cloudauth.MechanismRef, opt
 		expSubject := ref.ResourceIDs["expected_subject"]
 		expAudience := ref.ResourceIDs["expected_audience"]
 		if expIssuer != "" || expSubject != "" || expAudience != "" {
-			validators = append(validators, cloudauth.NewTrustPolicyMatchValidator(
+			validators = append(validators, core.NewTrustPolicyMatchValidator(
 				expIssuer, expAudience, expSubject,
-				cloudauth.WithTrustPolicySource(p)))
+				core.WithTrustPolicySource(p)))
 		}
 	}
 
-	report := cloudauth.RunValidation(ctx, ref, validators)
+	report := core.RunValidation(ctx, ref, validators)
 	return report, nil
 }
 
-// Delete implements cloudauth.LifecycleProvider.
-func (p *Provider) Delete(ctx context.Context, ref cloudauth.MechanismRef, opts cloudauth.DeleteOptions) error {
+// Delete implements core.LifecycleProvider.
+func (p *Provider) Delete(ctx context.Context, ref core.MechanismRef, opts core.DeleteOptions) error {
+	if !opts.DryRun {
+		if err := p.requireClients(true, false); err != nil {
+			return err
+		}
+	}
 	if opts.DryRun {
 		return nil
 	}
 
 	switch ref.Type {
-	case cloudauth.MechanismAzureFederatedCredential:
+	case core.MechanismAzureFederatedCredential:
 		// Delete federated credential first
 		if appID := ref.ResourceIDs["app_object_id"]; appID != "" {
 			if credID := ref.ResourceIDs["federated_credential_id"]; credID != "" {
 				if err := p.graphClient.DeleteFederatedIdentityCredential(ctx, appID, credID); err != nil {
 					if !isNotFoundError(err) {
-						return cloudauth.ErrPermission("failed to delete federated credential").WithCause(err)
+						return core.ErrPermission("failed to delete federated credential").WithCause(err)
 					}
 				}
 			}
@@ -643,7 +717,7 @@ func (p *Provider) Delete(ctx context.Context, ref cloudauth.MechanismRef, opts 
 			if ref.Owned {
 				if err := p.graphClient.DeleteApplication(ctx, appID); err != nil {
 					if !isNotFoundError(err) {
-						return cloudauth.ErrPermission("failed to delete application").WithCause(err)
+						return core.ErrPermission("failed to delete application").WithCause(err)
 					}
 				}
 			}
@@ -657,7 +731,7 @@ func (p *Provider) Delete(ctx context.Context, ref cloudauth.MechanismRef, opts 
 					ref.ResourceIDs["resource_group"],
 					identityName, credName)
 				if err != nil && !isNotFoundError(err) {
-					return cloudauth.ErrPermission("failed to delete federated credential").WithCause(err)
+					return core.ErrPermission("failed to delete federated credential").WithCause(err)
 				}
 			}
 
@@ -668,111 +742,13 @@ func (p *Provider) Delete(ctx context.Context, ref cloudauth.MechanismRef, opts 
 					ref.ResourceIDs["resource_group"],
 					identityName)
 				if err != nil && !isNotFoundError(err) {
-					return cloudauth.ErrPermission("failed to delete managed identity").WithCause(err)
+					return core.ErrPermission("failed to delete managed identity").WithCause(err)
 				}
 			}
 		}
 	}
 
 	return nil
-}
-
-// Token implements cloudauth.TokenProvider.
-// It exchanges a federated identity token (from an external IdP) for an Azure AD access token.
-//
-// TokenRequest fields:
-//   - TargetIdentity: The Azure AD client/application ID or managed identity client ID (required)
-//   - SourceIdentity: The federated identity token (JWT) from the external IdP (required)
-//   - Audience: The tenant ID for Azure AD (required)
-//   - Scopes: The Azure resource scopes to request (optional, defaults to ARM management)
-//   - Duration: Not used (Azure controls token lifetime)
-//
-// The token exchange uses the OAuth 2.0 client credentials flow with federated credentials:
-//
-//	POST https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token
-//	grant_type=client_credentials
-//	client_id={client_id}
-//	client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer
-//	client_assertion={federated_token}
-//	scope={scope}
-func (p *Provider) Token(ctx context.Context, req cloudauth.TokenRequest) (*cloudauth.TokenResponse, error) {
-	if p.tokenClient == nil {
-		return nil, cloudauth.ErrValidation("Azure token client not configured").
-			WithProvider(cloudauth.Azure).
-			WithDetail("hint", "Configure Azure token client using WithTokenClient option")
-	}
-
-	// Validate required fields
-	if req.TargetIdentity == "" {
-		return nil, cloudauth.ErrValidation("TargetIdentity (client ID) is required").
-			WithProvider(cloudauth.Azure)
-	}
-
-	if req.Audience == "" {
-		return nil, cloudauth.ErrValidation("Audience (tenant ID) is required").
-			WithProvider(cloudauth.Azure)
-	}
-
-	// The federated token should be passed via SourceIdentity
-	federatedToken := req.SourceIdentity
-	if federatedToken == "" {
-		return nil, cloudauth.ErrValidation("SourceIdentity (federated token) is required").
-			WithProvider(cloudauth.Azure).
-			WithDetail("hint", "Pass the external IdP's JWT token in SourceIdentity field")
-	}
-
-	// Build scope from request scopes or use default
-	scope := "https://management.azure.com/.default"
-	if len(req.Scopes) > 0 {
-		// Azure expects space-separated scopes
-		scope = ""
-		for i, s := range req.Scopes {
-			if i > 0 {
-				scope += " "
-			}
-			scope += s
-		}
-	}
-
-	// Exchange the federated token for an Azure AD token
-	input := &ExchangeTokenInput{
-		TenantID:            req.Audience,
-		ClientID:            req.TargetIdentity,
-		FederatedToken:      federatedToken,
-		Scope:               scope,
-		ClientAssertionType: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
-	}
-
-	output, err := p.tokenClient.ExchangeToken(ctx, input)
-	if err != nil {
-		return nil, cloudauth.ErrAuth("failed to exchange federated token for Azure AD token").
-			WithCause(err).
-			WithProvider(cloudauth.Azure).
-			WithResource("application", req.TargetIdentity)
-	}
-
-	// Build response with token details
-	credentials := map[string]interface{}{
-		"access_token": output.AccessToken,
-		"token_type":   output.TokenType,
-		"expires_in":   output.ExpiresIn,
-		"expires_on":   output.ExpiresOn.Format(time.RFC3339),
-		"resource":     output.Resource,
-		"tenant_id":    req.Audience,
-		"client_id":    req.TargetIdentity,
-	}
-
-	credentialsJSON, err := json.Marshal(credentials)
-	if err != nil {
-		return nil, cloudauth.ErrInternal("failed to marshal credentials").WithCause(err)
-	}
-
-	return &cloudauth.TokenResponse{
-		Token:     string(credentialsJSON),
-		ExpiresAt: output.ExpiresOn.Unix(),
-		TokenType: output.TokenType,
-		Scopes:    req.Scopes,
-	}, nil
 }
 
 // GenerateAWSRoleAssumptionToken creates an OIDC identity token that can be used
@@ -796,20 +772,20 @@ func (p *Provider) Token(ctx context.Context, req cloudauth.TokenRequest) (*clou
 //	// Use token.Token with AWS provider's Token() method
 func (p *Provider) GenerateAWSRoleAssumptionToken(ctx context.Context, input *AWSRoleAssumptionInput) (*CrossCloudTokenOutput, error) {
 	if p.tokenClient == nil {
-		return nil, cloudauth.ErrValidation("Azure token client not configured").
-			WithProvider(cloudauth.Azure).
+		return nil, core.ErrValidation("Azure token client not configured").
+			WithProvider(core.Azure).
 			WithDetail("hint", "Configure Azure token client using WithTokenClient option")
 	}
 
 	// Validate input
 	if input.TenantID == "" {
-		return nil, cloudauth.ErrValidation("TenantID is required").WithProvider(cloudauth.Azure)
+		return nil, core.ErrValidation("TenantID is required").WithProvider(core.Azure)
 	}
 	if input.ClientID == "" {
-		return nil, cloudauth.ErrValidation("ClientID is required").WithProvider(cloudauth.Azure)
+		return nil, core.ErrValidation("ClientID is required").WithProvider(core.Azure)
 	}
 	if input.RoleARN == "" {
-		return nil, cloudauth.ErrValidation("RoleARN is required").WithProvider(cloudauth.Azure)
+		return nil, core.ErrValidation("RoleARN is required").WithProvider(core.Azure)
 	}
 
 	// For AWS, we need to get a token with AWS STS as the audience
@@ -828,9 +804,9 @@ func (p *Provider) GenerateAWSRoleAssumptionToken(ctx context.Context, input *AW
 
 		miTokenOutput, err := p.tokenClient.GetManagedIdentityToken(ctx, miTokenInput)
 		if err != nil {
-			return nil, cloudauth.ErrAuth("failed to get managed identity token for AWS").
+			return nil, core.ErrAuth("failed to get managed identity token for AWS").
 				WithCause(err).
-				WithProvider(cloudauth.Azure)
+				WithProvider(core.Azure)
 		}
 
 		token = miTokenOutput.AccessToken
@@ -839,8 +815,8 @@ func (p *Provider) GenerateAWSRoleAssumptionToken(ctx context.Context, input *AW
 		// For app registrations, we would need to use a different flow
 		// Since we don't have the app secret, we need to be running in a context
 		// where we can get an identity token (e.g., Azure Functions, AKS with workload identity)
-		return nil, cloudauth.ErrValidation("App registration token generation requires running in an Azure environment with workload identity").
-			WithProvider(cloudauth.Azure).
+		return nil, core.ErrValidation("App registration token generation requires running in an Azure environment with workload identity").
+			WithProvider(core.Azure).
 			WithDetail("hint", "Set UseManagedIdentity=true when running on Azure, or use workload identity federation")
 	}
 
@@ -875,26 +851,26 @@ func (p *Provider) GenerateAWSRoleAssumptionToken(ctx context.Context, input *AW
 //	// Use token.Token with GCP provider's Token() method
 func (p *Provider) GenerateGCPWorkloadIdentityToken(ctx context.Context, input *GCPWorkloadIdentityInput) (*CrossCloudTokenOutput, error) {
 	if p.tokenClient == nil {
-		return nil, cloudauth.ErrValidation("Azure token client not configured").
-			WithProvider(cloudauth.Azure).
+		return nil, core.ErrValidation("Azure token client not configured").
+			WithProvider(core.Azure).
 			WithDetail("hint", "Configure Azure token client using WithTokenClient option")
 	}
 
 	// Validate input
 	if input.TenantID == "" {
-		return nil, cloudauth.ErrValidation("TenantID is required").WithProvider(cloudauth.Azure)
+		return nil, core.ErrValidation("TenantID is required").WithProvider(core.Azure)
 	}
 	if input.ClientID == "" {
-		return nil, cloudauth.ErrValidation("ClientID is required").WithProvider(cloudauth.Azure)
+		return nil, core.ErrValidation("ClientID is required").WithProvider(core.Azure)
 	}
 	if input.ProjectNumber == "" {
-		return nil, cloudauth.ErrValidation("ProjectNumber is required").WithProvider(cloudauth.Azure)
+		return nil, core.ErrValidation("ProjectNumber is required").WithProvider(core.Azure)
 	}
 	if input.PoolID == "" {
-		return nil, cloudauth.ErrValidation("PoolID is required").WithProvider(cloudauth.Azure)
+		return nil, core.ErrValidation("PoolID is required").WithProvider(core.Azure)
 	}
 	if input.ProviderID == "" {
-		return nil, cloudauth.ErrValidation("ProviderID is required").WithProvider(cloudauth.Azure)
+		return nil, core.ErrValidation("ProviderID is required").WithProvider(core.Azure)
 	}
 
 	// Build the GCP audience (full resource name of the WIF provider)
@@ -913,17 +889,17 @@ func (p *Provider) GenerateGCPWorkloadIdentityToken(ctx context.Context, input *
 
 		miTokenOutput, err := p.tokenClient.GetManagedIdentityToken(ctx, miTokenInput)
 		if err != nil {
-			return nil, cloudauth.ErrAuth("failed to get managed identity token for GCP").
+			return nil, core.ErrAuth("failed to get managed identity token for GCP").
 				WithCause(err).
-				WithProvider(cloudauth.Azure)
+				WithProvider(core.Azure)
 		}
 
 		token = miTokenOutput.AccessToken
 		expiresAt = miTokenOutput.ExpiresOn
 	} else {
 		// For app registrations, similar limitation as AWS
-		return nil, cloudauth.ErrValidation("App registration token generation requires running in an Azure environment with workload identity").
-			WithProvider(cloudauth.Azure).
+		return nil, core.ErrValidation("App registration token generation requires running in an Azure environment with workload identity").
+			WithProvider(core.Azure).
 			WithDetail("hint", "Set UseManagedIdentity=true when running on Azure, or use workload identity federation")
 	}
 
@@ -942,7 +918,7 @@ func isNotFoundError(err error) bool {
 	if err == nil {
 		return false
 	}
-	return cloudauth.IsCategory(err, cloudauth.ErrCategoryNotFound)
+	return core.IsCategory(err, core.ErrCategoryNotFound)
 }
 
 // Validators
@@ -956,24 +932,24 @@ func (v *appExistsValidator) ID() string          { return "azure_app_exists" }
 func (v *appExistsValidator) Name() string        { return "Application Exists" }
 func (v *appExistsValidator) Description() string { return "Checks if the Azure AD application exists" }
 
-func (v *appExistsValidator) Validate(ctx context.Context, ref cloudauth.MechanismRef) cloudauth.ValidationCheck {
-	check := cloudauth.ValidationCheck{
+func (v *appExistsValidator) Validate(ctx context.Context, ref core.MechanismRef) core.ValidationCheck {
+	check := core.ValidationCheck{
 		ID:          v.ID(),
 		Name:        v.Name(),
 		Description: v.Description(),
-		Severity:    cloudauth.SeverityCritical,
+		Severity:    core.SeverityCritical,
 		Evidence:    map[string]interface{}{"app_id": v.appID},
 	}
 
 	app, err := v.client.GetApplication(ctx, v.appID)
 	if err != nil {
-		check.Status = cloudauth.CheckStatusFailed
+		check.Status = core.CheckStatusFailed
 		check.Evidence["error"] = err.Error()
 		check.Remediation = "Create the application or run setup again"
 		return check
 	}
 
-	check.Status = cloudauth.CheckStatusPassed
+	check.Status = core.CheckStatusPassed
 	check.Evidence["display_name"] = app.DisplayName
 	return check
 }
@@ -990,24 +966,24 @@ func (v *federatedCredentialExistsValidator) Description() string {
 	return "Checks if the federated credential exists"
 }
 
-func (v *federatedCredentialExistsValidator) Validate(ctx context.Context, ref cloudauth.MechanismRef) cloudauth.ValidationCheck {
-	check := cloudauth.ValidationCheck{
+func (v *federatedCredentialExistsValidator) Validate(ctx context.Context, ref core.MechanismRef) core.ValidationCheck {
+	check := core.ValidationCheck{
 		ID:          v.ID(),
 		Name:        v.Name(),
 		Description: v.Description(),
-		Severity:    cloudauth.SeverityCritical,
+		Severity:    core.SeverityCritical,
 		Evidence:    map[string]interface{}{"credential_id": v.credID},
 	}
 
 	cred, err := v.client.GetFederatedIdentityCredential(ctx, v.appID, v.credID)
 	if err != nil {
-		check.Status = cloudauth.CheckStatusFailed
+		check.Status = core.CheckStatusFailed
 		check.Evidence["error"] = err.Error()
 		check.Remediation = "Create the federated credential or run setup again"
 		return check
 	}
 
-	check.Status = cloudauth.CheckStatusPassed
+	check.Status = core.CheckStatusPassed
 	check.Evidence["issuer"] = cred.Issuer
 	check.Evidence["subject"] = cred.Subject
 	return check
@@ -1026,24 +1002,24 @@ func (v *managedIdentityExistsValidator) Description() string {
 	return "Checks if the managed identity exists"
 }
 
-func (v *managedIdentityExistsValidator) Validate(ctx context.Context, ref cloudauth.MechanismRef) cloudauth.ValidationCheck {
-	check := cloudauth.ValidationCheck{
+func (v *managedIdentityExistsValidator) Validate(ctx context.Context, ref core.MechanismRef) core.ValidationCheck {
+	check := core.ValidationCheck{
 		ID:          v.ID(),
 		Name:        v.Name(),
 		Description: v.Description(),
-		Severity:    cloudauth.SeverityCritical,
+		Severity:    core.SeverityCritical,
 		Evidence:    map[string]interface{}{"identity_name": v.identityName},
 	}
 
 	mi, err := v.client.GetManagedIdentity(ctx, v.subscriptionID, v.resourceGroup, v.identityName)
 	if err != nil {
-		check.Status = cloudauth.CheckStatusFailed
+		check.Status = core.CheckStatusFailed
 		check.Evidence["error"] = err.Error()
 		check.Remediation = "Create the managed identity or run setup again"
 		return check
 	}
 
-	check.Status = cloudauth.CheckStatusPassed
+	check.Status = core.CheckStatusPassed
 	check.Evidence["client_id"] = mi.ClientID
 	check.Evidence["principal_id"] = mi.PrincipalID
 	return check
@@ -1051,5 +1027,5 @@ func (v *managedIdentityExistsValidator) Validate(ctx context.Context, ref cloud
 
 func init() {
 	// Register with default registry
-	cloudauth.Register(New())
+	core.Register(New())
 }

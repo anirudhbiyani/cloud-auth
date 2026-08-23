@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
 func TestScrubberRedactsRegisteredSecrets(t *testing.T) {
@@ -94,11 +94,11 @@ func TestReportNeverContainsCredentialValues(t *testing.T) {
 	// STS error body. Neither may survive into the report.
 	leakyErr := fmt.Errorf("STS rejected assertion %s and key %s: %w",
 		"eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJsZWFrIn0.c2lnbmF0dXJlLXZhbHVlLWhlcmUtMDAw",
-		creds.SecretAccessKey, cloudauth.ErrTrustMissing)
+		creds.SecretAccessKey, core.ErrTrustMissing)
 
 	r := testRunner(&fakeExchanger{creds: creds, err: nil})
 	r.Probes = map[string]Probe{
-		"leaky-probe": func(context.Context, *cloudauth.Credentials, Case) (string, error) {
+		"leaky-probe": func(context.Context, *core.Credentials, Case) (string, error) {
 			return "session token was " + creds.SessionToken, leakyErr
 		},
 	}
@@ -106,7 +106,7 @@ func TestReportNeverContainsCredentialValues(t *testing.T) {
 	c.Probe = "leaky-probe"
 
 	results := r.Run(context.Background(), []Case{c})
-	rep := BuildReport("run-1", RuntimeGCPGCE, &cloudauth.Runtime{Cloud: cloudauth.GCP, SubRuntime: "gce"}, results, time.Now(), 0)
+	rep := BuildReport("run-1", RuntimeGCPGCE, &core.Runtime{Cloud: core.GCP, SubRuntime: "gce"}, results, time.Now(), 0)
 
 	var buf bytes.Buffer
 	if err := rep.WriteJSON(&buf, r.Scrubber); err != nil {

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
 type stubGraph struct {
@@ -40,9 +40,9 @@ const (
 	aud     = "api://AzureADTokenExchange"
 )
 
-func appRef() cloudauth.MechanismRef {
-	return cloudauth.MechanismRef{
-		ID: "m", Type: cloudauth.MechanismAzureFederatedCredential,
+func appRef() core.MechanismRef {
+	return core.MechanismRef{
+		ID: "m", Type: core.MechanismAzureFederatedCredential,
 		ResourceIDs: map[string]string{
 			"app_object_id":           "app-1",
 			"federated_credential_id": "fic-1",
@@ -52,9 +52,9 @@ func appRef() cloudauth.MechanismRef {
 	}
 }
 
-func uamiRef() cloudauth.MechanismRef {
-	return cloudauth.MechanismRef{
-		ID: "m", Type: cloudauth.MechanismAzureFederatedCredential,
+func uamiRef() core.MechanismRef {
+	return core.MechanismRef{
+		ID: "m", Type: core.MechanismAzureFederatedCredential,
 		ResourceIDs: map[string]string{
 			"identity_name":             "uami-1",
 			"resource_group":            "rg-1",
@@ -102,10 +102,10 @@ func TestAzureCaseOnlyMismatchIsDiagnosed(t *testing.T) {
 		Subject:   subject,
 		Audiences: []string{aud},
 	}}}
-	v := cloudauth.NewTrustPolicyMatchValidator(issuer, aud, subject,
-		cloudauth.WithTrustPolicySource(p))
+	v := core.NewTrustPolicyMatchValidator(issuer, aud, subject,
+		core.WithTrustPolicySource(p))
 	got := v.Validate(context.Background(), appRef())
-	if got.Status != cloudauth.CheckStatusFailed {
+	if got.Status != core.CheckStatusFailed {
 		t.Fatalf("status = %s, want failed", got.Status)
 	}
 	if !strings.Contains(strings.ToLower(got.Message), "case") {
@@ -122,7 +122,7 @@ func TestAzureTrustPolicyErrors(t *testing.T) {
 	})
 	t.Run("ref identifying neither an app nor a managed identity", func(t *testing.T) {
 		p := &Provider{}
-		if _, err := p.TrustPolicy(context.Background(), cloudauth.MechanismRef{ID: "x"}); err == nil {
+		if _, err := p.TrustPolicy(context.Background(), core.MechanismRef{ID: "x"}); err == nil {
 			t.Error("expected an error when the ref names no federated credential")
 		}
 	})
@@ -143,6 +143,6 @@ func TestAzureGrantedPoliciesReturnsRoleDefinitions(t *testing.T) {
 }
 
 func TestAzureProviderSatisfiesInterfaces(t *testing.T) {
-	var _ cloudauth.TrustPolicySource = (*Provider)(nil)
-	var _ cloudauth.GrantedPolicySource = (*Provider)(nil)
+	var _ core.TrustPolicySource = (*Provider)(nil)
+	var _ core.GrantedPolicySource = (*Provider)(nil)
 }
