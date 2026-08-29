@@ -5,11 +5,20 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
+)
+
+// IAM's own bounds for a role's maximum session duration. Mirrors the range
+// core.AWSRoleTrustOIDCSpec validates, so a library caller bypassing the spec
+// gets the same answer the CLI would give.
+const (
+	iamMinSessionDuration = 3600
+	iamMaxSessionDuration = 43200
 )
 
 // This file is the concrete IAMClient: the bridge between the provider's
@@ -46,11 +55,36 @@ type realIAMClient struct{ api iamAPI }
 // compile-time proof the wrapper satisfies the provider's interface.
 var _ IAMClient = (*realIAMClient)(nil)
 
+// credentialResolveTimeout bounds how long the SDK's default chain may spend
+// looking for credentials.
+//
+// The chain ends at EC2 IMDS, and off-EC2 that endpoint is a link-local address
+// nothing answers. With the SDK's own retries that took roughly two minutes to
+// give up, which a CLI user reads as a hang rather than "no credentials here" —
+// including on `setup --dry-run`, which should not need credentials at all.
+const credentialResolveTimeout = 10 * time.Second
+
 // NewIAMClient builds an IAMClient from the ambient AWS configuration
 // (environment, shared config/credentials, SSO, instance role — whatever the
 // SDK's default chain resolves).
+//
+// Note which identity that is: whatever the ambient chain happens to resolve,
+// which on a host with AWS_ACCESS_KEY_ID set is not the instance role. Callers
+// that need a specific identity should pass config options rather than relying
+// on the default.
 func NewIAMClient(ctx context.Context, optFns ...func(*awsconfig.LoadOptions) error) (IAMClient, error) {
-	cfg, err := awsconfig.LoadDefaultConfig(ctx, optFns...)
+	// Bound the credential lookup, but keep the returned client tied to the
+	// caller's context for actual API calls.
+	loadCtx, cancel := context.WithTimeout(ctx, credentialResolveTimeout)
+	defer cancel()
+
+	opts := append([]func(*awsconfig.LoadOptions) error{
+		// Cap the IMDS probe rather than waiting out the default retry budget.
+		awsconfig.WithEC2IMDSRegion(),
+		awsconfig.WithRetryMaxAttempts(2),
+	}, optFns...)
+
+	cfg, err := awsconfig.LoadDefaultConfig(loadCtx, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("aws: loading configuration: %w", err)
 	}
@@ -126,6 +160,14 @@ func (c *realIAMClient) CreateRole(ctx context.Context, in *CreateRoleInput) (*R
 		req.Description = aws.String(in.Description)
 	}
 	if in.MaxSessionDuration > 0 {
+		// Reject rather than convert. int -> int32 truncation turns 2^32+3600
+		// into 3600: a silently shortened session that still looks valid to
+		// every caller. Spec-driven callers are already bounds-checked in
+		// core, but CreateRoleInput is exported and this is the last gate.
+		if in.MaxSessionDuration < iamMinSessionDuration || in.MaxSessionDuration > iamMaxSessionDuration {
+			return nil, fmt.Errorf("aws: MaxSessionDuration %d out of range (%d-%d seconds)",
+				in.MaxSessionDuration, iamMinSessionDuration, iamMaxSessionDuration)
+		}
 		req.MaxSessionDuration = aws.Int32(int32(in.MaxSessionDuration))
 	}
 	if in.PermissionsBoundary != "" {

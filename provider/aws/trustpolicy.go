@@ -7,17 +7,17 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// This file implements the validation source interfaces from cloudauth, so the
+// This file implements the validation source interfaces from core, so the
 // core's trust-policy and permission checks actually run against live IAM state
-// instead of reporting "skipped". cloudauth is the leaf package (providers
+// instead of reporting "skipped". core is the leaf package (providers
 // import it, never the reverse), so the dependency is inverted through these
 // interfaces.
 var (
-	_ cloudauth.TrustPolicySource   = (*Provider)(nil)
-	_ cloudauth.GrantedPolicySource = (*Provider)(nil)
+	_ core.TrustPolicySource   = (*Provider)(nil)
+	_ core.GrantedPolicySource = (*Provider)(nil)
 )
 
 // iamPolicyDoc mirrors an IAM policy document. Several fields are polymorphic
@@ -84,13 +84,18 @@ func issuerFromFederatedPrincipal(principal string) string {
 
 // TrustPolicy reads the role's live assume-role policy and normalizes it into
 // the provider-neutral shape the core validator compares against.
-func (p *Provider) TrustPolicy(ctx context.Context, ref cloudauth.MechanismRef) (*cloudauth.TrustPolicy, error) {
+func (p *Provider) TrustPolicy(ctx context.Context, ref core.MechanismRef) (*core.TrustPolicy, error) {
 	roleName := ref.ResourceIDs["role_name"]
 	if roleName == "" {
 		return nil, fmt.Errorf("aws: mechanism ref %q has no role_name; cannot read its trust policy", ref.ID)
 	}
 
-	role, err := p.client.GetRole(ctx, roleName)
+	client, err := p.iam(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("aws: resolving IAM client: %w", err)
+	}
+
+	role, err := client.GetRole(ctx, roleName)
 	if err != nil {
 		return nil, fmt.Errorf("aws: reading role %s: %w", roleName, err)
 	}
@@ -109,7 +114,7 @@ func (p *Provider) TrustPolicy(ctx context.Context, ref cloudauth.MechanismRef) 
 		return nil, fmt.Errorf("aws: parsing trust policy for role %s: %w", roleName, err)
 	}
 
-	tp := &cloudauth.TrustPolicy{Raw: doc}
+	tp := &core.TrustPolicy{Raw: doc}
 	seenAud := map[string]bool{}
 	seenSub := map[string]bool{}
 
@@ -161,17 +166,22 @@ func (p *Provider) TrustPolicy(ctx context.Context, ref cloudauth.MechanismRef) 
 // This verifies attachment, which is what catches drift and accidental
 // detachment. It is not an effective-permission simulation, so it cannot detect
 // a managed policy whose contents grant less than its name suggests.
-func (p *Provider) GrantedPolicies(ctx context.Context, ref cloudauth.MechanismRef) ([]string, error) {
+func (p *Provider) GrantedPolicies(ctx context.Context, ref core.MechanismRef) ([]string, error) {
 	roleName := ref.ResourceIDs["role_name"]
 	if roleName == "" {
 		return nil, fmt.Errorf("aws: mechanism ref %q has no role_name; cannot list its policies", ref.ID)
 	}
 
-	attached, err := p.client.ListAttachedRolePolicies(ctx, roleName)
+	client, err := p.iam(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("aws: resolving IAM client: %w", err)
+	}
+
+	attached, err := client.ListAttachedRolePolicies(ctx, roleName)
 	if err != nil {
 		return nil, fmt.Errorf("aws: listing attached policies for role %s: %w", roleName, err)
 	}
-	inline, err := p.client.ListRolePolicies(ctx, roleName)
+	inline, err := client.ListRolePolicies(ctx, roleName)
 	if err != nil {
 		return nil, fmt.Errorf("aws: listing inline policies for role %s: %w", roleName, err)
 	}

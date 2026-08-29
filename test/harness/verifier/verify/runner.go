@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
 // Exchanger is the one cloud-touching dependency of the runner. *broker.Broker
 // satisfies it as-is: the verifier drives cloud-auth's own detect→mint→exchange
 // orchestrator rather than reimplementing any part of it.
 type Exchanger interface {
-	Exchange(ctx context.Context, target cloudauth.Target) (*cloudauth.Credentials, *cloudauth.Runtime, error)
+	Exchange(ctx context.Context, target core.Target) (*core.Credentials, *core.Runtime, error)
 }
 
 // Probe optionally proves the returned credentials actually work against the
@@ -21,7 +21,7 @@ type Exchanger interface {
 // implementation) is reported, never fatal, unless Runner.StrictProbe is set.
 // A probe MUST NOT return credential material in its detail string; the
 // Scrubber will redact it regardless.
-type Probe func(ctx context.Context, creds *cloudauth.Credentials, c Case) (detail string, err error)
+type Probe func(ctx context.Context, creds *core.Credentials, c Case) (detail string, err error)
 
 // DefaultSkew is the clock-drift tolerance applied to credential expiry.
 const DefaultSkew = 60 * time.Second
@@ -163,7 +163,7 @@ func (r *Runner) assertExpectedError(res *CaseResult, c Case, exErr, wantErr err
 
 // assertSuccess implements the positive half: real, non-empty, unexpired
 // credentials, plus the optional probe.
-func (r *Runner) assertSuccess(ctx context.Context, res *CaseResult, c Case, creds *cloudauth.Credentials, exErr error) {
+func (r *Runner) assertSuccess(ctx context.Context, res *CaseResult, c Case, creds *core.Credentials, exErr error) {
 	if exErr != nil {
 		res.Error = "exchange failed: " + errSummary(exErr)
 		if s, ok := knownSentinel(exErr); ok {
@@ -193,7 +193,7 @@ func (r *Runner) assertSuccess(ctx context.Context, res *CaseResult, c Case, cre
 
 // runProbe invokes a registered probe, containing both its errors and its
 // panics: probe code talks to third-party APIs and must never take the run down.
-func (r *Runner) runProbe(ctx context.Context, c Case, creds *cloudauth.Credentials) (pr ProbeResult) {
+func (r *Runner) runProbe(ctx context.Context, c Case, creds *core.Credentials) (pr ProbeResult) {
 	pr = ProbeResult{Name: c.Probe, Status: ProbeUnimplemented,
 		Detail: fmt.Sprintf("no probe named %q is registered in this build; credential validity was still asserted", c.Probe)}
 
@@ -220,19 +220,19 @@ func (r *Runner) runProbe(ctx context.Context, c Case, creds *cloudauth.Credenti
 
 // validateCredentials asserts the credentials are present, populated for their
 // cloud, and not (nearly) expired.
-func validateCredentials(c *cloudauth.Credentials, now time.Time, skew time.Duration) error {
+func validateCredentials(c *core.Credentials, now time.Time, skew time.Duration) error {
 	if c == nil {
 		return errors.New("exchange returned no credentials")
 	}
 	switch c.Cloud {
-	case cloudauth.AWS:
+	case core.AWS:
 		if c.AccessKeyID == "" || c.SecretAccessKey == "" {
 			return errors.New("aws credentials are missing the access key id / secret access key")
 		}
 		if c.SessionToken == "" {
 			return errors.New("aws credentials are missing the session token (federated creds are always temporary)")
 		}
-	case cloudauth.GCP, cloudauth.Azure:
+	case core.GCP, core.Azure:
 		if c.AccessToken == "" {
 			return fmt.Errorf("%s credentials are missing the access token", c.Cloud)
 		}
@@ -260,17 +260,48 @@ func knownSentinel(err error) (string, bool) {
 	return "", false
 }
 
-func identityFromTarget(t cloudauth.Target) Identity {
+// The report is deliberately cloud-agnostic: one shape for every pair, so the
+// matrix is readable. These accessors pull whichever fields the concrete target
+// happens to carry.
+func roleOf(t core.Target) string {
+	if a, ok := t.(core.AWSTarget); ok {
+		return a.RoleARN
+	}
+	return ""
+}
+
+func poolOf(t core.Target) string {
+	if g, ok := t.(core.GCPTarget); ok {
+		return g.WorkloadIdentityPool
+	}
+	return ""
+}
+
+func tenantOf(t core.Target) string {
+	if z, ok := t.(core.AzureTarget); ok {
+		return z.Tenant
+	}
+	return ""
+}
+
+func clientIDOf(t core.Target) string {
+	if z, ok := t.(core.AzureTarget); ok {
+		return z.ClientID
+	}
+	return ""
+}
+
+func identityFromTarget(t core.Target) Identity {
 	return Identity{
-		Role:                 t.Role,
-		WorkloadIdentityPool: t.WorkloadIdentityPool,
-		Tenant:               t.Tenant,
-		ClientID:             t.ClientID,
-		Audience:             t.Audience,
+		Role:                 roleOf(t),
+		WorkloadIdentityPool: poolOf(t),
+		Tenant:               tenantOf(t),
+		ClientID:             clientIDOf(t),
+		Audience:             t.Audience(),
 	}
 }
 
-func mergeRuntimeIdentity(id *Identity, rt *cloudauth.Runtime) {
+func mergeRuntimeIdentity(id *Identity, rt *core.Runtime) {
 	if rt == nil {
 		return
 	}

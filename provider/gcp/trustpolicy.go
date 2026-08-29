@@ -6,15 +6,15 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// Implements the cloudauth validation source interfaces so the core's
-// trust-policy and permission checks run against live GCP state. cloudauth is
+// Implements core's validation source interfaces so its
+// trust-policy and permission checks run against live GCP state. core is
 // the leaf package, so the dependency is inverted through these interfaces.
 var (
-	_ cloudauth.TrustPolicySource   = (*Provider)(nil)
-	_ cloudauth.GrantedPolicySource = (*Provider)(nil)
+	_ core.TrustPolicySource   = (*Provider)(nil)
+	_ core.GrantedPolicySource = (*Provider)(nil)
 )
 
 // celLiteral extracts double-quoted string literals from a CEL attribute
@@ -55,7 +55,10 @@ func subjectsFromAttributeCondition(cond string) []string {
 }
 
 // TrustPolicy reads the live workload identity pool provider and normalizes it.
-func (p *Provider) TrustPolicy(ctx context.Context, ref cloudauth.MechanismRef) (*cloudauth.TrustPolicy, error) {
+func (p *Provider) TrustPolicy(ctx context.Context, ref core.MechanismRef) (*core.TrustPolicy, error) {
+	if err := p.requireClients(true, false); err != nil {
+		return nil, err
+	}
 	providerName := ref.ResourceIDs["provider_name"]
 	if providerName == "" {
 		return nil, fmt.Errorf("gcp: mechanism ref %q has no provider_name; cannot read its trust configuration", ref.ID)
@@ -69,7 +72,7 @@ func (p *Provider) TrustPolicy(ctx context.Context, ref cloudauth.MechanismRef) 
 		return nil, fmt.Errorf("gcp: workload identity pool provider %s not found", providerName)
 	}
 
-	tp := &cloudauth.TrustPolicy{
+	tp := &core.TrustPolicy{
 		Subjects: subjectsFromAttributeCondition(wp.AttributeCondition),
 		Raw:      wp.AttributeCondition,
 	}
@@ -112,7 +115,10 @@ func (p *Provider) TrustPolicy(ctx context.Context, ref cloudauth.MechanismRef) 
 // As on AWS this verifies bindings, not effective permissions: it catches a role
 // that was removed or never granted, but not a custom role whose contents were
 // narrowed.
-func (p *Provider) GrantedPolicies(ctx context.Context, ref cloudauth.MechanismRef) ([]string, error) {
+func (p *Provider) GrantedPolicies(ctx context.Context, ref core.MechanismRef) ([]string, error) {
+	if err := p.requireClients(false, true); err != nil {
+		return nil, err
+	}
 	sa := ref.ResourceIDs["service_account_email"]
 	if sa == "" {
 		return nil, fmt.Errorf("gcp: mechanism ref %q has no service_account_email; cannot list its roles", ref.ID)

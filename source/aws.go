@@ -8,20 +8,32 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 	"github.com/anirudhbiyani/cloud-auth/internal/imds"
 	"github.com/anirudhbiyani/cloud-auth/internal/jwt"
 )
 
 // DefaultSTSEndpoint is the global AWS STS endpoint used to build the
-// GetCallerIdentity proof.
+// GetCallerIdentity proof. It is not used by the outbound-federation path:
+// sts:GetWebIdentityToken is only served regionally.
 const DefaultSTSEndpoint = "https://sts.amazonaws.com"
+
+// defaultSigningRegion is used when no region is configured or discoverable. The
+// proof is verified by GCP against the global endpoint, so the region only has
+// to match what was signed.
+const defaultSigningRegion = "us-east-1"
+
+// credentialResolveTimeout bounds the ambient credential lookup. The default
+// chain ends at link-local IMDS, where nothing answers off-EC2, and the SDK's
+// own retry budget takes minutes to give up.
+const credentialResolveTimeout = 10 * time.Second
 
 // emptyPayloadHash is SHA-256 of the empty string (GetCallerIdentity has no body).
 var emptyPayloadHash = func() string {
@@ -29,9 +41,13 @@ var emptyPayloadHash = func() string {
 	return hex.EncodeToString(sum[:])
 }()
 
-// AWS is the Source Identity Provider for EC2, ECS, and EKS. EC2/ECS mint a
-// SigV4-signed GetCallerIdentity proof; EKS-IRSA mints a projected OIDC token.
-// EKS Pod Identity is detected but flagged non-federatable.
+// AWS is the Source Identity Provider for EC2, ECS, Lambda, and EKS.
+//
+// EKS-IRSA presents its projected OIDC token. EC2, ECS and Lambda have no token
+// of their own, so they mint one: an STS-vended OIDC JWT where the account has
+// enabled outbound identity federation, otherwise a SigV4-signed
+// GetCallerIdentity proof. See AWSProof to pin the choice. EKS Pod Identity is
+// detected but flagged non-federatable.
 type AWS struct {
 	getenv      func(string) string
 	readFile    func(string) ([]byte, error)
@@ -40,6 +56,22 @@ type AWS struct {
 	creds       aws.CredentialsProvider
 	stsEndpoint string
 	k8sClient   k8sTokenMinter // injected for tests; nil => derive in-cluster
+
+	// proof selects the EC2/ECS/Lambda proof kind; see AWSProof.
+	proof AWSProof
+	// proofErr holds an unparseable AWSProofEnv value, surfaced by Mint.
+	proofErr error
+	// stsAPI, when non-nil, is the injected outbound-federation STS client.
+	stsAPI   webIdentityTokenAPI
+	outbound outboundState
+
+	// The ambient config is resolved once and reused. It used to be re-loaded on
+	// every mint, which re-read the shared config file and the SSO cache each
+	// time — and, on a host with no credentials, spent the SDK's whole retry
+	// budget against a link-local IMDS address before failing.
+	cfgOnce sync.Once
+	cfg     aws.Config
+	cfgErr  error
 }
 
 // AWSOption configures an AWS provider.
@@ -70,6 +102,7 @@ func NewAWS(opts ...AWSOption) *AWS {
 	for _, o := range opts {
 		o(a)
 	}
+	a.resolveProof()
 	return a
 }
 
@@ -96,9 +129,9 @@ func (a *AWS) subRuntime() string {
 }
 
 // Detect resolves the AWS sub-runtime, confirming EC2 via IMDS.
-func (a *AWS) Detect(ctx context.Context) (*cloudauth.Runtime, error) {
+func (a *AWS) Detect(ctx context.Context) (*core.Runtime, error) {
 	sub := a.subRuntime()
-	rt := &cloudauth.Runtime{Cloud: cloudauth.AWS, SubRuntime: sub, Federatable: true}
+	rt := &core.Runtime{Cloud: core.AWS, SubRuntime: sub, Federatable: true}
 	switch sub {
 	case "eks-irsa":
 		rt.Subject = a.getenv("AWS_ROLE_ARN")
@@ -109,7 +142,7 @@ func (a *AWS) Detect(ctx context.Context) (*cloudauth.Runtime, error) {
 		if err != nil {
 			// Try a lighter probe; if IMDS is unreachable, we're not on EC2.
 			if _, err2 := a.imds.Get(ctx, "/latest/meta-data/instance-id"); err2 != nil {
-				return nil, fmt.Errorf("%w: %v", cloudauth.ErrNotThisRuntime, err2)
+				return nil, fmt.Errorf("%w: %v", core.ErrNotThisRuntime, err2)
 			}
 		} else {
 			rt.Subject = string(arn)
@@ -119,7 +152,7 @@ func (a *AWS) Detect(ctx context.Context) (*cloudauth.Runtime, error) {
 }
 
 // Mint produces the proof appropriate to the sub-runtime.
-func (a *AWS) Mint(ctx context.Context, audience string) (*cloudauth.SourceToken, error) {
+func (a *AWS) Mint(ctx context.Context, audience string) (*core.SourceToken, error) {
 	if audience == "" {
 		return nil, fmt.Errorf("aws: audience is required")
 	}
@@ -129,13 +162,13 @@ func (a *AWS) Mint(ctx context.Context, audience string) (*cloudauth.SourceToken
 	case "eks-pod-identity":
 		return nil, fmt.Errorf("%w: EKS Pod Identity vends AWS-internal credentials that are not an "+
 			"externally-verifiable token; use an OIDC-native source such as EKS IRSA for cross-cloud federation",
-			cloudauth.ErrNonFederatableSource)
-	default: // ec2, ecs
-		return a.mintSigV4(ctx, audience)
+			core.ErrNonFederatableSource)
+	default: // ec2, ecs, lambda
+		return a.mintPrincipalProof(ctx, audience)
 	}
 }
 
-func (a *AWS) mintIRSA(ctx context.Context, audience string) (*cloudauth.SourceToken, error) {
+func (a *AWS) mintIRSA(ctx context.Context, audience string) (*core.SourceToken, error) {
 	raw, err := a.readFile(a.getenv("AWS_WEB_IDENTITY_TOKEN_FILE"))
 	if err != nil {
 		return nil, fmt.Errorf("aws: reading projected web identity token: %w", err)
@@ -146,8 +179,8 @@ func (a *AWS) mintIRSA(ctx context.Context, audience string) (*cloudauth.SourceT
 	}
 	// Fast path: the on-disk projected token already carries the requested aud.
 	if claims.HasAudience(audience) {
-		return &cloudauth.SourceToken{
-			Kind:     cloudauth.OIDC,
+		return &core.SourceToken{
+			Kind:     core.OIDC,
 			Value:    string(raw),
 			Issuer:   claims.Issuer,
 			Subject:  claims.Subject,
@@ -163,8 +196,8 @@ func (a *AWS) mintIRSA(ctx context.Context, audience string) (*cloudauth.SourceT
 			return nil, fmt.Errorf("aws: %w", err)
 		}
 		minted, _ := jwt.ParseUnverified(token)
-		return &cloudauth.SourceToken{
-			Kind:     cloudauth.OIDC,
+		return &core.SourceToken{
+			Kind:     core.OIDC,
 			Value:    token,
 			Issuer:   minted.Issuer,
 			Subject:  minted.Subject,
@@ -183,11 +216,12 @@ func (a *AWS) mintIRSA(ctx context.Context, audience string) (*cloudauth.SourceT
 // it into the GCP-expected token shape ({url, method, headers}). The audience
 // is carried in the x-goog-cloud-target-resource header, binding the proof to
 // the intended target and defeating replay against another trust.
-func (a *AWS) mintSigV4(ctx context.Context, audience string) (*cloudauth.SourceToken, error) {
-	creds, region, err := a.resolveCreds(ctx)
+func (a *AWS) mintSigV4(ctx context.Context, audience string) (*core.SourceToken, error) {
+	creds, region, src, err := a.resolveCreds(ctx)
 	if err != nil {
 		return nil, err
 	}
+	_ = src // recorded on the token below
 	reqURL := a.stsEndpoint + "/?Action=GetCallerIdentity&Version=2011-06-15"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, nil)
 	if err != nil {
@@ -217,40 +251,77 @@ func (a *AWS) mintSigV4(ctx context.Context, audience string) (*cloudauth.Source
 	if err != nil {
 		return nil, err
 	}
-	return &cloudauth.SourceToken{
-		Kind:     cloudauth.AWSSigV4,
-		Value:    string(value),
-		Subject:  creds.AccessKeyID, // best-effort; the real principal is resolved by STS
+	return &core.SourceToken{
+		Kind:  core.AWSSigV4,
+		Value: string(value),
+		// Best-effort: the real principal is resolved by STS from the signature.
+		// The key id is the only local hint about which identity signed, and on a
+		// host where the ambient chain picked something unexpected it is the thing
+		// that explains why the exchange was refused.
+		Subject:  src.AccessKeyID,
 		Audience: audience,
 	}, nil
 }
 
-// resolveCreds returns the credentials and region for SigV4 signing.
-func (a *AWS) resolveCreds(ctx context.Context) (aws.Credentials, string, error) {
+// ambientConfig loads the SDK's default configuration once.
+//
+// Note what "ambient" means for identity: this resolves whatever the default
+// chain finds — environment variables first, then the shared config profile,
+// then SSO, then the instance role. On an EC2 host with AWS_ACCESS_KEY_ID set,
+// that is NOT the instance role, so the proof is signed by a different principal
+// than Detect reported. Callers who need a specific identity should pass
+// WithAWSCredentials rather than rely on the chain.
+func (a *AWS) ambientConfig(ctx context.Context) (aws.Config, error) {
+	a.cfgOnce.Do(func() {
+		// Bound the lookup: the chain ends at link-local IMDS, and off-EC2 nothing
+		// answers there.
+		loadCtx, cancel := context.WithTimeout(ctx, credentialResolveTimeout)
+		defer cancel()
+		a.cfg, a.cfgErr = awsconfig.LoadDefaultConfig(loadCtx,
+			awsconfig.WithRetryMaxAttempts(2))
+	})
+	return a.cfg, a.cfgErr
+}
+
+// CredentialSource describes which identity resolveCreds used, for diagnostics.
+type CredentialSource struct {
+	// Injected is true when the caller supplied a credentials provider.
+	Injected bool
+	// Provider is the SDK's name for the resolved source, when it reports one.
+	Provider string
+	// AccessKeyID is the resolved key id. Not a secret on its own, and it is what
+	// lets an operator tell which principal actually signed.
+	AccessKeyID string
+}
+
+// resolveCreds returns the credentials and region for SigV4 signing, plus which
+// identity they came from.
+func (a *AWS) resolveCreds(ctx context.Context) (aws.Credentials, string, CredentialSource, error) {
 	region := a.region
 	if a.creds != nil {
 		c, err := a.creds.Retrieve(ctx)
 		if err != nil {
-			return aws.Credentials{}, "", fmt.Errorf("aws: retrieving credentials: %w", err)
+			return aws.Credentials{}, "", CredentialSource{}, fmt.Errorf("aws: retrieving credentials: %w", err)
 		}
 		if region == "" {
-			region = "us-east-1"
+			region = defaultSigningRegion
 		}
-		return c, region, nil
+		return c, region, CredentialSource{Injected: true, Provider: c.Source, AccessKeyID: c.AccessKeyID}, nil
 	}
-	cfg, err := awsconfig.LoadDefaultConfig(ctx)
+
+	cfg, err := a.ambientConfig(ctx)
 	if err != nil {
-		return aws.Credentials{}, "", fmt.Errorf("aws: loading config: %w", err)
+		return aws.Credentials{}, "", CredentialSource{}, fmt.Errorf("aws: loading config: %w", err)
 	}
 	c, err := cfg.Credentials.Retrieve(ctx)
 	if err != nil {
-		return aws.Credentials{}, "", fmt.Errorf("aws: retrieving credentials: %w", err)
+		return aws.Credentials{}, "", CredentialSource{}, fmt.Errorf("aws: retrieving credentials: %w", err)
 	}
 	if region == "" {
 		region = cfg.Region
 	}
 	if region == "" {
-		region = "us-east-1"
+		region = defaultSigningRegion
 	}
-	return c, region, nil
+	return c, region, CredentialSource{Provider: c.Source, AccessKeyID: c.AccessKeyID}, nil
 }

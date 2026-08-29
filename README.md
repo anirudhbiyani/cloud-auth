@@ -9,7 +9,7 @@
   <a href="https://pkg.go.dev/github.com/anirudhbiyani/cloud-auth"><img src="https://pkg.go.dev/badge/github.com/anirudhbiyani/cloud-auth.svg" alt="Go Reference"></a>
   <a href="https://goreportcard.com/report/github.com/anirudhbiyani/cloud-auth"><img src="https://goreportcard.com/badge/github.com/anirudhbiyani/cloud-auth" alt="Go Report Card"></a>
   <a href="https://www.gnu.org/licenses/agpl-3.0"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL-3.0"></a>
-  <img src="https://img.shields.io/badge/Go-1.26.5+-00ADD8?logo=go&logoColor=white" alt="Go Version">
+  <img src="https://img.shields.io/badge/Go-1.27.0+-00ADD8?logo=go&logoColor=white" alt="Go Version">
 </p>
 
 <p align="center">
@@ -74,6 +74,24 @@ Full lifecycle support for major cloud providers:
 | **GitHub OIDC** | ✅ | - | - | - | Token Source |
 | **Kubernetes** | ✅ | - | - | - | Token Source |
 
+### 🔀 Runtime Federation Matrix
+
+Which source runtimes can obtain credentials at which targets, and the proof
+each one presents. This is the `exchange`/`exec` path, not the control plane:
+
+| Source runtime | Proof it mints | → AWS | → GCP | → Azure |
+|---|---|:---:|:---:|:---:|
+| **AWS** — `eks-irsa`, `eks-pod-identity` | OIDC (projected SA token) | ✅ | ✅ | ✅ |
+| **AWS** — `ec2`, `ecs`, `lambda` | OIDC via `sts:GetWebIdentityToken` | ✅ | ✅ | ✅ |
+| **AWS** — `ec2`, `ecs`, `lambda` | SigV4 `GetCallerIdentity` | ✅ | ✅ | ❌ |
+| **GCP** — `gce`, `gke`, `cloud-run`, `cloud-functions` | OIDC (metadata identity token) | ✅ | ✅ | ✅ |
+| **Azure** — `vm`, `aks-workload-identity`, `app-service`, `container-apps` | OIDC (managed identity token) | ✅ | ✅ | ✅ |
+
+Azure Entra accepts **only** RS256 OIDC JWTs. Until AWS shipped outbound
+identity federation, an EC2/ECS/Lambda workload had no OIDC token of its own and
+that cell was a documented gap (`ErrNoFirstClassPath`); the `sts:GetWebIdentityToken`
+path closes it. See [AWS proof selection](#aws-proof-selection).
+
 ### 🔐 Security-First Design
 - **No secrets in output** - Secrets are routed to secure storage, never returned directly
 - **Ownership tracking** - Only delete resources cloud-auth created
@@ -91,14 +109,14 @@ Full lifecycle support for major cloud providers:
 
 **Using Go:**
 ```bash
-go install github.com/anirudhbiyani/cloud-auth/cmd/cloud-auth@latest
+go install github.com/anirudhbiyani/cloud-auth@latest
 ```
 
 **From Source:**
 ```bash
 git clone https://github.com/anirudhbiyani/cloud-auth.git
 cd cloud-auth
-go build -o cloud-auth ./cmd/cloud-auth
+go build -o cloud-auth .
 ```
 
 ### Library
@@ -186,11 +204,45 @@ exchanges it at the target cloud's STS:
 | Command | Description |
 |---------|-------------|
 | `doctor` | Detect the runtime and preflight a target; explains exactly why an exchange would be refused |
-| `exchange` | Obtain short-lived target credentials (`--format env\|json`) |
+| `exchange` | Obtain short-lived target credentials (`--format env\|json\|credential-process`) |
 | `exec` | Mint + exchange, then run a command with the credentials injected (`... -- <cmd>`) |
 | `init` | Print the target-side trust scaffold (Terraform/OpenTofu + CLI). Print-only; never applies changes |
 | `credential-process` | Emit the AWS `credential_process` JSON contract for zero-code SDK integration |
 | `config-validate` | Lint a declarative federation config file |
+
+### AWS proof selection
+
+On EC2, ECS and Lambda the AWS source can prove its identity two ways. Both
+assert the *same* IAM principal — they differ in format, and therefore in which
+target-side trust configuration applies:
+
+| Proof | Minted by | Accepted by |
+|---|---|---|
+| **OIDC** | `sts:GetWebIdentityToken` (AWS IAM outbound identity federation) | AWS, GCP, Azure |
+| **SigV4** | Signed `GetCallerIdentity` request | AWS, GCP |
+
+Outbound identity federation is **opt-in per AWS account**
+(`iam:EnableOutboundWebIdentityFederation`), and the calling principal needs
+`sts:GetWebIdentityToken`. The minted JWT is RS256, bound to exactly one
+audience, valid 15 minutes, and verifiable against the account's OIDC discovery
+document.
+
+Select the proof with `CLOUD_AUTH_AWS_PROOF`, or `source.WithAWSProof(...)` in
+the library:
+
+| Value | Behaviour |
+|---|---|
+| `auto` *(default)* | Prefer OIDC; fall back to SigV4 only when the account has **not** enabled outbound federation. An `AccessDenied` does **not** fall back — the feature is on and this principal is not permitted, which is a policy you need to see. |
+| `oidc` | Require the STS-vended JWT; fail if the account has not enabled it. |
+| `sigv4` | Require the SigV4 proof. GCP-only. |
+
+> **Pin `sigv4` if your GCP workload identity pool has only an `aws` provider.**
+> Under `auto`, the day someone enables outbound federation on the account the
+> source starts presenting an OIDC JWT, and a pool with no `oidc` provider will
+> begin refusing the exchange.
+
+EKS IRSA and Pod Identity are unaffected — they already carry a projected OIDC
+token and never ask STS to vend one.
 
 ### Mechanism Types
 
@@ -317,9 +369,44 @@ Validation checks, and their **current** implementation status:
 > and never silently pass, and `validate` prints a prominent `⚠ INCOMPLETE`
 > banner listing what went unverified. In the library, pair `report.IsValid()`
 > with `report.IsComplete()` — and use `report.SkippedChecks()` to see the gaps.
-> Until trust-policy and permission validation are automated, verify those two
-> manually; each skipped check carries `Remediation` text telling you what to
-> confirm.
+> Every skipped check carries `Remediation` text telling you what to confirm by
+> hand.
+
+### Runtime Configuration File
+
+`exchange`, `exec` and `doctor` accept a declarative config via `--config`;
+`config-validate` lints it. Precedence is **code > env > file**, and validation
+fails closed — an invalid or ambiguous config is a hard error, never a degraded
+fallback.
+
+```yaml
+version: 1
+source:
+  # "auto" (default), a cloud ("aws"), or cloud and sub-runtime ("aws-ec2").
+  # A mismatch is a hard error: a host can satisfy more than one probe, so
+  # pinning lets an operator refuse any identity but the expected one.
+  detect: aws-ec2
+refresh:
+  buffer: 5m
+targets:
+  - name: prod-gcp
+    cloud: gcp
+    audience: //iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/aws-pool/providers/aws-provider
+    workload_identity_pool: projects/123/locations/global/workloadIdentityPools/aws-pool
+    impersonate_service_account: deployer@my-project.iam.gserviceaccount.com
+  - name: prod-azure
+    cloud: azure
+    tenant: 00000000-0000-0000-0000-000000000000
+    client_id: 11111111-1111-1111-1111-111111111111
+    scope: https://management.azure.com/.default
+  - name: prod-aws
+    cloud: aws
+    role: arn:aws:iam::123456789012:role/deploy
+    session_name: cloud-auth
+```
+
+A JSON Schema for editor completion and CI linting lives at
+[`config/cloud-auth.schema.json`](config/cloud-auth.schema.json).
 
 ### State Management
 
@@ -348,7 +435,7 @@ import (
     "fmt"
     "log"
 
-    "github.com/anirudhbiyani/cloud-auth/cloudauth"
+    "github.com/anirudhbiyani/cloud-auth/core"
     _ "github.com/anirudhbiyani/cloud-auth/provider/aws"
     _ "github.com/anirudhbiyani/cloud-auth/provider/gcp"
 )
@@ -357,32 +444,32 @@ func main() {
     ctx := context.Background()
 
     // Define the mechanism specification
-    spec := &cloudauth.AWSRoleTrustOIDCSpec{
+    spec := &core.AWSRoleTrustOIDCSpec{
         RoleName:         "github-actions-role",
         AccountID:        "123456789012",
         OIDCProviderURL:  "https://token.actions.githubusercontent.com",
         Audience:         "sts.amazonaws.com",
         Subject:          "repo:myorg/myrepo:*",
         SubjectCondition: "StringLike",
-        Source:           cloudauth.GitHubOIDC,
+        Source:           core.GitHubOIDC,
         PolicyARNs: []string{
             "arn:aws:iam::aws:policy/ReadOnlyAccess",
         },
     }
 
     // Create a state store
-    stateStore, err := cloudauth.NewFileStateStore("")
+    stateStore, err := core.NewFileStateStore("")
     if err != nil {
         log.Fatal(err)
     }
 
     // Create a manager
-    manager := cloudauth.NewManager(
-        cloudauth.WithStateStore(stateStore),
+    manager := core.NewManager(
+        core.WithStateStore(stateStore),
     )
 
     // Setup the mechanism
-    outputs, err := manager.Setup(ctx, spec, cloudauth.SetupOptions{})
+    outputs, err := manager.Setup(ctx, spec, core.SetupOptions{})
     if err != nil {
         log.Fatal(err)
     }
@@ -391,7 +478,7 @@ func main() {
     fmt.Printf("Role ARN: %s\n", outputs.Values["role_arn"])
 
     // Validate the mechanism
-    report, err := manager.Validate(ctx, outputs.Ref, cloudauth.ValidateOptions{})
+    report, err := manager.Validate(ctx, outputs.Ref, core.ValidateOptions{})
     if err != nil {
         log.Fatal(err)
     }
@@ -439,6 +526,28 @@ VAULT_ADDR                 # Vault server address
 VAULT_TOKEN                # Vault token
 ```
 
+#### cloud-auth runtime
+
+These override the config file (env > file):
+
+```bash
+CLOUD_AUTH_AWS_PROOF       # auto | oidc | sigv4 (see AWS proof selection)
+CLOUD_AUTH_SOURCE_DETECT   # auto, a cloud, or a cloud and sub-runtime
+CLOUD_AUTH_REFRESH_BUFFER  # credential refresh lead time, e.g. 5m
+```
+
+`source.detect` accepts `auto`, one of `aws` / `gcp` / `azure`, or a cloud plus
+a known sub-runtime:
+
+| Cloud | Sub-runtimes |
+|---|---|
+| `aws` | `ec2`, `ecs`, `lambda`, `eks-irsa`, `eks-pod-identity` |
+| `gcp` | `gce`, `gke`, `cloud-run`, `cloud-functions` |
+| `azure` | `vm`, `aks-workload-identity`, `app-service`, `container-apps` |
+
+An unrecognised value is rejected rather than silently defaulted — including a
+malformed `aws-`, which is an error and not a synonym for `aws`.
+
 ### Common Options
 
 | Option | Description |
@@ -452,8 +561,15 @@ VAULT_TOKEN                # Vault token
 
 ```
 cloud-auth/
-├── cmd/cloud-auth/            # Single CLI binary (control-plane + runtime commands)
-├── cloudauth/                 # Core domain package (one shared vocabulary)
+├── main.go                    # The cloud-auth command lives at the module root,
+├── controlplane.go            #   so `go install github.com/anirudhbiyani/cloud-auth@latest`
+├── runtime.go                 #   installs a binary named cloud-auth.
+├── diagnose.go                #   main.go: entry point and exit codes
+├── scaffold.go                #   controlplane.go: setup/validate/delete/list + argv dispatch
+├── exec.go                    #   runtime.go: doctor/exchange/exec/config-validate
+├── format.go                  #   diagnose.go: doctor's preflight logic (pure, no I/O)
+│                              #   scaffold.go, exec.go, format.go: init, exec, output shapes
+├── core/                      # Core domain package (one shared vocabulary)
 │   ├── federation.go          # Runtime types (Cloud, Target, SourceToken, Credentials)
 │   ├── federation_interfaces.go # SourceProvider, Exchanger, Runtime, sentinel errors
 │   ├── interfaces.go          # Provider and Manager interfaces (control-plane)
@@ -471,12 +587,14 @@ cloud-auth/
 │   ├── cloudflare/            # Cloudflare Access
 │   └── vault/                 # HashiCorp Vault
 ├── source/                    # Runtime: source-identity detection + minting
+│   └── aws_outbound.go        #   sts:GetWebIdentityToken OIDC proof (AWS → Azure)
 ├── target/                    # Runtime: target STS exchangers
 ├── adapters/                  # Runtime: SDK-native credential adapters
 ├── broker/                    # Runtime: detect→mint→exchange orchestrator
-├── config/                    # Runtime: declarative federation config
+├── config/                    # Runtime: declarative federation config + JSON Schema
 ├── internal/                  # imds, jwt, k8stoken, cache, audit
 ├── test/                      # Cloud integration harness (OpenTofu) + build-tagged tests
+├── docs/                      # TDD, task backlog, sprint plan
 └── examples/                  # Example spec files
 ```
 
@@ -513,7 +631,7 @@ type LifecycleProvider interface {
 Register providers using `init()`:
 ```go
 func init() {
-    cloudauth.Register(&MyProvider{})
+    core.Register(&MyProvider{})
 }
 ```
 
@@ -551,7 +669,7 @@ go mod download
 go test -v ./...
 
 # Build
-go build -o cloud-auth ./cmd/cloud-auth
+go build -o cloud-auth .
 
 # Run linter
 golangci-lint run

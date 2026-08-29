@@ -7,7 +7,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/credentials"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
 func TestAWSDetectLambda(t *testing.T) {
@@ -34,12 +34,16 @@ func TestAWSMintLambdaUsesSigV4(t *testing.T) {
 		})),
 		WithAWSRegion("us-east-1"),
 		WithAWSCredentials(credentials.NewStaticCredentialsProvider("AKIDEXAMPLE", "secret", "session-tok")),
+		// Pin the proof. The default prefers the STS-vended OIDC JWT, which needs
+		// a live sts:GetWebIdentityToken call; this test is about the SigV4 proof,
+		// so it says so rather than relying on whatever the default happens to be.
+		WithAWSProof(AWSProofSigV4),
 	)
 	tok, err := a.Mint(context.Background(), "//iam.googleapis.com/x")
 	if err != nil {
 		t.Fatalf("Mint: %v", err)
 	}
-	if tok.Kind != cloudauth.AWSSigV4 {
+	if tok.Kind != core.AWSSigV4 {
 		t.Fatalf("kind = %v, want AWSSigV4", tok.Kind)
 	}
 	if !strings.Contains(tok.Value, "GetCallerIdentity") {

@@ -9,7 +9,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
+	"github.com/anirudhbiyani/cloud-auth/internal/httpx"
 	"github.com/anirudhbiyani/cloud-auth/internal/jwt"
 )
 
@@ -37,7 +38,7 @@ func WithGCPEnv(f func(string) string) GCPOption { return func(g *GCP) { g.geten
 func NewGCP(opts ...GCPOption) *GCP {
 	g := &GCP{
 		metadataURL: DefaultGCPMetadataURL,
-		httpClient:  &http.Client{Timeout: 2 * time.Second},
+		httpClient:  httpx.NewMetadataClient(2 * time.Second),
 		getenv:      os.Getenv,
 	}
 	for _, o := range opts {
@@ -61,14 +62,22 @@ func (g *GCP) get(ctx context.Context, path string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("gcp metadata %s: status %d", path, resp.StatusCode)
 	}
+	// The header must come back, not just go out. That round trip is the
+	// documented defence against a spoofed or DNS-rebound
+	// metadata.google.internal: an attacker who answers on that name can serve
+	// a token, but a plain HTTP server will not echo this.
+	if flavor := resp.Header.Get("Metadata-Flavor"); flavor != gcpMetadataFlavor {
+		return nil, fmt.Errorf("gcp metadata %s: response Metadata-Flavor is %q, want %q; "+
+			"this is not the GCE metadata server", path, flavor, gcpMetadataFlavor)
+	}
 	return body, nil
 }
 
 // Detect probes the metadata server. Presence of KUBERNETES_SERVICE_HOST marks
 // the sub-runtime as GKE, otherwise GCE.
-func (g *GCP) Detect(ctx context.Context) (*cloudauth.Runtime, error) {
+func (g *GCP) Detect(ctx context.Context) (*core.Runtime, error) {
 	if _, err := g.get(ctx, "/computeMetadata/v1/"); err != nil {
-		return nil, fmt.Errorf("%w: %v", cloudauth.ErrNotThisRuntime, err)
+		return nil, fmt.Errorf("%w: %v", core.ErrNotThisRuntime, err)
 	}
 	// Env hints resolve the sub-runtime; GKE takes precedence over the
 	// serverless hints, then Cloud Run, then Cloud Functions, else bare GCE.
@@ -82,8 +91,8 @@ func (g *GCP) Detect(ctx context.Context) (*cloudauth.Runtime, error) {
 		sub = "cloud-functions"
 	}
 	email, _ := g.get(ctx, "/computeMetadata/v1/instance/service-accounts/default/email")
-	return &cloudauth.Runtime{
-		Cloud:       cloudauth.GCP,
+	return &core.Runtime{
+		Cloud:       core.GCP,
 		SubRuntime:  sub,
 		Federatable: true,
 		Subject:     string(email),
@@ -91,7 +100,7 @@ func (g *GCP) Detect(ctx context.Context) (*cloudauth.Runtime, error) {
 }
 
 // Mint fetches a Google-signed OIDC ID token pinned to audience.
-func (g *GCP) Mint(ctx context.Context, audience string) (*cloudauth.SourceToken, error) {
+func (g *GCP) Mint(ctx context.Context, audience string) (*core.SourceToken, error) {
 	if audience == "" {
 		return nil, fmt.Errorf("gcp: audience is required")
 	}
@@ -105,8 +114,8 @@ func (g *GCP) Mint(ctx context.Context, audience string) (*cloudauth.SourceToken
 	if err != nil {
 		return nil, fmt.Errorf("gcp: parsing minted token: %w", err)
 	}
-	return &cloudauth.SourceToken{
-		Kind:     cloudauth.OIDC,
+	return &core.SourceToken{
+		Kind:     core.OIDC,
 		Value:    string(body),
 		Issuer:   claims.Issuer,
 		Subject:  claims.Subject,

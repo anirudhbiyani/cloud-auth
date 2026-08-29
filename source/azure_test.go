@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
 func azureJWT(aud string) string {
@@ -40,7 +41,7 @@ func TestAzureDetectAKSWorkloadIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Detect: %v", err)
 	}
-	if rt.Cloud != cloudauth.Azure || rt.SubRuntime != "aks-workload-identity" {
+	if rt.Cloud != core.Azure || rt.SubRuntime != "aks-workload-identity" {
 		t.Errorf("runtime = %+v, want azure/aks-workload-identity", rt)
 	}
 	if !rt.Federatable {
@@ -62,7 +63,7 @@ func TestAzureMintAKSReadsProjectedToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Mint: %v", err)
 	}
-	if tok.Kind != cloudauth.OIDC {
+	if tok.Kind != core.OIDC {
 		t.Errorf("kind = %v, want OIDC", tok.Kind)
 	}
 	if tok.Issuer != "https://oidc.aks/cluster" {
@@ -127,11 +128,22 @@ func TestAzureDetectVMViaIMDS(t *testing.T) {
 	if rt.SubRuntime != "vm" {
 		t.Errorf("subruntime = %q, want vm", rt.SubRuntime)
 	}
-	tok, err := a.Mint(context.Background(), "https://management.azure.com/")
+	if rt.Federatable {
+		t.Error("a VM's IMDS vends access tokens, not assertions; it is not a federation source")
+	}
+
+	// Minting a cross-cloud proof here must fail closed rather than hand a live
+	// ARM access token to a third-party STS.
+	if _, err := a.Mint(context.Background(), "https://management.azure.com/"); !errors.Is(err, core.ErrNonFederatableSource) {
+		t.Fatalf("Mint should refuse with ErrNonFederatableSource, got %v", err)
+	}
+
+	// The same-cloud path still works, and names the identity.
+	tok, err := a.mintManagedIdentityToken(context.Background(), "https://management.azure.com/")
 	if err != nil {
-		t.Fatalf("Mint: %v", err)
+		t.Fatalf("mintManagedIdentityToken: %v", err)
 	}
 	if tok.Value == "" {
-		t.Error("VM mint should return the IMDS access token")
+		t.Error("the IMDS access token should still be obtainable for same-cloud use")
 	}
 }

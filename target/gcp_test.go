@@ -7,14 +7,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-func gcpTarget() cloudauth.Target {
-	return cloudauth.Target{
-		Cloud:                cloudauth.GCP,
+func gcpTarget() core.GCPTarget {
+	return core.GCPTarget{
 		WorkloadIdentityPool: "//iam.googleapis.com/projects/1/locations/global/workloadIdentityPools/p/providers/aws",
-		Audience:             "//iam.googleapis.com/projects/1/locations/global/workloadIdentityPools/p/providers/aws",
 	}
 }
 
@@ -28,7 +26,7 @@ func TestGCPExchangeDirectAccessOIDC(t *testing.T) {
 	defer sts.Close()
 
 	e := NewGCPExchanger(WithGCPSTSEndpoint(sts.URL), WithGCPHTTPClient(sts.Client()))
-	creds, err := e.Exchange(context.Background(), oidcToken(), gcpTarget())
+	creds, err := e.Exchange(context.Background(), oidcTokenFor(gcpTarget().Audience()), gcpTarget())
 	if err != nil {
 		t.Fatalf("Exchange: %v", err)
 	}
@@ -48,7 +46,7 @@ func TestGCPExchangeSigV4SubjectType(t *testing.T) {
 	}))
 	defer sts.Close()
 
-	sigv4 := &cloudauth.SourceToken{Kind: cloudauth.AWSSigV4, Value: `{"url":"x"}`, Audience: gcpTarget().Audience}
+	sigv4 := &core.SourceToken{Kind: core.AWSSigV4, Value: `{"url":"x"}`, Audience: gcpTarget().Audience()}
 	e := NewGCPExchanger(WithGCPSTSEndpoint(sts.URL), WithGCPHTTPClient(sts.Client()))
 	if _, err := e.Exchange(context.Background(), sigv4, gcpTarget()); err != nil {
 		t.Fatalf("Exchange: %v", err)
@@ -79,7 +77,7 @@ func TestGCPExchangeImpersonation(t *testing.T) {
 	target := gcpTarget()
 	target.ImpersonateServiceAccount = "reader@proj.iam.gserviceaccount.com"
 	e := NewGCPExchanger(WithGCPSTSEndpoint(sts.URL), WithGCPIAMEndpoint(iam.URL), WithGCPHTTPClient(sts.Client()))
-	creds, err := e.Exchange(context.Background(), oidcToken(), target)
+	creds, err := e.Exchange(context.Background(), oidcTokenFor(target.Audience()), target)
 	if err != nil {
 		t.Fatalf("Exchange: %v", err)
 	}

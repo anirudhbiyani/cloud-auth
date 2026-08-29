@@ -4,14 +4,17 @@ package gcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
+	"github.com/anirudhbiyani/cloud-auth/internal/jwt"
 )
 
-// Provider implements cloudauth.LifecycleProvider for GCP.
+// Provider implements core.LifecycleProvider for GCP.
 type Provider struct {
 	iamClient IAMClient
 	wifClient WorkloadIdentityClient
@@ -252,25 +255,24 @@ func New(opts ...ProviderOption) *Provider {
 	return p
 }
 
-// Name implements cloudauth.Provider.
-func (p *Provider) Name() cloudauth.Cloud {
-	return cloudauth.GCP
+// Name implements core.Provider.
+func (p *Provider) Name() core.Cloud {
+	return core.GCP
 }
 
-// Capabilities implements cloudauth.Provider.
-func (p *Provider) Capabilities() []cloudauth.Capability {
-	return []cloudauth.Capability{
-		cloudauth.CapabilityToken,
-		cloudauth.CapabilitySetup,
-		cloudauth.CapabilityValidate,
-		cloudauth.CapabilityDelete,
-		cloudauth.CapabilityDryRun,
-		cloudauth.CapabilityFederationOIDC,
+// Capabilities implements core.Provider.
+func (p *Provider) Capabilities() []core.Capability {
+	return []core.Capability{
+		core.CapabilitySetup,
+		core.CapabilityValidate,
+		core.CapabilityDelete,
+		core.CapabilityDryRun,
+		core.CapabilityFederationOIDC,
 	}
 }
 
-// HasCapability implements cloudauth.Provider.
-func (p *Provider) HasCapability(cap cloudauth.Capability) bool {
+// HasCapability implements core.Provider.
+func (p *Provider) HasCapability(cap core.Capability) bool {
 	for _, c := range p.Capabilities() {
 		if c == cap {
 			return true
@@ -279,33 +281,70 @@ func (p *Provider) HasCapability(cap cloudauth.Capability) bool {
 	return false
 }
 
-// Setup implements cloudauth.LifecycleProvider.
-func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts cloudauth.SetupOptions) (*cloudauth.Outputs, error) {
+// requireClients reports whether this provider can talk to GCP at all.
+//
+// There is no lazy constructor here — the clients are injected — so an
+// unconfigured Provider is the one init() registers, and every lifecycle method
+// used to dereference the nil field and panic.
+func (p *Provider) requireClients(needWIF, needIAM bool) error {
+	if needWIF && p.wifClient == nil {
+		return core.ErrValidation("GCP Workload Identity client not configured").
+			WithProvider(core.GCP).
+			WithDetail("hint", "Pass gcp.WithWorkloadIdentityClient, or use --dry-run")
+	}
+	if needIAM && p.iamClient == nil {
+		return core.ErrValidation("GCP IAM client not configured").
+			WithProvider(core.GCP).
+			WithDetail("hint", "Pass gcp.WithIAMClient, or use --dry-run")
+	}
+	return nil
+}
+
+// Setup implements core.LifecycleProvider.
+func (p *Provider) Setup(ctx context.Context, spec core.MechanismSpec, opts core.SetupOptions) (*core.Outputs, error) {
 	switch s := spec.(type) {
-	case *cloudauth.GCPWorkloadIdentityPoolSpec:
+	case *core.GCPWorkloadIdentityPoolSpec:
 		return p.setupWorkloadIdentityPool(ctx, s, opts)
 	default:
-		return nil, cloudauth.ErrValidation(fmt.Sprintf("unsupported spec type: %T", spec)).
-			WithProvider(cloudauth.GCP)
+		return nil, core.ErrValidation(fmt.Sprintf("unsupported spec type: %T", spec)).
+			WithProvider(core.GCP)
 	}
 }
 
-func (p *Provider) setupWorkloadIdentityPool(ctx context.Context, spec *cloudauth.GCPWorkloadIdentityPoolSpec, opts cloudauth.SetupOptions) (*cloudauth.Outputs, error) {
-	var plan cloudauth.Plan
+func (p *Provider) setupWorkloadIdentityPool(ctx context.Context, spec *core.GCPWorkloadIdentityPoolSpec, opts core.SetupOptions) (*core.Outputs, error) {
+	var plan core.Plan
 
 	poolName := fmt.Sprintf("projects/%s/locations/global/workloadIdentityPools/%s",
 		spec.ProjectNumber, spec.PoolID)
 	providerName := fmt.Sprintf("%s/providers/%s", poolName, spec.ProviderID)
 
-	// Step 1: Create or verify pool
-	var poolExists bool
+	// createdPool records that THIS run created the pool. Only that justifies
+	// deleting it again.
+	createdPool := false
+
+	// Step 1: Create or verify pool.
+	//
+	// "exists" and "could not tell" are different answers, and conflating them is
+	// how the rollback below became destructive: a permission or network failure
+	// on this Get read as "does not exist", so a later failure rolled back by
+	// deleting a pool this run never created.
+	poolExists, poolKnown := false, false
 	if p.wifClient != nil {
 		_, err := p.wifClient.GetWorkloadIdentityPool(ctx, poolName)
-		poolExists = err == nil
+		switch {
+		case err == nil:
+			poolExists, poolKnown = true, true
+		case isNotFoundError(err):
+			poolExists, poolKnown = false, true
+		default:
+			// Unknown. Proceed — Create will fail cleanly with AlreadyExists if it
+			// does exist — but never roll it back.
+			poolExists, poolKnown = false, false
+		}
 	}
 
 	if !poolExists {
-		action := cloudauth.PlannedAction{
+		action := core.PlannedAction{
 			Operation:    "create",
 			ResourceType: "workload-identity-pool",
 			Details: map[string]interface{}{
@@ -318,8 +357,8 @@ func (p *Provider) setupWorkloadIdentityPool(ctx context.Context, spec *cloudaut
 
 		if !opts.DryRun {
 			if p.wifClient == nil {
-				return nil, cloudauth.ErrValidation("GCP Workload Identity client not configured").
-					WithProvider(cloudauth.GCP).
+				return nil, core.ErrValidation("GCP Workload Identity client not configured").
+					WithProvider(core.GCP).
 					WithDetail("hint", "Configure GCP credentials or use --dry-run")
 			}
 
@@ -336,13 +375,14 @@ func (p *Provider) setupWorkloadIdentityPool(ctx context.Context, spec *cloudaut
 					Description: "Created by cloud-auth",
 				})
 			if err != nil {
-				return nil, cloudauth.ErrPermission("failed to create workload identity pool").
-					WithCause(err).WithProvider(cloudauth.GCP)
+				return nil, core.ErrPermission("failed to create workload identity pool").
+					WithCause(err).WithProvider(core.GCP)
 			}
+			createdPool = true
 		}
 	}
 
-	// Step 2: Create or update provider
+	// Step 2: Create or update provider.
 	var providerExists bool
 	if p.wifClient != nil {
 		_, err := p.wifClient.GetWorkloadIdentityPoolProvider(ctx, providerName)
@@ -350,7 +390,7 @@ func (p *Provider) setupWorkloadIdentityPool(ctx context.Context, spec *cloudaut
 	}
 
 	if !providerExists {
-		action := cloudauth.PlannedAction{
+		action := core.PlannedAction{
 			Operation:    "create",
 			ResourceType: "workload-identity-provider",
 			Details: map[string]interface{}{
@@ -382,12 +422,30 @@ func (p *Provider) setupWorkloadIdentityPool(ctx context.Context, spec *cloudaut
 
 			_, err := p.wifClient.CreateWorkloadIdentityPoolProvider(ctx, poolName, spec.ProviderID, providerConfig)
 			if err != nil {
-				// Rollback pool if we created it
-				if !poolExists {
-					_ = p.wifClient.DeleteWorkloadIdentityPool(ctx, poolName)
+				// Roll the pool back only if THIS run created it. The old
+				// condition was `!poolExists`, which was also true when the
+				// existence probe merely failed — so a transient error on the Get
+				// plus a provider-create failure deleted a pre-existing
+				// production pool, and every identity federating through it.
+				failure := core.ErrPermission("failed to create workload identity provider").
+					WithCause(err).WithProvider(core.GCP)
+				if createdPool {
+					if delErr := p.wifClient.DeleteWorkloadIdentityPool(ctx, poolName); delErr != nil {
+						return nil, &core.RollbackError{
+							OriginalError:     failure,
+							RollbackErrors:    []error{delErr},
+							OrphanedResources: []string{poolName},
+						}
+					}
+					return nil, failure
 				}
-				return nil, cloudauth.ErrPermission("failed to create workload identity provider").
-					WithCause(err).WithProvider(cloudauth.GCP)
+				if !poolKnown {
+					return nil, failure.WithDetail("note",
+						"the pool was left in place: this run could not confirm whether it "+
+							"existed beforehand, and deleting a pool it did not create would "+
+							"revoke every identity federating through it")
+				}
+				return nil, failure
 			}
 		}
 	}
@@ -397,7 +455,7 @@ func (p *Provider) setupWorkloadIdentityPool(ctx context.Context, spec *cloudaut
 		saEmail := spec.ServiceAccountEmail
 		parts := strings.Split(saEmail, "@")
 		if len(parts) != 2 {
-			return nil, cloudauth.ErrValidation("invalid service account email format")
+			return nil, core.ErrValidation("invalid service account email format")
 		}
 		accountID := parts[0]
 
@@ -409,7 +467,7 @@ func (p *Provider) setupWorkloadIdentityPool(ctx context.Context, spec *cloudaut
 		}
 
 		if !saExists {
-			action := cloudauth.PlannedAction{
+			action := core.PlannedAction{
 				Operation:    "create",
 				ResourceType: "service-account",
 				Details:      map[string]interface{}{"email": saEmail},
@@ -420,15 +478,15 @@ func (p *Provider) setupWorkloadIdentityPool(ctx context.Context, spec *cloudaut
 			if !opts.DryRun && p.iamClient != nil {
 				_, err := p.iamClient.CreateServiceAccount(ctx, spec.ProjectID, accountID, "Cloud-auth managed SA")
 				if err != nil {
-					return nil, cloudauth.ErrPermission("failed to create service account").
-						WithCause(err).WithProvider(cloudauth.GCP)
+					return nil, core.ErrPermission("failed to create service account").
+						WithCause(err).WithProvider(core.GCP)
 				}
 			}
 		}
 	}
 
 	// Step 4: Bind service account to workload identity
-	action := cloudauth.PlannedAction{
+	action := core.PlannedAction{
 		Operation:    "update",
 		ResourceType: "iam-binding",
 		Details: map[string]interface{}{
@@ -444,11 +502,13 @@ func (p *Provider) setupWorkloadIdentityPool(ctx context.Context, spec *cloudaut
 		saResource := fmt.Sprintf("projects/%s/serviceAccounts/%s", spec.ProjectID, spec.ServiceAccountEmail)
 		policy, err := p.iamClient.GetIAMPolicy(ctx, saResource)
 		if err != nil {
-			return nil, cloudauth.ErrPermission("failed to get service account IAM policy").WithCause(err)
+			return nil, core.ErrPermission("failed to get service account IAM policy").WithCause(err)
 		}
 
-		// Add workload identity user binding
-		principalSet := fmt.Sprintf("principalSet://iam.googleapis.com/%s/*", poolName)
+		// Add workload identity user binding, scoped as narrowly as the spec
+		// allows. The whole-pool form would let every identity that can federate
+		// through any provider in this pool impersonate the service account.
+		principalSet := spec.ImpersonationPrincipal(poolName)
 
 		// Check if binding already exists
 		bindingExists := false
@@ -476,7 +536,7 @@ func (p *Provider) setupWorkloadIdentityPool(ctx context.Context, spec *cloudaut
 		}
 
 		if err := p.iamClient.SetIAMPolicy(ctx, saResource, policy); err != nil {
-			return nil, cloudauth.ErrPermission("failed to set service account IAM policy").WithCause(err)
+			return nil, core.ErrPermission("failed to set service account IAM policy").WithCause(err)
 		}
 	}
 
@@ -505,11 +565,11 @@ func (p *Provider) setupWorkloadIdentityPool(ctx context.Context, spec *cloudaut
 		resourceIDs["expected_roles"] = strings.Join(spec.ServiceAccountRoles, ",")
 	}
 
-	ref := cloudauth.CreateMechanismRef(cloudauth.MechanismGCPWorkloadIdentityPool, cloudauth.GCP, resourceIDs)
+	ref := core.CreateMechanismRef(core.MechanismGCPWorkloadIdentityPool, core.GCP, resourceIDs)
 
 	if opts.DryRun {
 		plan.Summary = fmt.Sprintf("Would create/update %d resources for GCP Workload Identity Pool", len(plan.Actions))
-		return &cloudauth.Outputs{
+		return &core.Outputs{
 			Ref: ref,
 			Values: map[string]string{
 				"plan": plan.Summary,
@@ -518,9 +578,12 @@ func (p *Provider) setupWorkloadIdentityPool(ctx context.Context, spec *cloudaut
 	}
 
 	// Build credentials file content for reference
-	credentialsConfig := buildCredentialsConfig(spec)
+	credentialsConfig, err := buildCredentialsConfig(spec)
+	if err != nil {
+		return nil, err
+	}
 
-	return &cloudauth.Outputs{
+	return &core.Outputs{
 		Ref: ref,
 		Values: map[string]string{
 			"pool_name":          poolName,
@@ -531,12 +594,16 @@ func (p *Provider) setupWorkloadIdentityPool(ctx context.Context, spec *cloudaut
 	}, nil
 }
 
-// Validate implements cloudauth.LifecycleProvider.
-func (p *Provider) Validate(ctx context.Context, ref cloudauth.MechanismRef, opts cloudauth.ValidateOptions) (*cloudauth.ValidationReport, error) {
-	var validators []cloudauth.Validator
+// Validate implements core.LifecycleProvider.
+func (p *Provider) Validate(ctx context.Context, ref core.MechanismRef, opts core.ValidateOptions) (*core.ValidationReport, error) {
+	if err := p.requireClients(true, true); err != nil {
+		return nil, err
+	}
+
+	var validators []core.Validator
 
 	switch ref.Type {
-	case cloudauth.MechanismGCPWorkloadIdentityPool:
+	case core.MechanismGCPWorkloadIdentityPool:
 		poolName := ref.ResourceIDs["pool_name"]
 		if poolName != "" {
 			validators = append(validators, &poolExistsValidator{client: p.wifClient, name: poolName})
@@ -564,35 +631,38 @@ func (p *Provider) Validate(ctx context.Context, ref cloudauth.MechanismRef, opt
 		expAudience := ref.ResourceIDs["expected_audience"]
 		expSubject := firstCELLiteral(ref.ResourceIDs["expected_attribute_condition"])
 		if providerName != "" && (expIssuer != "" || expAudience != "" || expSubject != "") {
-			validators = append(validators, cloudauth.NewTrustPolicyMatchValidator(
+			validators = append(validators, core.NewTrustPolicyMatchValidator(
 				expIssuer, expAudience, expSubject,
-				cloudauth.WithTrustPolicySource(p)))
+				core.WithTrustPolicySource(p)))
 		}
 
 		if raw := ref.ResourceIDs["expected_roles"]; raw != "" && saEmail != "" {
-			validators = append(validators, cloudauth.NewPermissionsValidator(
+			validators = append(validators, core.NewPermissionsValidator(
 				strings.Split(raw, ","),
-				cloudauth.WithGrantedPolicySource(p)))
+				core.WithGrantedPolicySource(p)))
 		}
 	}
 
-	report := cloudauth.RunValidation(ctx, ref, validators)
+	report := core.RunValidation(ctx, ref, validators)
 	return report, nil
 }
 
-// Delete implements cloudauth.LifecycleProvider.
-func (p *Provider) Delete(ctx context.Context, ref cloudauth.MechanismRef, opts cloudauth.DeleteOptions) error {
+// Delete implements core.LifecycleProvider.
+func (p *Provider) Delete(ctx context.Context, ref core.MechanismRef, opts core.DeleteOptions) error {
 	switch ref.Type {
-	case cloudauth.MechanismGCPWorkloadIdentityPool:
+	case core.MechanismGCPWorkloadIdentityPool:
 		return p.deleteWorkloadIdentityPool(ctx, ref, opts)
 	default:
-		return cloudauth.ErrValidation(fmt.Sprintf("unsupported mechanism type: %s", ref.Type))
+		return core.ErrValidation(fmt.Sprintf("unsupported mechanism type: %s", ref.Type))
 	}
 }
 
-func (p *Provider) deleteWorkloadIdentityPool(ctx context.Context, ref cloudauth.MechanismRef, opts cloudauth.DeleteOptions) error {
+func (p *Provider) deleteWorkloadIdentityPool(ctx context.Context, ref core.MechanismRef, opts core.DeleteOptions) error {
 	if opts.DryRun {
 		return nil
+	}
+	if err := p.requireClients(true, false); err != nil {
+		return err
 	}
 
 	// Delete in reverse order: provider -> pool -> optionally SA
@@ -601,7 +671,7 @@ func (p *Provider) deleteWorkloadIdentityPool(ctx context.Context, ref cloudauth
 	if providerName := ref.ResourceIDs["provider_name"]; providerName != "" {
 		if err := p.wifClient.DeleteWorkloadIdentityPoolProvider(ctx, providerName); err != nil {
 			if !isNotFoundError(err) {
-				return cloudauth.ErrPermission("failed to delete workload identity provider").WithCause(err)
+				return core.ErrPermission("failed to delete workload identity provider").WithCause(err)
 			}
 		}
 	}
@@ -611,7 +681,7 @@ func (p *Provider) deleteWorkloadIdentityPool(ctx context.Context, ref cloudauth
 		if poolName := ref.ResourceIDs["pool_name"]; poolName != "" {
 			if err := p.wifClient.DeleteWorkloadIdentityPool(ctx, poolName); err != nil {
 				if !isNotFoundError(err) {
-					return cloudauth.ErrPermission("failed to delete workload identity pool").WithCause(err)
+					return core.ErrPermission("failed to delete workload identity pool").WithCause(err)
 				}
 			}
 		}
@@ -620,118 +690,6 @@ func (p *Provider) deleteWorkloadIdentityPool(ctx context.Context, ref cloudauth
 	// Note: We don't delete the service account by default as it may be used elsewhere
 
 	return nil
-}
-
-// Token implements cloudauth.TokenProvider.
-// It exchanges an external identity token for GCP credentials using Workload Identity Federation.
-//
-// TokenRequest fields:
-//   - TargetIdentity: Service account email to impersonate (required)
-//   - Audience: The WIF provider audience or the subject token (required)
-//     Format: //iam.googleapis.com/projects/{project_number}/locations/global/workloadIdentityPools/{pool_id}/providers/{provider_id}
-//   - SourceIdentity: The external subject token to exchange (required - passed via SourceIdentity)
-//   - Scopes: OAuth scopes for the access token (optional, defaults to cloud-platform)
-//   - Duration: Token lifetime in seconds (optional, defaults to 3600)
-//
-// The token exchange follows this flow:
-//  1. Exchange external token for GCP STS token via sts.googleapis.com
-//  2. Use STS token to impersonate service account via iamcredentials.googleapis.com
-//  3. Return the service account access token
-func (p *Provider) Token(ctx context.Context, req cloudauth.TokenRequest) (*cloudauth.TokenResponse, error) {
-	if p.stsClient == nil {
-		return nil, cloudauth.ErrValidation("GCP STS client not configured").
-			WithProvider(cloudauth.GCP).
-			WithDetail("hint", "Configure GCP STS client using WithSTSClient option")
-	}
-
-	// Validate required fields
-	if req.TargetIdentity == "" {
-		return nil, cloudauth.ErrValidation("TargetIdentity (service account email) is required").
-			WithProvider(cloudauth.GCP)
-	}
-
-	if req.Audience == "" {
-		return nil, cloudauth.ErrValidation("Audience (WIF provider audience) is required").
-			WithProvider(cloudauth.GCP).
-			WithDetail("hint", "Format: //iam.googleapis.com/projects/{project_number}/locations/global/workloadIdentityPools/{pool_id}/providers/{provider_id}")
-	}
-
-	// The subject token should be passed via SourceIdentity
-	subjectToken := req.SourceIdentity
-	if subjectToken == "" {
-		return nil, cloudauth.ErrValidation("SourceIdentity (subject token) is required").
-			WithProvider(cloudauth.GCP).
-			WithDetail("hint", "Pass the external identity token (JWT, AWS signature) in SourceIdentity field")
-	}
-
-	// Determine subject token type based on token format
-	subjectTokenType := determineSubjectTokenType(subjectToken)
-
-	// Set default scopes
-	scopes := req.Scopes
-	if len(scopes) == 0 {
-		scopes = []string{"https://www.googleapis.com/auth/cloud-platform"}
-	}
-
-	// Step 1: Exchange external token for GCP STS token
-	exchangeInput := &ExchangeTokenInput{
-		Audience:           req.Audience,
-		GrantType:          "urn:ietf:params:oauth:grant-type:token-exchange",
-		RequestedTokenType: "urn:ietf:params:oauth:token-type:access_token",
-		SubjectToken:       subjectToken,
-		SubjectTokenType:   subjectTokenType,
-		Scope:              strings.Join(scopes, " "),
-	}
-
-	exchangeOutput, err := p.stsClient.ExchangeToken(ctx, exchangeInput)
-	if err != nil {
-		return nil, cloudauth.ErrAuth("failed to exchange token with GCP STS").
-			WithCause(err).
-			WithProvider(cloudauth.GCP)
-	}
-
-	// Step 2: Use STS token to generate service account access token
-	lifetime := req.Duration
-	if lifetime == 0 {
-		lifetime = 3600 // Default 1 hour
-	}
-
-	generateInput := &GenerateAccessTokenInput{
-		ServiceAccountEmail: req.TargetIdentity,
-		Scope:               scopes,
-		Lifetime:            lifetime,
-	}
-
-	// Note: The STS client should use the exchanged token for authentication
-	// This is implementation-specific and depends on how the STSClient is configured
-	generateOutput, err := p.stsClient.GenerateAccessToken(ctx, generateInput)
-	if err != nil {
-		return nil, cloudauth.ErrAuth("failed to generate service account access token").
-			WithCause(err).
-			WithProvider(cloudauth.GCP).
-			WithResource("service-account", req.TargetIdentity)
-	}
-
-	// Build response
-	credentials := map[string]interface{}{
-		"access_token":          generateOutput.AccessToken,
-		"token_type":            "Bearer",
-		"expiration":            generateOutput.ExpireTime.Format(time.RFC3339),
-		"service_account_email": req.TargetIdentity,
-		"sts_token":             exchangeOutput.AccessToken, // Include STS token for debugging
-	}
-
-	credentialsJSON, err := json.Marshal(credentials)
-	if err != nil {
-		return nil, cloudauth.ErrInternal("failed to marshal credentials").WithCause(err)
-	}
-
-	return &cloudauth.TokenResponse{
-		Token:     string(credentialsJSON),
-		ExpiresAt: generateOutput.ExpireTime.Unix(),
-		TokenType: "Bearer",
-		Scopes:    scopes,
-	}, nil
 }
 
 // GenerateAWSRoleAssumptionToken creates an OIDC identity token that can be used
@@ -753,17 +711,17 @@ func (p *Provider) Token(ctx context.Context, req cloudauth.TokenRequest) (*clou
 //	// Use token.Token with AWS provider's Token() method
 func (p *Provider) GenerateAWSRoleAssumptionToken(ctx context.Context, input *AWSRoleAssumptionInput) (*CrossCloudTokenOutput, error) {
 	if p.stsClient == nil {
-		return nil, cloudauth.ErrValidation("GCP STS client not configured").
-			WithProvider(cloudauth.GCP).
+		return nil, core.ErrValidation("GCP STS client not configured").
+			WithProvider(core.GCP).
 			WithDetail("hint", "Configure GCP STS client using WithSTSClient option")
 	}
 
 	// Validate input
 	if input.ServiceAccountEmail == "" {
-		return nil, cloudauth.ErrValidation("ServiceAccountEmail is required").WithProvider(cloudauth.GCP)
+		return nil, core.ErrValidation("ServiceAccountEmail is required").WithProvider(core.GCP)
 	}
 	if input.RoleARN == "" {
-		return nil, cloudauth.ErrValidation("RoleARN is required").WithProvider(cloudauth.GCP)
+		return nil, core.ErrValidation("RoleARN is required").WithProvider(core.GCP)
 	}
 
 	// For AWS, the audience should be "sts.amazonaws.com" (the standard AWS STS audience)
@@ -778,14 +736,19 @@ func (p *Provider) GenerateAWSRoleAssumptionToken(ctx context.Context, input *AW
 
 	idTokenOutput, err := p.stsClient.GenerateIDToken(ctx, idTokenInput)
 	if err != nil {
-		return nil, cloudauth.ErrAuth("failed to generate identity token for AWS").
+		return nil, core.ErrAuth("failed to generate identity token for AWS").
 			WithCause(err).
-			WithProvider(cloudauth.GCP).
+			WithProvider(core.GCP).
 			WithResource("service-account", input.ServiceAccountEmail)
 	}
 
-	// Parse the JWT to get expiration (tokens are typically valid for 1 hour)
-	expiresAt := time.Now().Add(1 * time.Hour)
+	// Read the real expiry rather than assuming an hour. The comment here used to
+	// say "parse the JWT to get expiration" directly above a hardcoded guess; an
+	// optimistic guess means a caller caches past the token's actual life.
+	expiresAt, err := tokenExpiry(idTokenOutput.Token)
+	if err != nil {
+		return nil, core.ErrInternal("generated identity token has no usable expiry").WithCause(err)
+	}
 
 	return &CrossCloudTokenOutput{
 		Token:     idTokenOutput.Token,
@@ -817,20 +780,20 @@ func (p *Provider) GenerateAWSRoleAssumptionToken(ctx context.Context, input *AW
 //	// Use token.Token with Azure provider's Token() method
 func (p *Provider) GenerateAzureFederatedToken(ctx context.Context, input *AzureFederatedTokenInput) (*CrossCloudTokenOutput, error) {
 	if p.stsClient == nil {
-		return nil, cloudauth.ErrValidation("GCP STS client not configured").
-			WithProvider(cloudauth.GCP).
+		return nil, core.ErrValidation("GCP STS client not configured").
+			WithProvider(core.GCP).
 			WithDetail("hint", "Configure GCP STS client using WithSTSClient option")
 	}
 
 	// Validate input
 	if input.ServiceAccountEmail == "" {
-		return nil, cloudauth.ErrValidation("ServiceAccountEmail is required").WithProvider(cloudauth.GCP)
+		return nil, core.ErrValidation("ServiceAccountEmail is required").WithProvider(core.GCP)
 	}
 	if input.TenantID == "" {
-		return nil, cloudauth.ErrValidation("TenantID is required").WithProvider(cloudauth.GCP)
+		return nil, core.ErrValidation("TenantID is required").WithProvider(core.GCP)
 	}
 	if input.ClientID == "" {
-		return nil, cloudauth.ErrValidation("ClientID is required").WithProvider(cloudauth.GCP)
+		return nil, core.ErrValidation("ClientID is required").WithProvider(core.GCP)
 	}
 
 	// For Azure federated credentials, the default audience is "api://AzureADTokenExchange"
@@ -848,14 +811,19 @@ func (p *Provider) GenerateAzureFederatedToken(ctx context.Context, input *Azure
 
 	idTokenOutput, err := p.stsClient.GenerateIDToken(ctx, idTokenInput)
 	if err != nil {
-		return nil, cloudauth.ErrAuth("failed to generate identity token for Azure").
+		return nil, core.ErrAuth("failed to generate identity token for Azure").
 			WithCause(err).
-			WithProvider(cloudauth.GCP).
+			WithProvider(core.GCP).
 			WithResource("service-account", input.ServiceAccountEmail)
 	}
 
-	// Parse the JWT to get expiration (tokens are typically valid for 1 hour)
-	expiresAt := time.Now().Add(1 * time.Hour)
+	// Read the real expiry rather than assuming an hour. The comment here used to
+	// say "parse the JWT to get expiration" directly above a hardcoded guess; an
+	// optimistic guess means a caller caches past the token's actual life.
+	expiresAt, err := tokenExpiry(idTokenOutput.Token)
+	if err != nil {
+		return nil, core.ErrInternal("generated identity token has no usable expiry").WithCause(err)
+	}
 
 	return &CrossCloudTokenOutput{
 		Token:     idTokenOutput.Token,
@@ -866,70 +834,114 @@ func (p *Provider) GenerateAzureFederatedToken(ctx context.Context, input *Azure
 	}, nil
 }
 
-// determineSubjectTokenType infers the token type from the token content.
-func determineSubjectTokenType(token string) string {
-	// Check if it's a JWT (has 3 dot-separated parts)
-	if strings.Count(token, ".") == 2 {
-		return "urn:ietf:params:oauth:token-type:jwt"
+// tokenExpiry reads the exp claim from a minted identity token.
+//
+// The signature is not verified here and does not need to be: Google just minted
+// this token for us and the consumer will verify it. We only need to know how
+// long it is good for, so the cache does not outlive it.
+func tokenExpiry(token string) (time.Time, error) {
+	claims, err := jwt.ParseUnverified(token)
+	if err != nil {
+		return time.Time{}, err
 	}
-
-	// Check if it looks like an AWS signed request (JSON with url, method, headers)
-	if strings.HasPrefix(strings.TrimSpace(token), "{") {
-		var awsToken struct {
-			URL     string `json:"url"`
-			Method  string `json:"method"`
-			Headers []struct {
-				Key   string `json:"key"`
-				Value string `json:"value"`
-			} `json:"headers"`
-		}
-		if err := json.Unmarshal([]byte(token), &awsToken); err == nil && awsToken.URL != "" {
-			return "urn:ietf:params:aws:token-type:aws4_request"
-		}
+	if claims.Expiry.IsZero() {
+		return time.Time{}, fmt.Errorf("token carries no exp claim")
 	}
-
-	// Default to JWT
-	return "urn:ietf:params:oauth:token-type:jwt"
+	return claims.Expiry, nil
 }
 
 // Helper functions
 
-func buildCredentialsConfig(spec *cloudauth.GCPWorkloadIdentityPoolSpec) string {
-	// Build a credential configuration JSON that can be used with
-	// GOOGLE_APPLICATION_CREDENTIALS
-	config := map[string]interface{}{
-		"type":                              "external_account",
-		"audience":                          fmt.Sprintf("//iam.googleapis.com/projects/%s/locations/global/workloadIdentityPools/%s/providers/%s", spec.ProjectNumber, spec.PoolID, spec.ProviderID),
-		"subject_token_type":                "urn:ietf:params:oauth:token-type:jwt",
-		"service_account_impersonation_url": fmt.Sprintf("https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/%s:generateAccessToken", spec.ServiceAccountEmail),
-		"token_url":                         "https://sts.googleapis.com/v1/token",
+// buildCredentialsConfig renders an external_account credential file, the shape
+// GOOGLE_APPLICATION_CREDENTIALS expects.
+//
+// Two bugs here previously. It returned fmt.Sprintf("%v", map) — Go's map
+// printing, not JSON, in randomised key order — while being documented and
+// surfaced as a usable credential file. And the AWS credential_source used bare
+// IMDSv1 URLs with no imdsv2_session_token_url, which fails outright on an
+// IMDSv2-only instance and contradicts internal/imds, whose package doc explains
+// why v1 is never used.
+func buildCredentialsConfig(spec *core.GCPWorkloadIdentityPoolSpec) (string, error) {
+	type awsSource struct {
+		EnvironmentID               string `json:"environment_id"`
+		RegionURL                   string `json:"region_url"`
+		URL                         string `json:"url"`
+		IMDSv2SessionTokenURL       string `json:"imdsv2_session_token_url"`
+		RegionalCredVerificationURL string `json:"regional_cred_verification_url"`
+	}
+	type fileSource struct {
+		File string `json:"file"`
+	}
+
+	cfg := struct {
+		Type                           string      `json:"type"`
+		Audience                       string      `json:"audience"`
+		SubjectTokenType               string      `json:"subject_token_type"`
+		ServiceAccountImpersonationURL string      `json:"service_account_impersonation_url,omitempty"`
+		TokenURL                       string      `json:"token_url"`
+		CredentialSource               interface{} `json:"credential_source,omitempty"`
+	}{
+		Type: "external_account",
+		Audience: fmt.Sprintf(
+			"//iam.googleapis.com/projects/%s/locations/global/workloadIdentityPools/%s/providers/%s",
+			spec.ProjectNumber, spec.PoolID, spec.ProviderID),
+		SubjectTokenType: "urn:ietf:params:oauth:token-type:jwt",
+		TokenURL:         "https://sts.googleapis.com/v1/token",
+	}
+	if spec.ServiceAccountEmail != "" {
+		cfg.ServiceAccountImpersonationURL = fmt.Sprintf(
+			"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/%s:generateAccessToken",
+			url.PathEscape(spec.ServiceAccountEmail))
 	}
 
 	switch spec.ProviderType {
 	case "aws":
-		config["credential_source"] = map[string]interface{}{
-			"environment_id":                 "aws1",
-			"region_url":                     "http://169.254.169.254/latest/meta-data/placement/availability-zone",
-			"url":                            "http://169.254.169.254/latest/meta-data/iam/security-credentials",
-			"regional_cred_verification_url": "https://sts.{region}.amazonaws.com?Action=GetCallerIdentity&Version=2011-06-15",
+		cfg.SubjectTokenType = "urn:ietf:params:aws:token-type:aws4_request"
+		cfg.CredentialSource = awsSource{
+			EnvironmentID: "aws1",
+			RegionURL:     "http://169.254.169.254/latest/meta-data/placement/availability-zone",
+			URL:           "http://169.254.169.254/latest/meta-data/iam/security-credentials",
+			// Without this, the Google client uses IMDSv1 and fails on any
+			// instance configured for IMDSv2 only.
+			IMDSv2SessionTokenURL:       "http://169.254.169.254/latest/api/token",
+			RegionalCredVerificationURL: "https://sts.{region}.amazonaws.com?Action=GetCallerIdentity&Version=2011-06-15",
 		}
 	case "oidc":
-		config["credential_source"] = map[string]interface{}{
-			"file": "/var/run/secrets/tokens/gcp-token",
-		}
+		cfg.CredentialSource = fileSource{File: "/var/run/secrets/tokens/gcp-token"}
 	}
 
-	// Return as formatted JSON string
-	return fmt.Sprintf("%v", config)
+	out, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("gcp: rendering credential config: %w", err)
+	}
+	return string(out), nil
 }
 
+// isNotFoundError reports whether err means "the resource is absent", as opposed
+// to "we could not tell" — a distinction Setup's create-or-update decision and
+// the rollback both depend on.
+//
+// The typed check comes first. The substring fallback remains because this
+// package's clients are interfaces with no typed errors of their own: unlike AWS,
+// there is no NoSuchEntityException to match on, so a real implementation's
+// errors arrive already stringified. That is a gap in the client interface rather
+// than something this function can fix, and it is why the typed check is tried
+// first and the string match is last.
 func isNotFoundError(err error) bool {
 	if err == nil {
 		return false
 	}
-	return strings.Contains(err.Error(), "not found") ||
-		strings.Contains(err.Error(), "404") ||
-		cloudauth.IsCategory(err, cloudauth.ErrCategoryNotFound)
+	if core.IsCategory(err, core.ErrCategoryNotFound) {
+		return true
+	}
+	var apiErr interface{ NotFound() bool }
+	if errors.As(err, &apiErr) && apiErr.NotFound() {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "not found") ||
+		strings.Contains(msg, "notfound") ||
+		strings.Contains(msg, "404")
 }
 
 // Validators
@@ -945,24 +957,24 @@ func (v *poolExistsValidator) Description() string {
 	return "Checks if the Workload Identity Pool exists"
 }
 
-func (v *poolExistsValidator) Validate(ctx context.Context, ref cloudauth.MechanismRef) cloudauth.ValidationCheck {
-	check := cloudauth.ValidationCheck{
+func (v *poolExistsValidator) Validate(ctx context.Context, ref core.MechanismRef) core.ValidationCheck {
+	check := core.ValidationCheck{
 		ID:          v.ID(),
 		Name:        v.Name(),
 		Description: v.Description(),
-		Severity:    cloudauth.SeverityCritical,
+		Severity:    core.SeverityCritical,
 		Evidence:    map[string]interface{}{"pool_name": v.name},
 	}
 
 	pool, err := v.client.GetWorkloadIdentityPool(ctx, v.name)
 	if err != nil {
-		check.Status = cloudauth.CheckStatusFailed
+		check.Status = core.CheckStatusFailed
 		check.Evidence["error"] = err.Error()
 		check.Remediation = "Create the Workload Identity Pool or run setup again"
 		return check
 	}
 
-	check.Status = cloudauth.CheckStatusPassed
+	check.Status = core.CheckStatusPassed
 	check.Evidence["state"] = pool.State
 	check.Evidence["disabled"] = pool.Disabled
 	return check
@@ -979,24 +991,24 @@ func (v *providerExistsValidator) Description() string {
 	return "Checks if the Workload Identity Provider exists"
 }
 
-func (v *providerExistsValidator) Validate(ctx context.Context, ref cloudauth.MechanismRef) cloudauth.ValidationCheck {
-	check := cloudauth.ValidationCheck{
+func (v *providerExistsValidator) Validate(ctx context.Context, ref core.MechanismRef) core.ValidationCheck {
+	check := core.ValidationCheck{
 		ID:          v.ID(),
 		Name:        v.Name(),
 		Description: v.Description(),
-		Severity:    cloudauth.SeverityCritical,
+		Severity:    core.SeverityCritical,
 		Evidence:    map[string]interface{}{"provider_name": v.name},
 	}
 
 	provider, err := v.client.GetWorkloadIdentityPoolProvider(ctx, v.name)
 	if err != nil {
-		check.Status = cloudauth.CheckStatusFailed
+		check.Status = core.CheckStatusFailed
 		check.Evidence["error"] = err.Error()
 		check.Remediation = "Create the Workload Identity Provider or run setup again"
 		return check
 	}
 
-	check.Status = cloudauth.CheckStatusPassed
+	check.Status = core.CheckStatusPassed
 	check.Evidence["state"] = provider.State
 	return check
 }
@@ -1013,30 +1025,30 @@ func (v *serviceAccountExistsValidator) Description() string {
 	return "Checks if the Service Account exists"
 }
 
-func (v *serviceAccountExistsValidator) Validate(ctx context.Context, ref cloudauth.MechanismRef) cloudauth.ValidationCheck {
-	check := cloudauth.ValidationCheck{
+func (v *serviceAccountExistsValidator) Validate(ctx context.Context, ref core.MechanismRef) core.ValidationCheck {
+	check := core.ValidationCheck{
 		ID:          v.ID(),
 		Name:        v.Name(),
 		Description: v.Description(),
-		Severity:    cloudauth.SeverityCritical,
+		Severity:    core.SeverityCritical,
 		Evidence:    map[string]interface{}{"email": v.email},
 	}
 
 	saName := fmt.Sprintf("projects/%s/serviceAccounts/%s", v.projectID, v.email)
 	sa, err := v.client.GetServiceAccount(ctx, saName)
 	if err != nil {
-		check.Status = cloudauth.CheckStatusFailed
+		check.Status = core.CheckStatusFailed
 		check.Evidence["error"] = err.Error()
 		check.Remediation = "Create the Service Account or run setup again"
 		return check
 	}
 
-	check.Status = cloudauth.CheckStatusPassed
+	check.Status = core.CheckStatusPassed
 	check.Evidence["unique_id"] = sa.UniqueID
 	return check
 }
 
 func init() {
 	// Register with default registry
-	cloudauth.Register(New())
+	core.Register(New())
 }

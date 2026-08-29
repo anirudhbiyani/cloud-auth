@@ -4,15 +4,15 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// Implements the cloudauth validation source interfaces so the core's
-// trust-policy and permission checks run against live Entra state. cloudauth is
+// Implements core's validation source interfaces so its
+// trust-policy and permission checks run against live Entra state. core is
 // the leaf package, so the dependency is inverted through these interfaces.
 var (
-	_ cloudauth.TrustPolicySource   = (*Provider)(nil)
-	_ cloudauth.GrantedPolicySource = (*Provider)(nil)
+	_ core.TrustPolicySource   = (*Provider)(nil)
+	_ core.GrantedPolicySource = (*Provider)(nil)
 )
 
 // TrustPolicy reads the live federated identity credential.
@@ -24,7 +24,11 @@ var (
 // normalization, so a case-only difference surfaces as a mismatch instead of
 // being silently "corrected" here and then failing at exchange time with an
 // opaque AADSTS70021.
-func (p *Provider) TrustPolicy(ctx context.Context, ref cloudauth.MechanismRef) (*cloudauth.TrustPolicy, error) {
+func (p *Provider) TrustPolicy(ctx context.Context, ref core.MechanismRef) (*core.TrustPolicy, error) {
+	// The client needed depends on where the credential lives: an app
+	// registration's FICs come from Graph, a user-assigned managed identity's
+	// from ARM. Guarding per branch keeps the error accurate — demanding Graph
+	// for a managed-identity mechanism would report the wrong missing client.
 	var (
 		cred *FederatedIdentityCredential
 		err  error
@@ -41,6 +45,9 @@ func (p *Provider) TrustPolicy(ctx context.Context, ref cloudauth.MechanismRef) 
 		if credID == "" {
 			return nil, fmt.Errorf("azure: mechanism ref %q names an application but no federated credential", ref.ID)
 		}
+		if err := p.requireClients(true, false); err != nil {
+			return nil, err
+		}
 		cred, err = p.graphClient.GetFederatedIdentityCredential(ctx, appID, credID)
 		if err != nil {
 			return nil, fmt.Errorf("azure: reading federated credential %s on app %s: %w", credID, appID, err)
@@ -54,6 +61,9 @@ func (p *Provider) TrustPolicy(ctx context.Context, ref cloudauth.MechanismRef) 
 		}
 		if credName == "" {
 			return nil, fmt.Errorf("azure: mechanism ref %q names a managed identity but no federated credential", ref.ID)
+		}
+		if err := p.requireClients(false, true); err != nil {
+			return nil, err
 		}
 		cred, err = p.armClient.GetManagedIdentityFederatedCredential(ctx,
 			ref.ResourceIDs["subscription_id"],
@@ -74,7 +84,7 @@ func (p *Provider) TrustPolicy(ctx context.Context, ref cloudauth.MechanismRef) 
 		return nil, fmt.Errorf("azure: federated credential not found for mechanism %q", ref.ID)
 	}
 
-	tp := &cloudauth.TrustPolicy{
+	tp := &core.TrustPolicy{
 		Issuer:    cred.Issuer,
 		Audiences: append([]string(nil), cred.Audiences...),
 	}
@@ -94,7 +104,10 @@ func (p *Provider) TrustPolicy(ctx context.Context, ref cloudauth.MechanismRef) 
 // As on the other providers this checks assignment, not effective permission:
 // it catches a role that was removed, not a custom role definition that was
 // narrowed.
-func (p *Provider) GrantedPolicies(ctx context.Context, ref cloudauth.MechanismRef) ([]string, error) {
+func (p *Provider) GrantedPolicies(ctx context.Context, ref core.MechanismRef) ([]string, error) {
+	if err := p.requireClients(false, true); err != nil {
+		return nil, err
+	}
 	principalID := ref.ResourceIDs["service_principal_id"]
 	if principalID == "" {
 		principalID = ref.ResourceIDs["principal_id"]
@@ -136,7 +149,7 @@ func (p *Provider) GrantedPolicies(ctx context.Context, ref cloudauth.MechanismR
 // mechanism ref so a later Validate can compare the live federated credential
 // against what was configured. Entra matches these case-sensitively, so they
 // are stored verbatim with no normalization.
-func recordExpectedTrust(resourceIDs map[string]string, spec *cloudauth.AzureFederatedCredentialSpec) {
+func recordExpectedTrust(resourceIDs map[string]string, spec *core.AzureFederatedCredentialSpec) {
 	if spec == nil {
 		return
 	}

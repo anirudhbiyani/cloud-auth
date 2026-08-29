@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
 type stubWIF struct {
@@ -34,10 +34,10 @@ const (
 	saEmail      = "sa@proj.iam.gserviceaccount.com"
 )
 
-func gcpRef() cloudauth.MechanismRef {
-	return cloudauth.MechanismRef{
+func gcpRef() core.MechanismRef {
+	return core.MechanismRef{
 		ID:   "m",
-		Type: cloudauth.MechanismGCPWorkloadIdentityPool,
+		Type: core.MechanismGCPWorkloadIdentityPool,
 		ResourceIDs: map[string]string{
 			"provider_name":         providerName,
 			"service_account_email": saEmail,
@@ -88,10 +88,10 @@ func TestGCPMissingAttributeConditionIsUnscoped(t *testing.T) {
 		t.Fatalf("subjects = %v; an absent attribute condition must surface as the wildcard \"*\"", tp.Subjects)
 	}
 	// ...and the core validator must therefore fail it outright.
-	v := cloudauth.NewTrustPolicyMatchValidator("https://issuer.example", "", "anything",
-		cloudauth.WithTrustPolicySource(p))
+	v := core.NewTrustPolicyMatchValidator("https://issuer.example", "", "anything",
+		core.WithTrustPolicySource(p))
 	got := v.Validate(context.Background(), gcpRef())
-	if got.Status != cloudauth.CheckStatusFailed {
+	if got.Status != core.CheckStatusFailed {
 		t.Errorf("status = %s, want failed for an unscoped pool provider", got.Status)
 	}
 	if !strings.Contains(strings.ToLower(got.Message), "unscoped") {
@@ -150,7 +150,7 @@ func TestGCPTrustPolicyErrors(t *testing.T) {
 	})
 	t.Run("requires provider_name", func(t *testing.T) {
 		p := &Provider{wifClient: &stubWIF{}}
-		if _, err := p.TrustPolicy(context.Background(), cloudauth.MechanismRef{ID: "x"}); err == nil {
+		if _, err := p.TrustPolicy(context.Background(), core.MechanismRef{ID: "x"}); err == nil {
 			t.Error("expected an error without provider_name")
 		}
 	})
@@ -171,6 +171,6 @@ func TestGCPGrantedPoliciesReturnsBoundRoles(t *testing.T) {
 }
 
 func TestGCPProviderSatisfiesInterfaces(t *testing.T) {
-	var _ cloudauth.TrustPolicySource = (*Provider)(nil)
-	var _ cloudauth.GrantedPolicySource = (*Provider)(nil)
+	var _ core.TrustPolicySource = (*Provider)(nil)
+	var _ core.GrantedPolicySource = (*Provider)(nil)
 }

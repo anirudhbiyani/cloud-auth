@@ -9,7 +9,7 @@ Legend: pts ≈ ideal-days. `→` = depends on.
 ## E1 — Core types & interfaces  ·  Sprint 1  ·  [P0 foundation]
 - **T1.1 Define core domain types** (2) — `Cloud`, `Target`, `SourceToken{Kind,Value,Issuer,Subject,Audience,Expiry}`, `Runtime`, `Credentials`. AC: compiles; documented; `var _` interface assertions where applicable.
 - **T1.2 Define `SourceProvider`, `Exchanger` interfaces** (1) → T1.1. AC: interfaces match TDD §5.1/§6.1; godoc complete.
-- **T1.3 Public façade `cloudauth.NewCredentialsProvider`** (2) → T1.2. AC: signature per PRD §8 SDK example; returns adapter given detected source + explicit target.
+- **T1.3 Public façade `core.NewCredentialsProvider`** (2) → T1.2. AC: signature per PRD §8 SDK example; returns adapter given detected source + explicit target.
 - **T1.4 Injectable `Clock` + test helpers** (1). AC: all time reads go through `Clock`; fake clock in tests.
 
 ## E2 — IMDSv2 client  ·  Sprint 1  ·  [P0-6]
@@ -46,7 +46,7 @@ Legend: pts ≈ ideal-days. `→` = depends on.
 
 ## E8 — Config & policy  ·  Sprint 5  ·  [P0-5]
 - **T8.1 Config schema + loader (file/env/code precedence)** (3) → T1.1. AC: `code>env>file`; `CLOUD_AUTH_*` env; unmarshals to validated struct.
-- **T8.2 Strict fail-closed validation** (3) → T8.1. AC: audience required per target; malformed ARN/pool/tenant, duplicate names, unknown cloud all error before network; reuses `cloudauth/validation.go`.
+- **T8.2 Strict fail-closed validation** (3) → T8.1. AC: audience required per target; malformed ARN/pool/tenant, duplicate names, unknown cloud all error before network; reuses `core/validation.go`.
 - **T8.3 `cloud-auth.schema.json` + fuzz tests** (2) → T8.2. AC: schema published; fuzz corpus of invalid configs all rejected.
 
 ## E9 — `cloud-auth doctor` / `validate`  ·  Sprints 2,5,6  ·  [P0-1, P0-5]

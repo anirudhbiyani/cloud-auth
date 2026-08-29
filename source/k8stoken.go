@@ -5,8 +5,11 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"net"
 	"net/http"
+	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anirudhbiyani/cloud-auth/internal/jwt"
@@ -87,17 +90,18 @@ func inClusterClient(
 		return nil, false
 	}
 
-	// Build an HTTP client trusting the in-cluster CA if present.
-	transport := &http.Transport{}
-	if ca, err := readFile(k8stoken.CACertFile); err == nil && len(ca) > 0 {
-		pool := x509.NewCertPool()
-		if pool.AppendCertsFromPEM(ca) {
-			transport.TLSClientConfig = &tls.Config{RootCAs: pool}
-		}
+	// Build an HTTP client trusting the in-cluster CA.
+	//
+	// A malformed CA is an error rather than a silent fall-through to the system
+	// roots: the API server's certificate is issued by the cluster CA, so
+	// ignoring an unparseable ca.crt just moves the failure to an opaque TLS
+	// error later.
+	httpClient, err := inClusterHTTPClient(readFile)
+	if err != nil {
+		return nil, false
 	}
-	httpClient := &http.Client{Timeout: 5 * time.Second, Transport: transport}
 
-	baseURL := fmt.Sprintf("https://%s:%s", host, port)
+	baseURL := "https://" + net.JoinHostPort(host, port)
 	return k8stoken.New(
 		k8stoken.WithBaseURL(baseURL),
 		k8stoken.WithHTTPClient(httpClient),
@@ -120,6 +124,12 @@ func namespaceAndServiceAccount(
 		rest := strings.TrimPrefix(claims.Subject, prefix)
 		if i := strings.IndexByte(rest, ':'); i > 0 && i < len(rest)-1 {
 			ns, sa = rest[:i], rest[i+1:]
+			// The subject comes from a JWT read at an env-supplied path and both
+			// halves are interpolated into an API-server URL. Real Kubernetes names
+			// are DNS labels, so requiring that costs nothing and closes the path.
+			if !isDNSLabel(ns) || !isDNSLabel(sa) {
+				return "", "", false
+			}
 			return ns, sa, true
 		}
 		// sub had the prefix but no SA component; fall through to try the file.
@@ -128,9 +138,58 @@ func namespaceAndServiceAccount(
 	if b, err := readFile(k8stoken.NamespaceFile); err == nil {
 		fileNS := strings.TrimSpace(string(b))
 		saName := strings.TrimPrefix(claims.Subject, prefix)
-		if fileNS != "" && saName != "" && saName != claims.Subject {
+		if isDNSLabel(fileNS) && isDNSLabel(saName) && saName != claims.Subject {
 			return fileNS, saName, true
 		}
 	}
 	return "", "", false
+}
+
+// dnsLabel matches a Kubernetes namespace or service-account name.
+var dnsLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
+
+func isDNSLabel(s string) bool { return dnsLabel.MatchString(s) }
+
+// inClusterClientOnce caches the derived client. inClusterClient used to build a
+// fresh http.Transport per mint and never close it, so each dynamic-audience
+// token leaked a connection pool for the default 90-second idle window.
+var (
+	inClusterClientOnce sync.Once
+	inClusterHTTP       *http.Client
+	inClusterHTTPErr    error
+)
+
+func inClusterHTTPClient(readFile func(string) ([]byte, error)) (*http.Client, error) {
+	inClusterClientOnce.Do(func() {
+		ca, err := readFile(k8stoken.CACertFile)
+		if err != nil {
+			inClusterHTTPErr = fmt.Errorf("reading in-cluster CA: %w", err)
+			return
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(ca) {
+			inClusterHTTPErr = fmt.Errorf("in-cluster CA at %s is not valid PEM", k8stoken.CACertFile)
+			return
+		}
+		transport := &http.Transport{
+			// No proxy: the API server is reached in-cluster.
+			Proxy:               nil,
+			TLSClientConfig:     &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12},
+			MaxIdleConns:        4,
+			IdleConnTimeout:     30 * time.Second,
+			TLSHandshakeTimeout: 5 * time.Second,
+			ForceAttemptHTTP2:   true,
+		}
+		inClusterHTTP = &http.Client{
+			Timeout:   5 * time.Second,
+			Transport: transport,
+			// The API server has no reason to redirect a TokenRequest, and the
+			// request carries the pod's own bearer token.
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return fmt.Errorf("kubernetes API server attempted a redirect; refusing to " +
+					"forward the pod's service-account token")
+			},
+		}
+	})
+	return inClusterHTTP, inClusterHTTPErr
 }

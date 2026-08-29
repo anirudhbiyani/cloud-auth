@@ -7,39 +7,39 @@ import (
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
 // fakeSource / fakeExchanger let us test adapters without a live cloud.
 type fakeSource struct{ minted int }
 
-func (f *fakeSource) Detect(ctx context.Context) (*cloudauth.Runtime, error) {
-	return &cloudauth.Runtime{Cloud: cloudauth.GCP, Federatable: true}, nil
+func (f *fakeSource) Detect(ctx context.Context) (*core.Runtime, error) {
+	return &core.Runtime{Cloud: core.GCP, Federatable: true}, nil
 }
-func (f *fakeSource) Mint(ctx context.Context, audience string) (*cloudauth.SourceToken, error) {
+func (f *fakeSource) Mint(ctx context.Context, audience string) (*core.SourceToken, error) {
 	f.minted++
-	return &cloudauth.SourceToken{Kind: cloudauth.OIDC, Value: "jwt", Audience: audience}, nil
+	return &core.SourceToken{Kind: core.OIDC, Value: "jwt", Audience: audience}, nil
 }
 
 type fakeExchanger struct {
-	creds *cloudauth.Credentials
+	creds *core.Credentials
 	calls int
 }
 
-func (f *fakeExchanger) Exchange(ctx context.Context, tok *cloudauth.SourceToken, target cloudauth.Target) (*cloudauth.Credentials, error) {
+func (f *fakeExchanger) Exchange(ctx context.Context, tok *core.SourceToken, target core.Target) (*core.Credentials, error) {
 	f.calls++
 	return f.creds, nil
 }
 
 func TestAWSAdapterRetrieveMapsAndCaches(t *testing.T) {
 	base := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
-	clk := cloudauth.NewFakeClock(base)
+	clk := core.NewFakeClock(base)
 	src := &fakeSource{}
-	ex := &fakeExchanger{creds: &cloudauth.Credentials{
-		Cloud: cloudauth.AWS, AccessKeyID: "AKIA", SecretAccessKey: "sk", SessionToken: "st",
+	ex := &fakeExchanger{creds: &core.Credentials{
+		Cloud: core.AWS, AccessKeyID: "AKIA", SecretAccessKey: "sk", SessionToken: "st",
 		Expiry: base.Add(time.Hour),
 	}}
-	target := cloudauth.Target{Cloud: cloudauth.AWS, Role: "arn:...:role/r", Audience: "sts.amazonaws.com"}
+	target := core.AWSTarget{RoleARN: "arn:aws:iam::123456789012:role/r"}
 
 	p := NewAWS(src, ex, target, WithClock(clk))
 
@@ -64,3 +64,22 @@ func TestAWSAdapterRetrieveMapsAndCaches(t *testing.T) {
 
 // Compile-time proof the adapter satisfies the AWS SDK interface.
 var _ awssdk.CredentialsProvider = (*AWSProvider)(nil)
+
+// Each adapter must expose invalidation, or a caller holding a revoked session
+// has no way to recover except waiting out the refresh buffer.
+func TestAdaptersExposeInvalidate(t *testing.T) {
+	src, ex := &fakeSource{}, &fakeExchanger{}
+	target := core.AWSTarget{RoleARN: "arn:aws:iam::123456789012:role/r"}
+	type invalidator interface{ Invalidate() }
+	for name, p := range map[string]invalidator{
+		"aws":   NewAWS(src, ex, target),
+		"gcp":   NewGCP(src, ex, target),
+		"azure": NewAzure(src, ex, target),
+	} {
+		if p == nil {
+			t.Errorf("%s adapter does not expose Invalidate", name)
+			continue
+		}
+		p.Invalidate() // must not panic on a cold cache
+	}
+}

@@ -15,7 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
 // Probe names used in targets.json.
@@ -50,8 +50,8 @@ func STSGetCallerIdentityProbe(client *http.Client) Probe {
 	if client == nil {
 		client = &http.Client{Timeout: probeHTTPTimeout}
 	}
-	return func(ctx context.Context, creds *cloudauth.Credentials, c Case) (string, error) {
-		if creds == nil || creds.Cloud != cloudauth.AWS {
+	return func(ctx context.Context, creds *core.Credentials, c Case) (string, error) {
+		if creds == nil || creds.Cloud != core.AWS {
 			return "", fmt.Errorf("%s probe needs AWS credentials, got cloud %q", ProbeSTSGetCallerIdentity, credCloud(creds))
 		}
 		body := url.Values{"Action": {"GetCallerIdentity"}, "Version": {"2011-06-15"}}.Encode()
@@ -100,7 +100,7 @@ func sha256Hex(body string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func credCloud(c *cloudauth.Credentials) cloudauth.Cloud {
+func credCloud(c *core.Credentials) core.Cloud {
 	if c == nil {
 		return ""
 	}

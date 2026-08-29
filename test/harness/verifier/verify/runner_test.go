@@ -8,18 +8,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
 // fakeExchanger stands in for *broker.Broker: same method shape, no cloud.
 type fakeExchanger struct {
-	creds *cloudauth.Credentials
-	rt    *cloudauth.Runtime
+	creds *core.Credentials
+	rt    *core.Runtime
 	err   error
-	calls []cloudauth.Target
+	calls []core.Target
 }
 
-func (f *fakeExchanger) Exchange(ctx context.Context, t cloudauth.Target) (*cloudauth.Credentials, *cloudauth.Runtime, error) {
+func (f *fakeExchanger) Exchange(ctx context.Context, t core.Target) (*core.Credentials, *core.Runtime, error) {
 	f.calls = append(f.calls, t)
 	return f.creds, f.rt, f.err
 }
@@ -36,9 +36,9 @@ func testRunner(ex Exchanger) *Runner {
 	}
 }
 
-func awsCreds() *cloudauth.Credentials {
-	return &cloudauth.Credentials{
-		Cloud:           cloudauth.AWS,
+func awsCreds() *core.Credentials {
+	return &core.Credentials{
+		Cloud:           core.AWS,
 		AccessKeyID:     "ASIAEXAMPLEKEYID0000",
 		SecretAccessKey: "wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY",
 		SessionToken:    "FwoGZXIvYXdzEExampleSessionTokenValue0000000000",
@@ -57,7 +57,7 @@ func successCase() Case {
 func TestRunCaseSuccess(t *testing.T) {
 	ex := &fakeExchanger{
 		creds: awsCreds(),
-		rt:    &cloudauth.Runtime{Cloud: cloudauth.GCP, SubRuntime: "gce", Issuer: "https://accounts.google.com", Subject: "1098765"},
+		rt:    &core.Runtime{Cloud: core.GCP, SubRuntime: "gce", Issuer: "https://accounts.google.com", Subject: "1098765"},
 	}
 	res := testRunner(ex).RunCase(context.Background(), successCase())
 
@@ -76,7 +76,7 @@ func TestRunCaseSuccess(t *testing.T) {
 	if res.Identity.Role != "arn:aws:iam::123:role/x" {
 		t.Errorf("role = %q, want the target role recorded", res.Identity.Role)
 	}
-	if len(ex.calls) != 1 || ex.calls[0].Audience != "sts.amazonaws.com" {
+	if len(ex.calls) != 1 || ex.calls[0].Audience() != "sts.amazonaws.com" {
 		t.Errorf("exchange calls = %+v", ex.calls)
 	}
 	if res.Probe.Status != ProbeNotRequested {
@@ -88,9 +88,9 @@ func TestRunCaseSuccessFailures(t *testing.T) {
 	expiredCreds := awsCreds()
 	expiredCreds.Expiry = testNow.Add(10 * time.Second) // inside the 30s skew
 
-	emptyCreds := &cloudauth.Credentials{Cloud: cloudauth.AWS, Expiry: testNow.Add(time.Hour)}
+	emptyCreds := &core.Credentials{Cloud: core.AWS, Expiry: testNow.Add(time.Hour)}
 
-	gcpNoToken := &cloudauth.Credentials{Cloud: cloudauth.GCP, Expiry: testNow.Add(time.Hour)}
+	gcpNoToken := &core.Credentials{Cloud: core.GCP, Expiry: testNow.Add(time.Hour)}
 
 	tests := []struct {
 		name    string
@@ -144,7 +144,7 @@ func gapCase() Case {
 
 func TestRunCaseExpectedSentinelError(t *testing.T) {
 	// The documented AWS-EC2 -> Azure gap: it must fail, with this error.
-	wrapped := fmt.Errorf("cloud-auth: exchange: %w: SigV4 proof is not RS256 OIDC", cloudauth.ErrNoFirstClassPath)
+	wrapped := fmt.Errorf("cloud-auth: exchange: %w: SigV4 proof is not RS256 OIDC", core.ErrNoFirstClassPath)
 	res := testRunner(&fakeExchanger{err: wrapped}).RunCase(context.Background(), gapCase())
 
 	if res.Status != StatusPass {
@@ -163,7 +163,7 @@ func TestRunCaseExpectedErrorMismatches(t *testing.T) {
 	}{
 		{
 			"wrong sentinel",
-			&fakeExchanger{err: fmt.Errorf("nope: %w", cloudauth.ErrTrustMissing)},
+			&fakeExchanger{err: fmt.Errorf("nope: %w", core.ErrTrustMissing)},
 			"want ErrNoFirstClassPath",
 		},
 		{
@@ -173,7 +173,7 @@ func TestRunCaseExpectedErrorMismatches(t *testing.T) {
 		},
 		{
 			"unexpected success",
-			&fakeExchanger{creds: &cloudauth.Credentials{Cloud: cloudauth.Azure, AccessToken: "tok", Expiry: testNow.Add(time.Hour)}},
+			&fakeExchanger{creds: &core.Credentials{Cloud: core.Azure, AccessToken: "tok", Expiry: testNow.Add(time.Hour)}},
 			"succeeded",
 		},
 	}
@@ -193,7 +193,7 @@ func TestRunCaseExpectedErrorMismatches(t *testing.T) {
 func TestRunCaseUnknownSentinelNameFails(t *testing.T) {
 	c := gapCase()
 	c.ExpectError = "ErrMadeUp"
-	res := testRunner(&fakeExchanger{err: cloudauth.ErrNoFirstClassPath}).RunCase(context.Background(), c)
+	res := testRunner(&fakeExchanger{err: core.ErrNoFirstClassPath}).RunCase(context.Background(), c)
 	if res.Status != StatusFail || !strings.Contains(res.Error, "unknown sentinel") {
 		t.Errorf("result = %+v, want fail mentioning unknown sentinel", res)
 	}
@@ -210,21 +210,21 @@ func TestRunCaseProbeOutcomesAreSoft(t *testing.T) {
 	}{
 		{
 			"probe ok", "ok-probe",
-			map[string]Probe{"ok-probe": func(context.Context, *cloudauth.Credentials, Case) (string, error) {
+			map[string]Probe{"ok-probe": func(context.Context, *core.Credentials, Case) (string, error) {
 				return "arn:aws:sts::123:assumed-role/x/y", nil
 			}},
 			false, StatusPass, ProbeOK,
 		},
 		{
 			"probe fails but case still passes", "bad-probe",
-			map[string]Probe{"bad-probe": func(context.Context, *cloudauth.Credentials, Case) (string, error) {
+			map[string]Probe{"bad-probe": func(context.Context, *core.Credentials, Case) (string, error) {
 				return "", errors.New("403 from sts")
 			}},
 			false, StatusPass, ProbeSoftFail,
 		},
 		{
 			"probe fails under -probe-strict", "bad-probe",
-			map[string]Probe{"bad-probe": func(context.Context, *cloudauth.Credentials, Case) (string, error) {
+			map[string]Probe{"bad-probe": func(context.Context, *core.Credentials, Case) (string, error) {
 				return "", errors.New("403 from sts")
 			}},
 			true, StatusFail, ProbeSoftFail,
@@ -235,7 +235,7 @@ func TestRunCaseProbeOutcomesAreSoft(t *testing.T) {
 		},
 		{
 			"panicking probe does not crash the run", "panic-probe",
-			map[string]Probe{"panic-probe": func(context.Context, *cloudauth.Credentials, Case) (string, error) {
+			map[string]Probe{"panic-probe": func(context.Context, *core.Credentials, Case) (string, error) {
 				panic("probe exploded")
 			}},
 			false, StatusPass, ProbeSoftFail,

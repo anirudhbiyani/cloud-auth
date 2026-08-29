@@ -13,7 +13,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
 // Config is the top-level federation config (schema version 1).
@@ -26,7 +26,13 @@ type Config struct {
 
 // Source configures runtime detection.
 type Source struct {
-	Detect string `yaml:"detect"` // "auto" or a forced sub-runtime
+	// Detect pins which runtime the workload may authenticate as: "auto" (the
+	// default), a cloud ("aws"), or a cloud and sub-runtime ("aws-ec2").
+	//
+	// A mismatch is a hard error. That is the point: auto-detection picks an
+	// identity by probe order, and a host can satisfy more than one probe, so an
+	// operator who knows where the workload runs can refuse anything else.
+	Detect string `yaml:"detect"`
 }
 
 // Refresh configures credential refresh timing.
@@ -44,6 +50,8 @@ type Target struct {
 	ImpersonateServiceAccount string `yaml:"impersonate_service_account"`
 	Tenant                    string `yaml:"tenant"`
 	ClientID                  string `yaml:"client_id"`
+	Scope                     string `yaml:"scope"`
+	SessionName               string `yaml:"session_name"`
 }
 
 // Load reads, applies environment overrides, and validates a config file.
@@ -95,7 +103,7 @@ func (c *Config) Validate() error {
 		}
 		seen[t.Name] = true
 
-		cloud, err := cloudauth.ParseCloud(t.Cloud)
+		cloud, err := core.ParseFederationTarget(t.Cloud)
 		if err != nil {
 			return fmt.Errorf("config: target %q: %w", t.Name, err)
 		}
@@ -108,7 +116,19 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("config: refresh.buffer %q: %w", c.Refresh.Buffer, err)
 		}
 	}
+	// Reject an unparseable selector here rather than at first exchange. A typo
+	// in a field whose whole purpose is to constrain which identity may be used
+	// must fail loudly: silently falling back to auto would leave the operator
+	// believing they had pinned something.
+	if _, err := c.SourceSelector(); err != nil {
+		return fmt.Errorf("config: %w", err)
+	}
 	return nil
+}
+
+// SourceSelector returns the parsed source.detect restriction.
+func (c *Config) SourceSelector() (core.Selector, error) {
+	return core.ParseSelector(c.Source.Detect)
 }
 
 // RefreshBuffer returns the parsed refresh buffer (default 5m).
@@ -119,55 +139,83 @@ func (c *Config) RefreshBuffer() (time.Duration, error) {
 	return time.ParseDuration(c.Refresh.Buffer)
 }
 
-// Target resolves a named target into a cloudauth.Target.
-func (c *Config) Target(name string) (cloudauth.Target, error) {
+// Target resolves a named target into a core.Target.
+func (c *Config) Target(name string) (core.Target, error) {
 	for _, t := range c.Targets {
-		if t.Name == name {
-			cloud, err := cloudauth.ParseCloud(t.Cloud)
-			if err != nil {
-				return cloudauth.Target{}, err
-			}
-			return t.resolve(cloud)
+		if t.Name != name {
+			continue
 		}
+		cloud, err := core.ParseFederationTarget(t.Cloud)
+		if err != nil {
+			return nil, err
+		}
+		return t.resolve(cloud)
 	}
-	return cloudauth.Target{}, fmt.Errorf("config: no target named %q", name)
+	return nil, fmt.Errorf("config: no target named %q", name)
 }
 
-// resolve converts a config Target to a cloudauth.Target, applying per-cloud
-// defaults and required-field checks. Audience is required everywhere; for GCP
-// it defaults to the workload identity pool when unset.
-func (t Target) resolve(cloud cloudauth.Cloud) (cloudauth.Target, error) {
-	out := cloudauth.Target{
-		Cloud:                     cloud,
-		Audience:                  t.Audience,
-		Role:                      t.Role,
-		WorkloadIdentityPool:      t.WorkloadIdentityPool,
-		ImpersonateServiceAccount: t.ImpersonateServiceAccount,
-		Tenant:                    t.Tenant,
-		ClientID:                  t.ClientID,
-	}
+// resolve builds the concrete per-cloud target.
+//
+// The required-field checks live on each target type's Validate, so the config
+// layer no longer restates per-cloud rules — and a field belonging to another
+// cloud is now unrepresentable rather than silently ignored.
+func (t Target) resolve(cloud core.Cloud) (core.Target, error) {
+	var out core.Target
 	switch cloud {
-	case cloudauth.AWS:
-		if out.Role == "" {
-			return out, fmt.Errorf("aws target requires a role ARN")
+	case core.AWS:
+		out = core.AWSTarget{
+			RoleARN:       t.Role,
+			TokenAudience: t.Audience,
+			SessionName:   t.SessionName,
 		}
-	case cloudauth.GCP:
-		if out.WorkloadIdentityPool == "" {
-			return out, fmt.Errorf("gcp target requires workload_identity_pool")
+	case core.GCP:
+		out = core.GCPTarget{
+			WorkloadIdentityPool:      t.WorkloadIdentityPool,
+			ImpersonateServiceAccount: t.ImpersonateServiceAccount,
+			TokenAudience:             t.Audience,
 		}
-		if out.Audience == "" {
-			out.Audience = out.WorkloadIdentityPool
+	case core.Azure:
+		out = core.AzureTarget{
+			Tenant:        t.Tenant,
+			ClientID:      t.ClientID,
+			TokenAudience: t.Audience,
+			Scope:         t.Scope,
 		}
-	case cloudauth.Azure:
-		if out.Tenant == "" || out.ClientID == "" {
-			return out, fmt.Errorf("azure target requires tenant and client_id")
-		}
-		if out.Audience == "" {
-			out.Audience = "api://AzureADTokenExchange"
-		}
+	default:
+		return nil, fmt.Errorf("unsupported target cloud %q", cloud)
 	}
-	if out.Audience == "" {
-		return out, fmt.Errorf("audience is required and must be pinned per target")
+
+	// Reject fields that belong to another cloud rather than ignoring them: a
+	// tenant on an AWS target means the operator has the wrong block, and
+	// silently dropping it is how a target ends up pointing somewhere unintended.
+	if err := t.rejectForeignFields(cloud); err != nil {
+		return nil, err
+	}
+	if err := out.Validate(); err != nil {
+		return nil, err
 	}
 	return out, nil
+}
+
+// rejectForeignFields reports config keys set for a different cloud.
+func (t Target) rejectForeignFields(cloud core.Cloud) error {
+	type field struct {
+		name  string
+		value string
+		owner core.Cloud
+	}
+	for _, f := range []field{
+		{"role", t.Role, core.AWS},
+		{"session_name", t.SessionName, core.AWS},
+		{"workload_identity_pool", t.WorkloadIdentityPool, core.GCP},
+		{"impersonate_service_account", t.ImpersonateServiceAccount, core.GCP},
+		{"tenant", t.Tenant, core.Azure},
+		{"client_id", t.ClientID, core.Azure},
+		{"scope", t.Scope, core.Azure},
+	} {
+		if f.value != "" && f.owner != cloud {
+			return fmt.Errorf("%q is a %s setting but this target's cloud is %s", f.name, f.owner, cloud)
+		}
+	}
+	return nil
 }

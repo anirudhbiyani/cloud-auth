@@ -13,7 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 	"github.com/anirudhbiyani/cloud-auth/internal/imds"
 )
 
@@ -79,7 +79,7 @@ func TestAWSMintPodIdentityRejectedWithGuidance(t *testing.T) {
 		"AWS_CONTAINER_CREDENTIALS_FULL_URI": "http://169.254.170.23/v1/credentials",
 	})))
 	_, err := a.Mint(context.Background(), "sts.amazonaws.com")
-	if !errors.Is(err, cloudauth.ErrNonFederatableSource) {
+	if !errors.Is(err, core.ErrNonFederatableSource) {
 		t.Fatalf("err = %v, want ErrNonFederatableSource", err)
 	}
 	// The message must point the user at an OIDC-native source.
@@ -101,7 +101,7 @@ func TestAWSMintIRSAReadsTokenFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Mint: %v", err)
 	}
-	if tok.Kind != cloudauth.OIDC {
+	if tok.Kind != core.OIDC {
 		t.Errorf("IRSA token kind = %v, want OIDC", tok.Kind)
 	}
 	if tok.Audience != "sts.amazonaws.com" {
@@ -136,12 +136,16 @@ func TestAWSMintEC2ProducesSigV4Proof(t *testing.T) {
 		WithAWSEnv(envFunc(nil)),
 		WithAWSRegion("us-east-1"),
 		WithAWSCredentials(credentials.NewStaticCredentialsProvider("AKIDEXAMPLE", "secret", "session-tok")),
+		// Pin the proof. The default prefers the STS-vended OIDC JWT, which needs
+		// a live sts:GetWebIdentityToken call; this test is about the SigV4 proof,
+		// so it says so rather than relying on whatever the default happens to be.
+		WithAWSProof(AWSProofSigV4),
 	)
 	tok, err := a.Mint(context.Background(), "//iam.googleapis.com/projects/1/locations/global/workloadIdentityPools/p/providers/aws")
 	if err != nil {
 		t.Fatalf("Mint: %v", err)
 	}
-	if tok.Kind != cloudauth.AWSSigV4 {
+	if tok.Kind != core.AWSSigV4 {
 		t.Fatalf("kind = %v, want AWSSigV4", tok.Kind)
 	}
 	// The serialized proof must be a replayable GetCallerIdentity request that

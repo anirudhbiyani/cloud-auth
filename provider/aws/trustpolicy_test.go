@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
 // stubIAM implements just enough of IAMClient for the trust-policy and
@@ -32,10 +32,10 @@ func (s *stubIAM) ListRolePolicies(context.Context, string) ([]string, error) {
 	return s.inline, s.inlineErr
 }
 
-func ref(role string) cloudauth.MechanismRef {
-	return cloudauth.MechanismRef{
+func ref(role string) core.MechanismRef {
+	return core.MechanismRef{
 		ID:          "test",
-		Type:        cloudauth.MechanismAWSRoleTrustOIDC,
+		Type:        core.MechanismAWSRoleTrustOIDC,
 		ResourceIDs: map[string]string{"role_name": role},
 	}
 }
@@ -121,7 +121,7 @@ func TestTrustPolicyErrors(t *testing.T) {
 	})
 	t.Run("requires a role name in the ref", func(t *testing.T) {
 		p := &Provider{client: &stubIAM{}}
-		if _, err := p.TrustPolicy(context.Background(), cloudauth.MechanismRef{ID: "x"}); err == nil {
+		if _, err := p.TrustPolicy(context.Background(), core.MechanismRef{ID: "x"}); err == nil {
 			t.Error("expected an error when the ref carries no role_name")
 		}
 	})
@@ -144,26 +144,26 @@ func TestGrantedPoliciesCombinesAttachedAndInline(t *testing.T) {
 // The whole point of the wiring: the core validators must actually run against
 // the provider rather than reporting "skipped".
 func TestProviderSatisfiesValidationSources(t *testing.T) {
-	var _ cloudauth.TrustPolicySource = (*Provider)(nil)
-	var _ cloudauth.GrantedPolicySource = (*Provider)(nil)
+	var _ core.TrustPolicySource = (*Provider)(nil)
+	var _ core.GrantedPolicySource = (*Provider)(nil)
 
 	p := &Provider{client: &stubIAM{
 		role:     &Role{AssumeRolePolicyDocument: ghPolicy},
 		attached: []string{"arn:aws:iam::aws:policy/ReadOnlyAccess"},
 	}}
-	v := cloudauth.NewTrustPolicyMatchValidator(
+	v := core.NewTrustPolicyMatchValidator(
 		"https://token.actions.githubusercontent.com", "sts.amazonaws.com",
 		"repo:myorg/myrepo:ref:refs/heads/main",
-		cloudauth.WithTrustPolicySource(p))
+		core.WithTrustPolicySource(p))
 	check := v.Validate(context.Background(), ref("r"))
-	if check.Status != cloudauth.CheckStatusPassed {
+	if check.Status != core.CheckStatusPassed {
 		t.Errorf("trust check = %s, want passed (message=%q)", check.Status, check.Message)
 	}
 
-	pv := cloudauth.NewPermissionsValidator(
+	pv := core.NewPermissionsValidator(
 		[]string{"arn:aws:iam::aws:policy/ReadOnlyAccess"},
-		cloudauth.WithGrantedPolicySource(p))
-	if got := pv.Validate(context.Background(), ref("r")); got.Status != cloudauth.CheckStatusPassed {
+		core.WithGrantedPolicySource(p))
+	if got := pv.Validate(context.Background(), ref("r")); got.Status != core.CheckStatusPassed {
 		t.Errorf("permissions check = %s, want passed (message=%q)", got.Status, got.Message)
 	}
 }
@@ -171,9 +171,9 @@ func TestProviderSatisfiesValidationSources(t *testing.T) {
 // End-to-end: Provider.Validate must now actually run the trust-policy and
 // permission checks, not just "role exists".
 func TestValidateRunsTrustAndPermissionChecks(t *testing.T) {
-	fullRef := cloudauth.MechanismRef{
+	fullRef := core.MechanismRef{
 		ID:   "m1",
-		Type: cloudauth.MechanismAWSRoleTrustOIDC,
+		Type: core.MechanismAWSRoleTrustOIDC,
 		ResourceIDs: map[string]string{
 			"role_name":            "r",
 			"expected_issuer":      "https://token.actions.githubusercontent.com",
@@ -188,7 +188,7 @@ func TestValidateRunsTrustAndPermissionChecks(t *testing.T) {
 			role:     &Role{RoleName: "r", AssumeRolePolicyDocument: ghPolicy},
 			attached: []string{"arn:aws:iam::aws:policy/ReadOnlyAccess"},
 		}}
-		rep, err := p.Validate(context.Background(), fullRef, cloudauth.ValidateOptions{})
+		rep, err := p.Validate(context.Background(), fullRef, core.ValidateOptions{})
 		if err != nil {
 			t.Fatalf("Validate: %v", err)
 		}
@@ -210,7 +210,7 @@ func TestValidateRunsTrustAndPermissionChecks(t *testing.T) {
 			role:     &Role{RoleName: "r", AssumeRolePolicyDocument: widened},
 			attached: []string{"arn:aws:iam::aws:policy/ReadOnlyAccess"},
 		}}
-		rep, _ := p.Validate(context.Background(), fullRef, cloudauth.ValidateOptions{})
+		rep, _ := p.Validate(context.Background(), fullRef, core.ValidateOptions{})
 		if rep.IsValid() {
 			t.Error("a wide-open subject condition must fail validation")
 		}
@@ -221,19 +221,19 @@ func TestValidateRunsTrustAndPermissionChecks(t *testing.T) {
 			role:     &Role{RoleName: "r", AssumeRolePolicyDocument: ghPolicy},
 			attached: nil, // policy was detached out-of-band
 		}}
-		rep, _ := p.Validate(context.Background(), fullRef, cloudauth.ValidateOptions{})
+		rep, _ := p.Validate(context.Background(), fullRef, core.ValidateOptions{})
 		if rep.IsValid() {
 			t.Error("a missing expected policy must fail validation")
 		}
 	})
 
 	t.Run("legacy ref without expectations degrades to skipped, not failed", func(t *testing.T) {
-		legacy := cloudauth.MechanismRef{
-			ID: "old", Type: cloudauth.MechanismAWSRoleTrustOIDC,
+		legacy := core.MechanismRef{
+			ID: "old", Type: core.MechanismAWSRoleTrustOIDC,
 			ResourceIDs: map[string]string{"role_name": "r"},
 		}
 		p := &Provider{client: &stubIAM{role: &Role{RoleName: "r", AssumeRolePolicyDocument: ghPolicy}}}
-		rep, err := p.Validate(context.Background(), legacy, cloudauth.ValidateOptions{})
+		rep, err := p.Validate(context.Background(), legacy, core.ValidateOptions{})
 		if err != nil {
 			t.Fatalf("Validate: %v", err)
 		}

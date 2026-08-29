@@ -20,5 +20,6 @@
         "attribute.aws_role": "assertion.arn.extract('/assumed-role/{role}/')"
     },
     "attribute_condition": "assertion.arn.startsWith('arn:aws:sts::987654321098:assumed-role/AllowedRole')",
-    "source": "aws"
+    "source": "aws",
+    "attribute_scope": "aws_role/AllowedRole"
 }

@@ -6,7 +6,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 	"github.com/anirudhbiyani/cloud-auth/internal/cache"
 )
 
@@ -17,7 +17,7 @@ type AzureProvider struct {
 }
 
 // NewAzure builds an AzureProvider.
-func NewAzure(src cloudauth.SourceProvider, ex cloudauth.Exchanger, target cloudauth.Target, opts ...Option) *AzureProvider {
+func NewAzure(src core.SourceProvider, ex core.Exchanger, target core.Target, opts ...Option) *AzureProvider {
 	return &AzureProvider{cache: newCache(src, ex, target, resolve(opts))}
 }
 
@@ -28,7 +28,15 @@ func (p *AzureProvider) GetToken(ctx context.Context, _ policy.TokenRequestOptio
 		return azcore.AccessToken{}, err
 	}
 	return azcore.AccessToken{
-		Token:     c.AccessToken,
+		Token:     c.Reveal().AccessToken,
 		ExpiresOn: c.Expiry,
 	}, nil
 }
+
+// Invalidate discards the cached credentials so the next call re-exchanges.
+//
+// Expiry cannot express revocation: a session dropped server-side, or a role
+// whose policy changed, still looks valid locally until it runs out. A caller
+// that has just seen a 403 knows more than the cache does, and this is how it
+// says so.
+func (p *AzureProvider) Invalidate() { p.cache.Invalidate() }

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
 func TestGCPDetectCloudRun(t *testing.T) {
@@ -18,7 +18,7 @@ func TestGCPDetectCloudRun(t *testing.T) {
 	if rt.SubRuntime != "cloud-run" {
 		t.Errorf("subruntime = %q, want cloud-run", rt.SubRuntime)
 	}
-	if rt.Cloud != cloudauth.GCP || !rt.Federatable {
+	if rt.Cloud != core.GCP || !rt.Federatable {
 		t.Errorf("runtime = %+v, want federatable gcp", rt)
 	}
 }
@@ -44,7 +44,7 @@ func TestGCPCloudRunMintUsesMetadataIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Mint: %v", err)
 	}
-	if tok.Kind != cloudauth.OIDC || tok.Audience != "sts.amazonaws.com" {
+	if tok.Kind != core.OIDC || tok.Audience != "sts.amazonaws.com" {
 		t.Errorf("token = %+v", tok)
 	}
 }

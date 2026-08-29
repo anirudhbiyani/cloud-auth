@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 	"github.com/anirudhbiyani/cloud-auth/internal/k8stoken"
 )
 
@@ -76,7 +76,7 @@ func TestAWSMintIRSAFallsBackToTokenRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Mint: %v", err)
 	}
-	if tok.Kind != cloudauth.OIDC {
+	if tok.Kind != core.OIDC {
 		t.Errorf("kind = %v, want OIDC", tok.Kind)
 	}
 	if tok.Audience != want {

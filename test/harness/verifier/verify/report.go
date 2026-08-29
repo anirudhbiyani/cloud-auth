@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
 // Process exit codes. The driver branches on these.
@@ -130,7 +130,7 @@ type Report struct {
 const credentialsNote = "no credential, token, or assertion values appear in this report; identity metadata only"
 
 // BuildReport assembles the report from finished case results.
-func BuildReport(runID, detectedKey string, rt *cloudauth.Runtime, results []CaseResult, startedAt time.Time, total time.Duration) Report {
+func BuildReport(runID, detectedKey string, rt *core.Runtime, results []CaseResult, startedAt time.Time, total time.Duration) Report {
 	var info *RuntimeInfo
 	if rt != nil {
 		info = &RuntimeInfo{

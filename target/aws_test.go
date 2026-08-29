@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
 const successXML = `<AssumeRoleWithWebIdentityResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/">
@@ -29,12 +29,19 @@ const accessDeniedXML = `<ErrorResponse xmlns="https://sts.amazonaws.com/doc/201
   <RequestId>req-err-1</RequestId>
 </ErrorResponse>`
 
-func awsTarget() cloudauth.Target {
-	return cloudauth.Target{Cloud: cloudauth.AWS, Role: "arn:aws:iam::123:role/reader", Audience: "sts.amazonaws.com"}
+func awsTarget() core.Target {
+	return core.AWSTarget{RoleARN: "arn:aws:iam::123456789012:role/reader"}
 }
 
-func oidcToken() *cloudauth.SourceToken {
-	return &cloudauth.SourceToken{Kind: cloudauth.OIDC, Value: "eyJ.payload.sig", Audience: "sts.amazonaws.com"}
+func oidcToken() *core.SourceToken {
+	return oidcTokenFor("sts.amazonaws.com")
+}
+
+// oidcTokenFor mints a proof pinned to aud. Tests must use the audience of the
+// target they exchange at: a proof minted for one target is refused at another,
+// which is the whole point of checkAudienceBinding.
+func oidcTokenFor(aud string) *core.SourceToken {
+	return &core.SourceToken{Kind: core.OIDC, Value: "eyJ.payload.sig", Audience: aud}
 }
 
 func TestAWSExchangeSuccess(t *testing.T) {
@@ -76,7 +83,7 @@ func TestAWSExchangeAccessDeniedNotRetried(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !errors.Is(err, cloudauth.ErrTrustMissing) {
+	if !errors.Is(err, core.ErrTrustMissing) {
 		t.Errorf("err = %v, want it to wrap ErrTrustMissing", err)
 	}
 	if n := atomic.LoadInt32(&calls); n != 1 {
@@ -111,7 +118,7 @@ func TestAWSExchangeRetriesOn5xx(t *testing.T) {
 func TestAWSExchangeRejectsSigV4Token(t *testing.T) {
 	// AWS WebIdentity accepts only OIDC JWTs, not a SigV4 proof.
 	e := NewAWSExchanger()
-	_, err := e.Exchange(context.Background(), &cloudauth.SourceToken{Kind: cloudauth.AWSSigV4}, awsTarget())
+	_, err := e.Exchange(context.Background(), &core.SourceToken{Kind: core.AWSSigV4}, awsTarget())
 	if err == nil {
 		t.Fatal("expected error exchanging a SigV4 proof at AWS")
 	}

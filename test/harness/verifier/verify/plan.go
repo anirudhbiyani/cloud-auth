@@ -19,7 +19,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
 // Environment variables the verifier reads for its plan. The inline form exists
@@ -80,10 +80,10 @@ var runtimeAliases = map[string]string{
 // sentinel errors. Lookup is case-insensitive; anything absent is a hard error
 // rather than a silent pass, so a typo in targets.json cannot fake a green run.
 var sentinels = map[string]error{
-	"errnofirstclasspath":     cloudauth.ErrNoFirstClassPath,
-	"errtrustmissing":         cloudauth.ErrTrustMissing,
-	"errnonfederatablesource": cloudauth.ErrNonFederatableSource,
-	"errnotthisruntime":       cloudauth.ErrNotThisRuntime,
+	"errnofirstclasspath":     core.ErrNoFirstClassPath,
+	"errtrustmissing":         core.ErrTrustMissing,
+	"errnonfederatablesource": core.ErrNonFederatableSource,
+	"errnotthisruntime":       core.ErrNotThisRuntime,
 }
 
 // Plan is the merged state/targets.json the driver produces from the stage-2
@@ -111,10 +111,10 @@ type Case struct {
 	Probe string `json:"probe,omitempty"`
 }
 
-// TargetSpec is the JSON form of cloudauth.Target. Alias keys are accepted for
+// TargetSpec is the JSON form of core.Target. Alias keys are accepted for
 // the GCP pool and impersonation fields because the stage-2 outputs name them
 // "provider_for_*"/"audience_for_*"; whichever the driver emits, it resolves to
-// the same cloudauth.Target.
+// the same core.Target.
 type TargetSpec struct {
 	Cloud    string `json:"cloud"`
 	Audience string `json:"audience"`
@@ -131,6 +131,7 @@ type TargetSpec struct {
 	// Azure
 	Tenant   string `json:"tenant,omitempty"`
 	ClientID string `json:"client_id,omitempty"`
+	Scope    string `json:"scope,omitempty"`
 }
 
 // pool returns the workload identity pool/provider under whichever key it came.
@@ -144,20 +145,30 @@ func (s TargetSpec) pool() string {
 }
 
 // Target converts the spec into the core binding the broker consumes.
-func (s TargetSpec) Target() (cloudauth.Target, error) {
-	cloud, err := cloudauth.ParseCloud(s.Cloud)
+func (s TargetSpec) Target() (core.Target, error) {
+	cloud, err := core.ParseFederationTarget(s.Cloud)
 	if err != nil {
-		return cloudauth.Target{}, err
+		return nil, err
 	}
-	return cloudauth.Target{
-		Cloud:                     cloud,
-		Audience:                  s.Audience,
-		Role:                      s.Role,
-		WorkloadIdentityPool:      s.pool(),
-		ImpersonateServiceAccount: s.Impersonate,
-		Tenant:                    s.Tenant,
-		ClientID:                  s.ClientID,
-	}, nil
+	switch cloud {
+	case core.AWS:
+		return core.AWSTarget{RoleARN: s.Role, TokenAudience: s.Audience}, nil
+	case core.GCP:
+		return core.GCPTarget{
+			WorkloadIdentityPool:      s.pool(),
+			ImpersonateServiceAccount: s.Impersonate,
+			TokenAudience:             s.Audience,
+		}, nil
+	case core.Azure:
+		return core.AzureTarget{
+			Tenant:        s.Tenant,
+			ClientID:      s.ClientID,
+			TokenAudience: s.Audience,
+			Scope:         s.Scope,
+		}, nil
+	default:
+		return nil, fmt.Errorf("verify: unsupported target cloud %q", cloud)
+	}
 }
 
 // CanonicalRuntime normalizes a source-runtime spelling to its canonical key,
@@ -170,7 +181,7 @@ func CanonicalRuntime(s string) string {
 // RuntimeKey derives the canonical runtime key from cloud-auth's own detection
 // result. An unrecognized cloud/sub-runtime pair yields "" so the verifier
 // refuses to guess which cases belong to it.
-func RuntimeKey(rt *cloudauth.Runtime) string {
+func RuntimeKey(rt *core.Runtime) string {
 	if rt == nil {
 		return ""
 	}
@@ -268,7 +279,7 @@ func (c Case) Validate() error {
 }
 
 func (s TargetSpec) validate() error {
-	cloud, err := cloudauth.ParseCloud(s.Cloud)
+	cloud, err := core.ParseFederationTarget(s.Cloud)
 	if err != nil {
 		return fmt.Errorf("target cloud: %w", err)
 	}
@@ -276,15 +287,15 @@ func (s TargetSpec) validate() error {
 		return errors.New("target audience is required and must be pinned per target")
 	}
 	switch cloud {
-	case cloudauth.AWS:
+	case core.AWS:
 		if s.Role == "" {
 			return errors.New("aws target requires role (the role ARN to assume)")
 		}
-	case cloudauth.GCP:
+	case core.GCP:
 		if s.pool() == "" {
 			return errors.New("gcp target requires pool (the workload identity pool provider)")
 		}
-	case cloudauth.Azure:
+	case core.Azure:
 		if s.Tenant == "" {
 			return errors.New("azure target requires tenant")
 		}

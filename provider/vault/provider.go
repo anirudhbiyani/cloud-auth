@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/anirudhbiyani/cloud-auth/cloudauth"
+	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// Provider implements cloudauth.LifecycleProvider for HashiCorp Vault.
+// Provider implements core.LifecycleProvider for HashiCorp Vault.
 type Provider struct {
 	client VaultClient
 }
@@ -220,7 +220,7 @@ type CrossCloudTokenOutput struct {
 	// ExpiresAt is when the credentials expire.
 	ExpiresAt time.Time
 	// Provider is the target cloud provider.
-	Provider cloudauth.Cloud
+	Provider core.Cloud
 	// LeaseID is the Vault lease ID for renewal/revocation.
 	LeaseID string
 }
@@ -288,15 +288,19 @@ type VaultBrokerSpec struct {
 	PolicyDocument string `json:"policy_document,omitempty" yaml:"policy_document,omitempty"`
 
 	// Source identifies the source identity provider.
-	Source cloudauth.Cloud `json:"source" yaml:"source"`
+	Source core.Cloud `json:"source" yaml:"source"`
 }
 
-// Type implements cloudauth.MechanismSpec.
-func (s *VaultBrokerSpec) Type() cloudauth.MechanismType {
-	return "vault_broker"
+// MechanismVaultBroker identifies a Vault broker mechanism. Exported so the CLI
+// can dispatch on it rather than repeating the string.
+const MechanismVaultBroker core.MechanismType = "vault_broker"
+
+// Type implements core.MechanismSpec.
+func (s *VaultBrokerSpec) Type() core.MechanismType {
+	return MechanismVaultBroker
 }
 
-// Validate implements cloudauth.MechanismSpec.
+// Validate implements core.MechanismSpec.
 func (s *VaultBrokerSpec) Validate() error {
 	if s.VaultAddress == "" {
 		return fmt.Errorf("vault_address is required")
@@ -327,14 +331,14 @@ func (s *VaultBrokerSpec) Validate() error {
 	return nil
 }
 
-// SourceProvider implements cloudauth.MechanismSpec.
-func (s *VaultBrokerSpec) SourceProvider() cloudauth.Cloud {
+// SourceProvider implements core.MechanismSpec.
+func (s *VaultBrokerSpec) SourceProvider() core.Cloud {
 	return s.Source
 }
 
-// TargetProvider implements cloudauth.MechanismSpec.
-func (s *VaultBrokerSpec) TargetProvider() cloudauth.Cloud {
-	return cloudauth.Vault
+// TargetProvider implements core.MechanismSpec.
+func (s *VaultBrokerSpec) TargetProvider() core.Cloud {
+	return core.Vault
 }
 
 // ProviderOption configures the Provider.
@@ -356,25 +360,24 @@ func New(opts ...ProviderOption) *Provider {
 	return p
 }
 
-// Name implements cloudauth.Provider.
-func (p *Provider) Name() cloudauth.Cloud {
-	return cloudauth.Vault
+// Name implements core.Provider.
+func (p *Provider) Name() core.Cloud {
+	return core.Vault
 }
 
-// Capabilities implements cloudauth.Provider.
-func (p *Provider) Capabilities() []cloudauth.Capability {
-	return []cloudauth.Capability{
-		cloudauth.CapabilityToken,
-		cloudauth.CapabilitySetup,
-		cloudauth.CapabilityValidate,
-		cloudauth.CapabilityDelete,
-		cloudauth.CapabilityDryRun,
-		cloudauth.CapabilityFederationOIDC,
+// Capabilities implements core.Provider.
+func (p *Provider) Capabilities() []core.Capability {
+	return []core.Capability{
+		core.CapabilitySetup,
+		core.CapabilityValidate,
+		core.CapabilityDelete,
+		core.CapabilityDryRun,
+		core.CapabilityFederationOIDC,
 	}
 }
 
-// HasCapability implements cloudauth.Provider.
-func (p *Provider) HasCapability(cap cloudauth.Capability) bool {
+// HasCapability implements core.Provider.
+func (p *Provider) HasCapability(cap core.Capability) bool {
 	for _, c := range p.Capabilities() {
 		if c == cap {
 			return true
@@ -383,27 +386,56 @@ func (p *Provider) HasCapability(cap cloudauth.Capability) bool {
 	return false
 }
 
-// Setup implements cloudauth.LifecycleProvider.
-func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts cloudauth.SetupOptions) (*cloudauth.Outputs, error) {
+// requireClient reports whether this provider can reach Vault.
+//
+// The client is injected and init() registers a Provider without one, so every
+// entry point used to dereference nil and panic — the same class of bug already
+// fixed in the aws, gcp and azure providers, and still present here because
+// nothing tested this package.
+func (p *Provider) requireClient() error {
+	if p.client == nil {
+		return core.ErrValidation("Vault client not configured").
+			WithProvider(core.Vault).
+			WithDetail("hint", "Pass vault.WithVaultClient, or use --dry-run")
+	}
+	return nil
+}
+
+// Setup implements core.LifecycleProvider.
+func (p *Provider) Setup(ctx context.Context, spec core.MechanismSpec, opts core.SetupOptions) (*core.Outputs, error) {
+	// A dry run describes a plan and must not need a client, matching every other
+	// provider. This used to read the auth method unconditionally, so `setup
+	// --dry-run` required Vault credentials to tell you what it would do.
+	if !opts.DryRun {
+		if err := p.requireClient(); err != nil {
+			return nil, err
+		}
+	}
 	vaultSpec, ok := spec.(*VaultBrokerSpec)
 	if !ok {
-		return nil, cloudauth.ErrValidation(fmt.Sprintf("unsupported spec type: %T", spec)).
-			WithProvider(cloudauth.Vault)
+		return nil, core.ErrValidation(fmt.Sprintf("unsupported spec type: %T", spec)).
+			WithProvider(core.Vault)
 	}
 
-	var plan cloudauth.Plan
+	var plan core.Plan
 	resourceIDs := make(map[string]string)
 
 	resourceIDs["vault_address"] = vaultSpec.VaultAddress
 	resourceIDs["auth_path"] = vaultSpec.AuthMethodPath
 	resourceIDs["role_name"] = vaultSpec.RoleName
 
-	// Step 1: Enable auth method if not exists
-	_, err := p.client.ReadAuthMethod(ctx, vaultSpec.AuthMethodPath)
-	authExists := err == nil
+	// Step 1: Enable auth method if not exists.
+	//
+	// On a dry run the existence is unknown, and the useful thing to report is
+	// the fuller plan — "would enable, would configure" — rather than nothing.
+	authExists := false
+	if !opts.DryRun {
+		_, err := p.client.ReadAuthMethod(ctx, vaultSpec.AuthMethodPath)
+		authExists = err == nil
+	}
 
 	if !authExists {
-		action := cloudauth.PlannedAction{
+		action := core.PlannedAction{
 			Operation:    "create",
 			ResourceType: "auth-method",
 			Details: map[string]interface{}{
@@ -417,15 +449,15 @@ func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts
 		if !opts.DryRun {
 			err := p.client.EnableAuthMethod(ctx, vaultSpec.AuthMethodPath, vaultSpec.AuthMethodType, nil)
 			if err != nil {
-				return nil, cloudauth.ErrPermission("failed to enable auth method").
-					WithCause(err).WithProvider(cloudauth.Vault)
+				return nil, core.ErrPermission("failed to enable auth method").
+					WithCause(err).WithProvider(core.Vault)
 			}
 		}
 	}
 
 	// Step 2: Configure auth method
 	if vaultSpec.JWTConfig != nil {
-		action := cloudauth.PlannedAction{
+		action := core.PlannedAction{
 			Operation:    "update",
 			ResourceType: "jwt-config",
 			Details:      map[string]interface{}{"path": vaultSpec.AuthMethodPath},
@@ -435,14 +467,14 @@ func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts
 
 		if !opts.DryRun {
 			if err := p.client.WriteJWTConfig(ctx, vaultSpec.AuthMethodPath, vaultSpec.JWTConfig); err != nil {
-				return nil, cloudauth.ErrPermission("failed to configure JWT auth").
-					WithCause(err).WithProvider(cloudauth.Vault)
+				return nil, core.ErrPermission("failed to configure JWT auth").
+					WithCause(err).WithProvider(core.Vault)
 			}
 		}
 	}
 
 	if vaultSpec.AWSConfig != nil {
-		action := cloudauth.PlannedAction{
+		action := core.PlannedAction{
 			Operation:    "update",
 			ResourceType: "aws-config",
 			Details:      map[string]interface{}{"path": vaultSpec.AuthMethodPath},
@@ -452,14 +484,14 @@ func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts
 
 		if !opts.DryRun {
 			if err := p.client.WriteAWSConfig(ctx, vaultSpec.AuthMethodPath, vaultSpec.AWSConfig); err != nil {
-				return nil, cloudauth.ErrPermission("failed to configure AWS auth").
-					WithCause(err).WithProvider(cloudauth.Vault)
+				return nil, core.ErrPermission("failed to configure AWS auth").
+					WithCause(err).WithProvider(core.Vault)
 			}
 		}
 	}
 
 	// Step 3: Create role
-	action := cloudauth.PlannedAction{
+	action := core.PlannedAction{
 		Operation:    "create",
 		ResourceType: "auth-role",
 		Details: map[string]interface{}{
@@ -475,15 +507,15 @@ func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts
 		case "jwt", "oidc":
 			if vaultSpec.JWTRole != nil {
 				if err := p.client.WriteJWTRole(ctx, vaultSpec.AuthMethodPath, vaultSpec.RoleName, vaultSpec.JWTRole); err != nil {
-					return nil, cloudauth.ErrPermission("failed to create JWT role").
-						WithCause(err).WithProvider(cloudauth.Vault)
+					return nil, core.ErrPermission("failed to create JWT role").
+						WithCause(err).WithProvider(core.Vault)
 				}
 			}
 		case "aws":
 			if vaultSpec.AWSRole != nil {
 				if err := p.client.WriteAWSRole(ctx, vaultSpec.AuthMethodPath, vaultSpec.RoleName, vaultSpec.AWSRole); err != nil {
-					return nil, cloudauth.ErrPermission("failed to create AWS role").
-						WithCause(err).WithProvider(cloudauth.Vault)
+					return nil, core.ErrPermission("failed to create AWS role").
+						WithCause(err).WithProvider(core.Vault)
 				}
 			}
 		}
@@ -492,7 +524,7 @@ func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts
 	// Step 4: Create policy if specified
 	if vaultSpec.PolicyDocument != "" {
 		policyName := "cloud-auth-" + vaultSpec.RoleName
-		action := cloudauth.PlannedAction{
+		action := core.PlannedAction{
 			Operation:    "create",
 			ResourceType: "policy",
 			Details:      map[string]interface{}{"name": policyName},
@@ -502,19 +534,19 @@ func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts
 
 		if !opts.DryRun {
 			if err := p.client.WritePolicy(ctx, policyName, vaultSpec.PolicyDocument); err != nil {
-				return nil, cloudauth.ErrPermission("failed to create policy").
-					WithCause(err).WithProvider(cloudauth.Vault)
+				return nil, core.ErrPermission("failed to create policy").
+					WithCause(err).WithProvider(core.Vault)
 			}
 			resourceIDs["policy_name"] = policyName
 		}
 	}
 
-	ref := cloudauth.CreateMechanismRef("vault_broker", cloudauth.Vault, resourceIDs)
+	ref := core.CreateMechanismRef("vault_broker", core.Vault, resourceIDs)
 	ref.Owned = !authExists // Only own if we created the auth method
 
 	if opts.DryRun {
 		plan.Summary = fmt.Sprintf("Would create/update %d Vault resources", len(plan.Actions))
-		return &cloudauth.Outputs{
+		return &core.Outputs{
 			Ref: ref,
 			Values: map[string]string{
 				"plan": plan.Summary,
@@ -522,7 +554,7 @@ func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts
 		}, nil
 	}
 
-	return &cloudauth.Outputs{
+	return &core.Outputs{
 		Ref: ref,
 		Values: map[string]string{
 			"auth_path": vaultSpec.AuthMethodPath,
@@ -534,9 +566,12 @@ func (p *Provider) Setup(ctx context.Context, spec cloudauth.MechanismSpec, opts
 	}, nil
 }
 
-// Validate implements cloudauth.LifecycleProvider.
-func (p *Provider) Validate(ctx context.Context, ref cloudauth.MechanismRef, opts cloudauth.ValidateOptions) (*cloudauth.ValidationReport, error) {
-	var validators []cloudauth.Validator
+// Validate implements core.LifecycleProvider.
+func (p *Provider) Validate(ctx context.Context, ref core.MechanismRef, opts core.ValidateOptions) (*core.ValidationReport, error) {
+	if err := p.requireClient(); err != nil {
+		return nil, err
+	}
+	var validators []core.Validator
 
 	authPath := ref.ResourceIDs["auth_path"]
 	roleName := ref.ResourceIDs["role_name"]
@@ -556,14 +591,17 @@ func (p *Provider) Validate(ctx context.Context, ref cloudauth.MechanismRef, opt
 		})
 	}
 
-	report := cloudauth.RunValidation(ctx, ref, validators)
+	report := core.RunValidation(ctx, ref, validators)
 	return report, nil
 }
 
-// Delete implements cloudauth.LifecycleProvider.
-func (p *Provider) Delete(ctx context.Context, ref cloudauth.MechanismRef, opts cloudauth.DeleteOptions) error {
+// Delete implements core.LifecycleProvider.
+func (p *Provider) Delete(ctx context.Context, ref core.MechanismRef, opts core.DeleteOptions) error {
 	if opts.DryRun {
 		return nil
+	}
+	if err := p.requireClient(); err != nil {
+		return err
 	}
 
 	authPath := ref.ResourceIDs["auth_path"]
@@ -584,33 +622,11 @@ func (p *Provider) Delete(ctx context.Context, ref cloudauth.MechanismRef, opts 
 	// Disable auth method if owned
 	if ref.Owned && authPath != "" {
 		if err := p.client.DisableAuthMethod(ctx, authPath); err != nil {
-			return cloudauth.ErrPermission("failed to disable auth method").WithCause(err)
+			return core.ErrPermission("failed to disable auth method").WithCause(err)
 		}
 	}
 
 	return nil
-}
-
-// Token implements cloudauth.TokenProvider.
-func (p *Provider) Token(ctx context.Context, req cloudauth.TokenRequest) (*cloudauth.TokenResponse, error) {
-	// Create a Vault token
-	opts := &CreateTokenOptions{
-		DisplayName: req.SourceIdentity,
-		TTL:         fmt.Sprintf("%ds", req.Duration),
-		Renewable:   true,
-	}
-
-	resp, err := p.client.CreateToken(ctx, opts)
-	if err != nil {
-		return nil, cloudauth.ErrAuth("failed to create Vault token").WithCause(err)
-	}
-
-	return &cloudauth.TokenResponse{
-		Token:     resp.Token,
-		ExpiresAt: int64(resp.LeaseDuration),
-		TokenType: "service",
-		Scopes:    resp.Policies,
-	}, nil
 }
 
 // GenerateAWSCredentials generates AWS credentials using Vault's AWS secrets engine.
@@ -636,14 +652,14 @@ func (p *Provider) Token(ctx context.Context, req cloudauth.TokenRequest) (*clou
 //	})
 func (p *Provider) GenerateAWSCredentials(ctx context.Context, input *GenerateAWSCredentialsInput) (*CrossCloudTokenOutput, error) {
 	if p.client == nil {
-		return nil, cloudauth.ErrValidation("Vault client not configured").
-			WithProvider(cloudauth.Vault).
+		return nil, core.ErrValidation("Vault client not configured").
+			WithProvider(core.Vault).
 			WithDetail("hint", "Configure Vault client using WithVaultClient option")
 	}
 
 	// Validate input
 	if input.RoleName == "" {
-		return nil, cloudauth.ErrValidation("RoleName is required").WithProvider(cloudauth.Vault)
+		return nil, core.ErrValidation("RoleName is required").WithProvider(core.Vault)
 	}
 
 	path := input.SecretsEnginePath
@@ -664,9 +680,9 @@ func (p *Provider) GenerateAWSCredentials(ctx context.Context, input *GenerateAW
 	}
 
 	if err != nil {
-		return nil, cloudauth.ErrAuth("failed to generate AWS credentials from Vault").
+		return nil, core.ErrAuth("failed to generate AWS credentials from Vault").
 			WithCause(err).
-			WithProvider(cloudauth.Vault).
+			WithProvider(core.Vault).
 			WithResource("vault:aws-secrets-role", input.RoleName)
 	}
 
@@ -678,7 +694,7 @@ func (p *Provider) GenerateAWSCredentials(ctx context.Context, input *GenerateAW
 		SessionToken: creds.SessionToken,
 		TokenType:    "aws-credentials",
 		ExpiresAt:    expiresAt,
-		Provider:     cloudauth.AWS,
+		Provider:     core.AWS,
 		LeaseID:      creds.LeaseID,
 	}, nil
 }
@@ -703,14 +719,14 @@ func (p *Provider) GenerateAWSCredentials(ctx context.Context, input *GenerateAW
 //	})
 func (p *Provider) GenerateGCPCredentials(ctx context.Context, input *GenerateGCPCredentialsInput) (*CrossCloudTokenOutput, error) {
 	if p.client == nil {
-		return nil, cloudauth.ErrValidation("Vault client not configured").
-			WithProvider(cloudauth.Vault).
+		return nil, core.ErrValidation("Vault client not configured").
+			WithProvider(core.Vault).
 			WithDetail("hint", "Configure Vault client using WithVaultClient option")
 	}
 
 	// Validate input
 	if input.RoleName == "" {
-		return nil, cloudauth.ErrValidation("RoleName is required").WithProvider(cloudauth.Vault)
+		return nil, core.ErrValidation("RoleName is required").WithProvider(core.Vault)
 	}
 
 	path := input.SecretsEnginePath
@@ -727,9 +743,9 @@ func (p *Provider) GenerateGCPCredentials(ctx context.Context, input *GenerateGC
 	case "access_token":
 		token, err := p.client.GenerateGCPAccessToken(ctx, path, input.RoleName)
 		if err != nil {
-			return nil, cloudauth.ErrAuth("failed to generate GCP access token from Vault").
+			return nil, core.ErrAuth("failed to generate GCP access token from Vault").
 				WithCause(err).
-				WithProvider(cloudauth.Vault).
+				WithProvider(core.Vault).
 				WithResource("vault:gcp-secrets-role", input.RoleName)
 		}
 
@@ -739,16 +755,16 @@ func (p *Provider) GenerateGCPCredentials(ctx context.Context, input *GenerateGC
 			Token:     token.Token,
 			TokenType: "gcp-access-token",
 			ExpiresAt: expiresAt,
-			Provider:  cloudauth.GCP,
+			Provider:  core.GCP,
 			LeaseID:   token.LeaseID,
 		}, nil
 
 	case "service_account_key":
 		key, err := p.client.GenerateGCPServiceAccountKey(ctx, path, input.RoleName)
 		if err != nil {
-			return nil, cloudauth.ErrAuth("failed to generate GCP service account key from Vault").
+			return nil, core.ErrAuth("failed to generate GCP service account key from Vault").
 				WithCause(err).
-				WithProvider(cloudauth.Vault).
+				WithProvider(core.Vault).
 				WithResource("vault:gcp-secrets-role", input.RoleName)
 		}
 
@@ -758,13 +774,13 @@ func (p *Provider) GenerateGCPCredentials(ctx context.Context, input *GenerateGC
 			Token:     key.PrivateKeyData, // Base64-encoded JSON key
 			TokenType: "gcp-service-account-key",
 			ExpiresAt: expiresAt,
-			Provider:  cloudauth.GCP,
+			Provider:  core.GCP,
 			LeaseID:   key.LeaseID,
 		}, nil
 
 	default:
-		return nil, cloudauth.ErrValidation(fmt.Sprintf("unsupported key type: %s, use 'access_token' or 'service_account_key'", keyType)).
-			WithProvider(cloudauth.Vault)
+		return nil, core.ErrValidation(fmt.Sprintf("unsupported key type: %s, use 'access_token' or 'service_account_key'", keyType)).
+			WithProvider(core.Vault)
 	}
 }
 
@@ -786,14 +802,14 @@ func (p *Provider) GenerateGCPCredentials(ctx context.Context, input *GenerateGC
 //	})
 func (p *Provider) GenerateAzureCredentials(ctx context.Context, input *GenerateAzureCredentialsInput) (*CrossCloudTokenOutput, error) {
 	if p.client == nil {
-		return nil, cloudauth.ErrValidation("Vault client not configured").
-			WithProvider(cloudauth.Vault).
+		return nil, core.ErrValidation("Vault client not configured").
+			WithProvider(core.Vault).
 			WithDetail("hint", "Configure Vault client using WithVaultClient option")
 	}
 
 	// Validate input
 	if input.RoleName == "" {
-		return nil, cloudauth.ErrValidation("RoleName is required").WithProvider(cloudauth.Vault)
+		return nil, core.ErrValidation("RoleName is required").WithProvider(core.Vault)
 	}
 
 	path := input.SecretsEnginePath
@@ -803,9 +819,9 @@ func (p *Provider) GenerateAzureCredentials(ctx context.Context, input *Generate
 
 	creds, err := p.client.GenerateAzureCredentials(ctx, path, input.RoleName)
 	if err != nil {
-		return nil, cloudauth.ErrAuth("failed to generate Azure credentials from Vault").
+		return nil, core.ErrAuth("failed to generate Azure credentials from Vault").
 			WithCause(err).
-			WithProvider(cloudauth.Vault).
+			WithProvider(core.Vault).
 			WithResource("vault:azure-secrets-role", input.RoleName)
 	}
 
@@ -816,7 +832,7 @@ func (p *Provider) GenerateAzureCredentials(ctx context.Context, input *Generate
 		Secret:    creds.ClientSecret,
 		TokenType: "azure-credentials",
 		ExpiresAt: expiresAt,
-		Provider:  cloudauth.Azure,
+		Provider:  core.Azure,
 		LeaseID:   creds.LeaseID,
 	}, nil
 }
@@ -834,24 +850,24 @@ func (v *authMethodExistsValidator) Description() string {
 	return "Checks if the Vault auth method is enabled"
 }
 
-func (v *authMethodExistsValidator) Validate(ctx context.Context, ref cloudauth.MechanismRef) cloudauth.ValidationCheck {
-	check := cloudauth.ValidationCheck{
+func (v *authMethodExistsValidator) Validate(ctx context.Context, ref core.MechanismRef) core.ValidationCheck {
+	check := core.ValidationCheck{
 		ID:          v.ID(),
 		Name:        v.Name(),
 		Description: v.Description(),
-		Severity:    cloudauth.SeverityCritical,
+		Severity:    core.SeverityCritical,
 		Evidence:    map[string]interface{}{"path": v.path},
 	}
 
 	authMethod, err := v.client.ReadAuthMethod(ctx, v.path)
 	if err != nil {
-		check.Status = cloudauth.CheckStatusFailed
+		check.Status = core.CheckStatusFailed
 		check.Evidence["error"] = err.Error()
 		check.Remediation = "Enable the auth method or run setup again"
 		return check
 	}
 
-	check.Status = cloudauth.CheckStatusPassed
+	check.Status = core.CheckStatusPassed
 	check.Evidence["type"] = authMethod.Type
 	return check
 }
@@ -866,12 +882,12 @@ func (v *roleExistsValidator) ID() string          { return "vault_role_exists" 
 func (v *roleExistsValidator) Name() string        { return "Auth Role Exists" }
 func (v *roleExistsValidator) Description() string { return "Checks if the Vault auth role exists" }
 
-func (v *roleExistsValidator) Validate(ctx context.Context, ref cloudauth.MechanismRef) cloudauth.ValidationCheck {
-	check := cloudauth.ValidationCheck{
+func (v *roleExistsValidator) Validate(ctx context.Context, ref core.MechanismRef) core.ValidationCheck {
+	check := core.ValidationCheck{
 		ID:          v.ID(),
 		Name:        v.Name(),
 		Description: v.Description(),
-		Severity:    cloudauth.SeverityCritical,
+		Severity:    core.SeverityCritical,
 		Evidence: map[string]interface{}{
 			"auth_path": v.authPath,
 			"role_name": v.roleName,
@@ -881,7 +897,7 @@ func (v *roleExistsValidator) Validate(ctx context.Context, ref cloudauth.Mechan
 	// Try JWT role first
 	jwtRole, err := v.client.ReadJWTRole(ctx, v.authPath, v.roleName)
 	if err == nil && jwtRole != nil {
-		check.Status = cloudauth.CheckStatusPassed
+		check.Status = core.CheckStatusPassed
 		check.Evidence["role_type"] = "jwt"
 		return check
 	}
@@ -889,16 +905,16 @@ func (v *roleExistsValidator) Validate(ctx context.Context, ref cloudauth.Mechan
 	// Try AWS role
 	awsRole, err := v.client.ReadAWSRole(ctx, v.authPath, v.roleName)
 	if err == nil && awsRole != nil {
-		check.Status = cloudauth.CheckStatusPassed
+		check.Status = core.CheckStatusPassed
 		check.Evidence["role_type"] = "aws"
 		return check
 	}
 
-	check.Status = cloudauth.CheckStatusFailed
+	check.Status = core.CheckStatusFailed
 	check.Remediation = "Create the auth role or run setup again"
 	return check
 }
 
 func init() {
-	cloudauth.Register(New())
+	core.Register(New())
 }
