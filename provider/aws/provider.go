@@ -3,7 +3,7 @@ package aws
 
 import (
 	"context"
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505 -- AWS defines the OIDC provider thumbprint as SHA-1
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"

@@ -13,6 +13,14 @@ import (
 	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
 )
 
+// IAM's own bounds for a role's maximum session duration. Mirrors the range
+// core.AWSRoleTrustOIDCSpec validates, so a library caller bypassing the spec
+// gets the same answer the CLI would give.
+const (
+	iamMinSessionDuration = 3600
+	iamMaxSessionDuration = 43200
+)
+
 // This file is the concrete IAMClient: the bridge between the provider's
 // cloud-neutral interface and the real AWS IAM API. Without it the control
 // plane could describe what it would do but never do it — Setup failed with
@@ -152,6 +160,14 @@ func (c *realIAMClient) CreateRole(ctx context.Context, in *CreateRoleInput) (*R
 		req.Description = aws.String(in.Description)
 	}
 	if in.MaxSessionDuration > 0 {
+		// Reject rather than convert. int -> int32 truncation turns 2^32+3600
+		// into 3600: a silently shortened session that still looks valid to
+		// every caller. Spec-driven callers are already bounds-checked in
+		// core, but CreateRoleInput is exported and this is the last gate.
+		if in.MaxSessionDuration < iamMinSessionDuration || in.MaxSessionDuration > iamMaxSessionDuration {
+			return nil, fmt.Errorf("aws: MaxSessionDuration %d out of range (%d-%d seconds)",
+				in.MaxSessionDuration, iamMinSessionDuration, iamMaxSessionDuration)
+		}
 		req.MaxSessionDuration = aws.Int32(int32(in.MaxSessionDuration))
 	}
 	if in.PermissionsBoundary != "" {

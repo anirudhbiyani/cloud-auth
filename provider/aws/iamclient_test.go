@@ -197,3 +197,55 @@ func TestProviderIAMBuildsLazilyWhenAbsent(t *testing.T) {
 		t.Error("iam() should cache the constructed client")
 	}
 }
+
+// int -> int32 truncation would turn 2^32+3600 into a role that looks like it
+// has a valid 1-hour session and silently does not have what was asked for.
+// The conversion must refuse the input rather than reinterpret it.
+func TestCreateRoleRejectsOutOfRangeSessionDuration(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		seconds int
+		wantErr bool
+	}{
+		{"truncates to a valid-looking value", 1<<32 + 3600, true},
+		{"above IAM maximum", 43201, true},
+		{"below IAM minimum", 3599, true},
+		{"at IAM minimum", 3600, false},
+		{"at IAM maximum", 43200, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var sent *iam.CreateRoleInput
+			c := &realIAMClient{api: &fakeIAMAPI{
+				createRole: func(_ context.Context, in *iam.CreateRoleInput) (*iam.CreateRoleOutput, error) {
+					sent = in
+					return &iam.CreateRoleOutput{Role: &iamtypes.Role{
+						RoleName: in.RoleName,
+						Arn:      aws.String("arn:aws:iam::1:role/r"),
+					}}, nil
+				},
+			}}
+
+			_, err := c.CreateRole(context.Background(), &CreateRoleInput{
+				RoleName:                 "r",
+				AssumeRolePolicyDocument: "{}",
+				MaxSessionDuration:       tc.seconds,
+			})
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("MaxSessionDuration %d: want error, got none (sent %v)",
+						tc.seconds, aws.ToInt32(sent.MaxSessionDuration))
+				}
+				if sent != nil {
+					t.Errorf("rejected input still reached IAM")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("MaxSessionDuration %d: %v", tc.seconds, err)
+			}
+			if got := aws.ToInt32(sent.MaxSessionDuration); got != int32(tc.seconds) {
+				t.Errorf("MaxSessionDuration = %d, want %d", got, tc.seconds)
+			}
+		})
+	}
+}
