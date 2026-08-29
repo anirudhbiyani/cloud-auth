@@ -97,7 +97,9 @@ func TestREADMERuntimeMatrixMatchesTheCode(t *testing.T) {
 func TestREADMEControlPlaneMatrixDoesNotOverstate(t *testing.T) {
 	section := readmeSection(t, "### 🌐 Multi-Cloud Support")
 
-	for _, provider := range []string{"GCP", "Azure", "Cloudflare", "Vault"} {
+	// Providers that still have no concrete client. Remove a name from this list
+	// only in the same commit that adds its client.
+	for _, provider := range []string{"Azure", "Cloudflare", "Vault"} {
 		t.Run(provider, func(t *testing.T) {
 			var row string
 			for _, line := range strings.Split(section, "\n") {
@@ -119,6 +121,30 @@ func TestREADMEControlPlaneMatrixDoesNotOverstate(t *testing.T) {
 						provider, header, strings.ToLower(provider))
 				}
 			}
+		})
+	}
+}
+
+// The converse: a provider that HAS a client must not still be marked plan-only,
+// or the README understates what works and nobody uses it.
+func TestREADMEControlPlaneMatrixCreditsWiredProviders(t *testing.T) {
+	section := readmeSection(t, "### 🌐 Multi-Cloud Support")
+
+	for _, provider := range []string{"AWS", "GCP"} {
+		t.Run(provider, func(t *testing.T) {
+			for _, line := range strings.Split(section, "\n") {
+				if !strings.HasPrefix(line, "| **"+provider+"**") {
+					continue
+				}
+				if strings.Contains(line, "🅿️") {
+					t.Errorf("%s has a client but its row still says plan-only:\n%s", provider, line)
+				}
+				if !strings.Contains(line, "✅") {
+					t.Errorf("%s has a client but its row shows no ✅:\n%s", provider, line)
+				}
+				return
+			}
+			t.Fatalf("no %s row in the control-plane matrix", provider)
 		})
 	}
 }

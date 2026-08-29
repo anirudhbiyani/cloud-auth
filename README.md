@@ -63,12 +63,15 @@ Setting up cross-cloud authentication typically requires:
 
 ### 📍 Current status
 
-**AWS is the only control-plane provider wired to its cloud.** GCP, Azure,
-Cloudflare and Vault define their client interfaces, validation and dry-run
-plans, but ship no concrete client — every non-`--dry-run` `setup`, `validate`
-or `delete` against them stops at `<cloud> client not configured`. The runtime
-data plane (`doctor`, `exchange`, `exec`) is the more mature half of this
-project and works across all three clouds.
+**AWS and GCP are wired to their clouds. Azure, Cloudflare and Vault are not
+yet** — they define client interfaces, validation and dry-run plans but ship no
+concrete client, so every non-`--dry-run` `setup`, `validate` or `delete`
+against them stops at `<cloud> client not configured`. The runtime data plane
+(`doctor`, `exchange`, `exec`) is the more mature half of this project and works
+across all three clouds.
+
+`--dry-run` needs no cloud credentials on any provider. That is deliberate:
+planning is what you do *before* you have them.
 
 ### 🌐 Multi-Cloud Support
 
@@ -80,12 +83,20 @@ client (`--dry-run` works, a real run does not) · — not applicable.
 | Provider | Setup | Validate | Delete | Dry-run | Federation Types |
 |----------|:-----:|:--------:|:------:|:-------:|------------------|
 | **AWS** | ✅ | ✅ | ✅ | ✅ | OIDC Trust |
-| **GCP** | 🅿️ | 🅿️ | 🅿️ | ✅ | Workload Identity |
+| **GCP** | ✅ | ✅ | ✅ | ✅ | Workload Identity |
 | **Azure** | 🅿️ | 🅿️ | 🅿️ | ✅ | Federated Credentials |
 | **Cloudflare** | 🅿️ | 🅿️ | 🅿️ | ✅ | Access Service Tokens |
 | **Vault** | 🅿️ | 🅿️ | 🅿️ | ✅ | JWT Auth |
 | **GitHub OIDC** | — | — | — | — | Token source only |
-| **Kubernetes** | — | — | — | — | Token source only |
+| **Kubernetes** | — | — | — | — | Token source only (`--type k8s-federation`, AWS target) |
+
+> **How far each ✅ has been verified.** AWS is exercised against live AWS in the
+> integration harness. GCP's client is covered by unit tests that speak the
+> documented IAM, STS and IAM Credentials wire protocol — the long-running-
+> operation envelope, the error envelope, the IAM policy etag — against a fake
+> server, and has not yet been run against live GCP. Credentials come from
+> Application Default Credentials: `GOOGLE_APPLICATION_CREDENTIALS`,
+> `gcloud auth application-default login`, or the metadata server.
 
 ### 🔀 Runtime Federation Matrix
 

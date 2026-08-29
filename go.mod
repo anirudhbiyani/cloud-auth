@@ -15,6 +15,7 @@ require (
 )
 
 require (
+	cloud.google.com/go/compute/metadata v0.3.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.12.0 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.38 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.38 // indirect

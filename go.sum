@@ -1,3 +1,5 @@
+cloud.google.com/go/compute/metadata v0.3.0 h1:Tz+eQXMEqDIKRsmY3cHTL6FVaynIjX2QxYC4trgAKZc=
+cloud.google.com/go/compute/metadata v0.3.0/go.mod h1:zFmK7XCadkQkj6TtorcaGlCW1hT1fIilQDwofLpJ20k=
 github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.0 h1:4gRPBpN1f6xt88yi4WR26m7XaD9OlWtVT6bWPdGUIok=
 github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.0/go.mod h1:G7QVLxw1j1JVyrO1MA95S8m8HStaaleDZYTcfGgjB2o=
 github.com/Azure/azure-sdk-for-go/sdk/internal v1.12.0 h1:fhqpLE3UEXi9lPaBRpQ6XuRW0nU7hgg4zlmZZa+a9q4=
