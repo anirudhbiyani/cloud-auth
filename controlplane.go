@@ -1097,7 +1097,7 @@ func cmdValidate(ctx context.Context, args []string) error {
 		fmt.Printf("\n⚠ NO CHECKS RAN — this mechanism was NOT verified. \"Valid: true\"\n" +
 			"  above only means nothing failed, and nothing was tested. Treat this as\n" +
 			"  unverified and report it: the provider registered no validators.\n")
-		os.Exit(exitValidationError)
+		return errValidationFailed(fmt.Errorf("mechanism %s was not verified: no checks ran", ref.ID))
 	}
 
 	// "Valid" only means nothing failed. If a security-relevant check never ran,
@@ -1132,7 +1132,8 @@ func cmdValidate(ctx context.Context, args []string) error {
 	}
 
 	if !report.IsValid() {
-		os.Exit(exitValidationError)
+		return errValidationFailed(fmt.Errorf("mechanism %s failed validation: %d of %d checks failed",
+			ref.ID, report.Summary.FailedChecks, report.Summary.TotalChecks))
 	}
 
 	return nil

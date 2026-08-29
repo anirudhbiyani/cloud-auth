@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -81,6 +83,35 @@ func (s *MemoryStateStore) Get(ctx context.Context, id string) (*MechanismRef, e
 	return &ref, nil
 }
 
+// paginate sorts refs and applies the filter's window.
+//
+// Sorting is not cosmetic. Both stores build the slice by ranging a map, and Go
+// randomizes map iteration order deliberately, so Offset/Limit were slicing a
+// different arrangement on every call: page 2 could repeat an entry from page 1
+// and omit another entirely, and nothing about the result would look wrong.
+// ID is the sort key because it is the only field guaranteed present and unique.
+//
+// An offset past the end returns nothing, which is the second half of the bug:
+// the guard used to be `Offset < len(refs)`, so paging past the last entry
+// skipped the slice entirely and returned the FULL list. A client walking pages
+// until it got an empty one never got one.
+func paginate(refs []MechanismRef, filter ListFilter) []MechanismRef {
+	slices.SortFunc(refs, func(a, b MechanismRef) int {
+		return strings.Compare(a.ID, b.ID)
+	})
+
+	if filter.Offset > 0 {
+		if filter.Offset >= len(refs) {
+			return []MechanismRef{}
+		}
+		refs = refs[filter.Offset:]
+	}
+	if filter.Limit > 0 && filter.Limit < len(refs) {
+		refs = refs[:filter.Limit]
+	}
+	return refs
+}
+
 // List implements StateStore.
 func (s *MemoryStateStore) List(ctx context.Context, filter ListFilter) ([]MechanismRef, error) {
 	s.mu.RLock()
@@ -97,15 +128,7 @@ func (s *MemoryStateStore) List(ctx context.Context, filter ListFilter) ([]Mecha
 		refs = append(refs, ref)
 	}
 
-	// Apply pagination
-	if filter.Offset > 0 && filter.Offset < len(refs) {
-		refs = refs[filter.Offset:]
-	}
-	if filter.Limit > 0 && filter.Limit < len(refs) {
-		refs = refs[:filter.Limit]
-	}
-
-	return refs, nil
+	return paginate(refs, filter), nil
 }
 
 // Delete implements StateStore.
@@ -360,15 +383,7 @@ func (s *FileStateStore) List(ctx context.Context, filter ListFilter) ([]Mechani
 		refs = append(refs, ref)
 	}
 
-	// Apply pagination
-	if filter.Offset > 0 && filter.Offset < len(refs) {
-		refs = refs[filter.Offset:]
-	}
-	if filter.Limit > 0 && filter.Limit < len(refs) {
-		refs = refs[:filter.Limit]
-	}
-
-	return refs, nil
+	return paginate(refs, filter), nil
 }
 
 // Delete implements StateStore.

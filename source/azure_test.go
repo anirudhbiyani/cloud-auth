@@ -138,10 +138,12 @@ func TestAzureDetectVMViaIMDS(t *testing.T) {
 		t.Fatalf("Mint should refuse with ErrNonFederatableSource, got %v", err)
 	}
 
-	// The same-cloud path still works, and names the identity.
-	tok, err := a.mintManagedIdentityToken(context.Background(), "https://management.azure.com/")
+	// The IMDS access-token path itself still works — it is just not a
+	// federation source. Nothing in this process calls it today; it is exercised
+	// here because Detect shares its transport and its host checks.
+	tok, err := a.mintFromIMDS(context.Background(), "https://management.azure.com/")
 	if err != nil {
-		t.Fatalf("mintManagedIdentityToken: %v", err)
+		t.Fatalf("mintFromIMDS: %v", err)
 	}
 	if tok.Value == "" {
 		t.Error("the IMDS access token should still be obtainable for same-cloud use")
