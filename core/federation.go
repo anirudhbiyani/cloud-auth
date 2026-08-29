@@ -20,7 +20,6 @@ const (
 	AWS        Cloud = "aws"
 	GCP        Cloud = "gcp"
 	Azure      Cloud = "azure"
-	Cloudflare Cloud = "cloudflare"
 	Vault      Cloud = "vault"
 	Okta       Cloud = "okta"
 	GitHubOIDC Cloud = "github_oidc"
@@ -36,7 +35,7 @@ var federationTargets = map[Cloud]bool{AWS: true, GCP: true, Azure: true}
 // they are not federation targets, and conflating the two is why ParseCloud used
 // to reject five of this package's own constants.
 var trustPeers = map[Cloud]bool{
-	Cloudflare: true, Vault: true, Okta: true, GitHubOIDC: true, Kubernetes: true,
+	Vault: true, Okta: true, GitHubOIDC: true, Kubernetes: true,
 }
 
 // ParseCloud parses a case-insensitive identifier for any declared Cloud.
@@ -50,7 +49,7 @@ func ParseCloud(s string) (Cloud, error) {
 	if federationTargets[c] || trustPeers[c] {
 		return c, nil
 	}
-	return "", fmt.Errorf("cloud-auth: unknown cloud %q (want aws, gcp, azure, cloudflare, "+
+	return "", fmt.Errorf("cloud-auth: unknown cloud %q (want aws, gcp, azure, "+
 		"vault, okta, github_oidc, or kubernetes)", s)
 }
 

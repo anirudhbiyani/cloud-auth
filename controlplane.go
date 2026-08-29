@@ -21,7 +21,6 @@ import (
 	// Import providers to register them
 	_ "github.com/anirudhbiyani/cloud-auth/provider/aws"
 	_ "github.com/anirudhbiyani/cloud-auth/provider/azure"
-	_ "github.com/anirudhbiyani/cloud-auth/provider/cloudflare"
 	_ "github.com/anirudhbiyani/cloud-auth/provider/gcp"
 	"github.com/anirudhbiyani/cloud-auth/provider/vault"
 )
@@ -1438,7 +1437,7 @@ func cmdProviders(_ context.Context, _ []string) error {
 func cmdVersion() error {
 	fmt.Println("cloud-auth version 0.2.0")
 	fmt.Println("  Core: lifecycle management support")
-	fmt.Println("  Providers: aws, gcp, azure, cloudflare, vault")
+	fmt.Println("  Providers: aws, gcp, azure, vault")
 	return nil
 }
 

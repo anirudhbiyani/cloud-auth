@@ -4,6 +4,7 @@ package vault
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/anirudhbiyani/cloud-auth/core"
@@ -11,7 +12,36 @@ import (
 
 // Provider implements core.LifecycleProvider for HashiCorp Vault.
 type Provider struct {
+	mu     sync.Mutex
 	client VaultClient
+
+	// resolveFailed caches a configuration failure so the second call reports
+	// the original cause rather than retrying a lookup that fails the same way.
+	resolveFailed error
+}
+
+// resolve lazily builds the HTTP client from VAULT_ADDR and VAULT_TOKEN.
+//
+// Lazily, because init() registers this Provider into the global registry at
+// import time, long before anyone has asked to talk to Vault. An injected client
+// always wins.
+func (p *Provider) resolve() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.client != nil {
+		return nil
+	}
+	if p.resolveFailed != nil {
+		return p.resolveFailed
+	}
+
+	client, err := NewClient()
+	if err != nil {
+		p.resolveFailed = err
+		return err
+	}
+	p.client = client
+	return nil
 }
 
 // VaultClient abstracts Vault API operations for testing.
@@ -393,6 +423,13 @@ func (p *Provider) HasCapability(cap core.Capability) bool {
 // fixed in the aws, gcp and azure providers, and still present here because
 // nothing tested this package.
 func (p *Provider) requireClient() error {
+	if err := p.resolve(); err != nil {
+		return core.ErrValidation("could not reach Vault: not configured").
+			WithCause(err).
+			WithProvider(core.Vault).
+			WithDetail("hint", "Set VAULT_ADDR and VAULT_TOKEN (and VAULT_NAMESPACE on Enterprise), "+
+				"or pass vault.WithVaultClient; --dry-run needs neither")
+	}
 	if p.client == nil {
 		return core.ErrValidation("Vault client not configured").
 			WithProvider(core.Vault).

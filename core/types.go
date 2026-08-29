@@ -29,7 +29,7 @@ const (
 	CapabilityFederationSAML Capability = "federation_saml"
 )
 
-// Cloud (aws/gcp/azure/cloudflare/vault/okta/github_oidc/kubernetes) and its
+// Cloud (aws/gcp/azure/vault/okta/github_oidc/kubernetes) and its
 // constants are defined in federation.go — the single provider enum for the
 // whole module.
 

@@ -63,10 +63,8 @@ Setting up cross-cloud authentication typically requires:
 
 ### 📍 Current status
 
-**AWS, GCP and Azure are wired to their clouds. Cloudflare and Vault are not
-yet** — they define client interfaces, validation and dry-run plans but ship no
-concrete client, so every non-`--dry-run` `setup`, `validate` or `delete`
-against them stops at `<cloud> client not configured`. The runtime data plane
+**All four providers are wired.** AWS, GCP, Azure and HashiCorp Vault each reach
+their service on a real run. The runtime data plane
 (`doctor`, `exchange`, `exec`) is the more mature half of this project and works
 across all three clouds.
 
@@ -85,8 +83,7 @@ client (`--dry-run` works, a real run does not) · — not applicable.
 | **AWS** | ✅ | ✅ | ✅ | ✅ | OIDC Trust |
 | **GCP** | ✅ | ✅ | ✅ | ✅ | Workload Identity |
 | **Azure** | ✅ | ✅ | ✅ | ✅ | Federated Credentials |
-| **Cloudflare** | 🅿️ | 🅿️ | 🅿️ | ✅ | Access Service Tokens |
-| **Vault** | 🅿️ | 🅿️ | 🅿️ | ✅ | JWT Auth |
+| **Vault** | ✅ | ✅ | ✅ | ✅ | JWT Auth |
 | **GitHub OIDC** | — | — | — | — | Token source only |
 | **Kubernetes** | — | — | — | — | Token source only (`--type k8s-federation`, AWS target) |
 
@@ -100,7 +97,14 @@ client (`--dry-run` works, a real run does not) · — not applicable.
 > Credentials: GCP uses Application Default Credentials
 > (`GOOGLE_APPLICATION_CREDENTIALS`, `gcloud auth application-default login`, or
 > the metadata server). Azure uses `DefaultAzureCredential` (`az login`, managed
-> identity, workload identity, or the `AZURE_*` environment variables).
+> identity, workload identity, or the `AZURE_*` environment variables). Vault
+> uses `VAULT_ADDR` and `VAULT_TOKEN`, plus `VAULT_NAMESPACE` on Enterprise —
+> there is deliberately no discovery chain, because guessing an address would
+> mean sending a token somewhere you did not name.
+
+> **Cloudflare was removed.** Cloudflare Access has no workload identity
+> federation — only service tokens and mTLS, which are shared secrets. Shipping
+> that under this project's banner would have been the opposite of the point.
 
 #### Azure constraints cloud-auth enforces for you
 
@@ -656,7 +660,6 @@ cloud-auth/
 │   ├── aws/                   # AWS IAM, STS, OIDC
 │   ├── gcp/                   # GCP Workload Identity
 │   ├── azure/                 # Azure AD Federated Credentials
-│   ├── cloudflare/            # Cloudflare Access
 │   └── vault/                 # HashiCorp Vault
 ├── source/                    # Runtime: source-identity detection + minting
 │   └── aws_outbound.go        #   sts:GetWebIdentityToken OIDC proof (AWS → Azure)
