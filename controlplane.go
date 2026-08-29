@@ -1321,18 +1321,27 @@ func cmdList(ctx context.Context, args []string) error {
 		return fmt.Errorf("failed to list mechanisms: %w", err)
 	}
 
-	if len(refs) == 0 {
-		fmt.Println("No mechanisms found")
-		return nil
-	}
-
+	// The empty case is handled INSIDE the switch, not before it. Returning early
+	// meant `list --output json` printed the prose "No mechanisms found" whenever
+	// there was nothing to list, so the one case a script is most likely to hit
+	// was the one case that did not emit JSON.
 	switch opts.output {
 	case "json":
-		data, _ := json.MarshalIndent(refs, "", "  ")
+		if refs == nil {
+			refs = []core.MechanismRef{} // marshals as [], not null
+		}
+		data, err := json.MarshalIndent(refs, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to encode mechanisms as JSON: %w", err)
+		}
 		fmt.Println(string(data))
 	case "table":
+		if len(refs) == 0 {
+			fmt.Println("No mechanisms found")
+			return nil
+		}
 		fmt.Printf("%-40s %-30s %-12s %-6s %s\n", "ID", "TYPE", "PROVIDER", "OWNED", "CREATED")
-		fmt.Println(string(make([]byte, 100)))
+		fmt.Println(strings.Repeat("-", 100))
 		for _, ref := range refs {
 			owned := "no"
 			if ref.Owned {

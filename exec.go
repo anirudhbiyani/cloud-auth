@@ -74,7 +74,7 @@ func cmdExec(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if target == nil {
+	if target.Cloud() == "" {
 		return fmt.Errorf("--to or --config/--target is required")
 	}
 	if target.Audience() == "" {

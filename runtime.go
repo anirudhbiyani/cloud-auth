@@ -37,7 +37,9 @@ func targetFlags(fs *flag.FlagSet) func() (core.Target, error) {
 
 	return func() (core.Target, error) {
 		if strings.TrimSpace(*to) == "" {
-			return nil, nil // no --to; the caller may resolve a target from --config
+			// A typed zero, not nil: core.Target is an interface, and every
+			// consumer calls a method on this before it can decide anything.
+			return core.NoTarget{}, nil // the caller may resolve a target from --config
 		}
 		cloud, err := core.ParseCloud(*to)
 		if err != nil {
@@ -222,7 +224,7 @@ func cmdExchange(ctx context.Context, args []string, defaultFormat string) error
 	if err != nil {
 		return err
 	}
-	if target == nil {
+	if target.Cloud() == "" {
 		return fmt.Errorf("--to or --config/--target is required")
 	}
 	if target.Audience() == "" {

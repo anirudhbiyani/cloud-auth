@@ -31,7 +31,7 @@ cloud-auth setup --type aws-oidc \
   --role-name github-deploy-role \
   --account-id 123456789012 \
   --oidc-url https://token.actions.githubusercontent.com \
-  --subject "repo:myorg/myrepo:*" \
+  --subject "repo:myorg/myrepo:ref:refs/heads/main" \
   --source github
 ```
 
@@ -61,31 +61,63 @@ Setting up cross-cloud authentication typically requires:
 - **Delete** - Safely remove mechanisms and associated resources
 - **Dry-Run** - Preview changes before applying them
 
-### 🌐 Multi-Cloud Support
-Full lifecycle support for major cloud providers:
+### 📍 Current status
 
-| Provider | Token | Setup | Validate | Delete | Federation Types |
-|----------|:-----:|:-----:|:--------:|:------:|------------------|
+**AWS is the only control-plane provider wired to its cloud.** GCP, Azure,
+Cloudflare and Vault define their client interfaces, validation and dry-run
+plans, but ship no concrete client — every non-`--dry-run` `setup`, `validate`
+or `delete` against them stops at `<cloud> client not configured`. The runtime
+data plane (`doctor`, `exchange`, `exec`) is the more mature half of this
+project and works across all three clouds.
+
+### 🌐 Multi-Cloud Support
+
+Control-plane lifecycle — establishing the trust relationship.
+
+**Legend:** ✅ implemented and reaches the cloud · 🅿️ plan/validation only, no
+client (`--dry-run` works, a real run does not) · — not applicable.
+
+| Provider | Setup | Validate | Delete | Dry-run | Federation Types |
+|----------|:-----:|:--------:|:------:|:-------:|------------------|
 | **AWS** | ✅ | ✅ | ✅ | ✅ | OIDC Trust |
-| **GCP** | ✅ | ✅ | ✅ | ✅ | Workload Identity |
-| **Azure** | ✅ | ✅ | ✅ | ✅ | Federated Credentials |
-| **Cloudflare** | ✅ | ✅ | ✅ | ✅ | Access Service Tokens |
-| **Vault** | ✅ | ✅ | ✅ | ✅ | JWT Auth |
-| **GitHub OIDC** | ✅ | - | - | - | Token Source |
-| **Kubernetes** | ✅ | - | - | - | Token Source |
+| **GCP** | 🅿️ | 🅿️ | 🅿️ | ✅ | Workload Identity |
+| **Azure** | 🅿️ | 🅿️ | 🅿️ | ✅ | Federated Credentials |
+| **Cloudflare** | 🅿️ | 🅿️ | 🅿️ | ✅ | Access Service Tokens |
+| **Vault** | 🅿️ | 🅿️ | 🅿️ | ✅ | JWT Auth |
+| **GitHub OIDC** | — | — | — | — | Token source only |
+| **Kubernetes** | — | — | — | — | Token source only |
 
 ### 🔀 Runtime Federation Matrix
 
 Which source runtimes can obtain credentials at which targets, and the proof
 each one presents. This is the `exchange`/`exec` path, not the control plane:
 
+**Legend:** ✅ works · ❌ the target STS will not accept this proof · 🚫 **refused
+by design** — cloud-auth returns `ErrNonFederatableSource` rather than attempt it.
+
 | Source runtime | Proof it mints | → AWS | → GCP | → Azure |
 |---|---|:---:|:---:|:---:|
-| **AWS** — `eks-irsa`, `eks-pod-identity` | OIDC (projected SA token) | ✅ | ✅ | ✅ |
+| **AWS** — `eks-irsa` | OIDC (projected SA token) | ✅ | ✅ | ✅ |
 | **AWS** — `ec2`, `ecs`, `lambda` | OIDC via `sts:GetWebIdentityToken` | ✅ | ✅ | ✅ |
 | **AWS** — `ec2`, `ecs`, `lambda` | SigV4 `GetCallerIdentity` | ✅ | ✅ | ❌ |
+| **AWS** — `eks-pod-identity` | *none* | 🚫 | 🚫 | 🚫 |
 | **GCP** — `gce`, `gke`, `cloud-run`, `cloud-functions` | OIDC (metadata identity token) | ✅ | ✅ | ✅ |
-| **Azure** — `vm`, `aks-workload-identity`, `app-service`, `container-apps` | OIDC (managed identity token) | ✅ | ✅ | ✅ |
+| **Azure** — `aks-workload-identity` | OIDC (projected SA token) | ✅ | ✅ | ✅ |
+| **Azure** — `vm`, `app-service`, `container-apps` | *none* | 🚫 | 🚫 | 🚫 |
+
+**Why two runtimes are refused rather than attempted.**
+
+*EKS Pod Identity* vends AWS-internal credentials. There is no
+externally-verifiable token to present, so no other cloud's STS can check
+anything. Use EKS IRSA, which projects a real OIDC token.
+
+*Azure managed identity* — a bare VM, App Service, Container Apps — vends Entra
+**access tokens**. An access token is a live bearer credential for whatever
+Azure resource was named in the request, not an audience-pinned assertion about
+the workload. Forwarding one to a third-party STS discloses a working Azure
+credential **and still fails**, because its `aud` is an Azure resource rather
+than the target's audience. Use AKS Workload Identity
+(`AZURE_FEDERATED_TOKEN_FILE`), or bridge the identity through an OIDC issuer.
 
 Azure Entra accepts **only** RS256 OIDC JWTs. Until AWS shipped outbound
 identity federation, an EC2/ECS/Lambda workload had no OIDC token of its own and
@@ -269,8 +301,8 @@ Or using a spec file:
   "account_id": "123456789012",
   "oidc_provider_url": "https://token.actions.githubusercontent.com",
   "audience": "sts.amazonaws.com",
-  "subject": "repo:myorg/myrepo:*",
-  "subject_condition": "StringLike",
+  "subject": "repo:myorg/myrepo:ref:refs/heads/main",
+  "subject_condition": "StringEquals",
   "source": "github_oidc",
   "policy_arns": [
     "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
@@ -350,7 +382,7 @@ Validation checks, and their **current** implementation status:
 | OIDC provider configuration | ✅ implemented — fetches the issuer's `.well-known/openid-configuration` |
 | Token acquisition | ✅ implemented (opt-in via `--include-token-test`) |
 | Clock skew | ✅ implemented — requires a remote time source; reports **skipped** without one |
-| Trust policy configuration | ✅ implemented for **AWS, GCP and Azure** — reads the live trust object and checks the issuer, audience and subject still match what was configured, and flags an unscoped trust outright |
+| Trust policy configuration | ✅ implemented for **AWS, GCP and Azure** — reads the live trust object and checks the issuer, audience and subject still match what was configured, and flags a *totally* unscoped trust outright |
 | Permission policies | ✅ implemented for **AWS, GCP and Azure** — confirms the expected policies/roles are still attached |
 
 > **What "unscoped" means per cloud.** The trust check fails outright when a
@@ -358,6 +390,13 @@ Validation checks, and their **current** implementation status:
 > workload identity pool provider with **no attribute condition**, or an Azure
 > federated credential with an empty subject. Each is a confused-deputy hole,
 > and each would otherwise "match" whatever you compared it to.
+
+> **"Unscoped" is a narrow test, not a breadth score.** It answers *does this
+> pin nothing at all*. A subject that pins some characters is not flagged, so
+> `repo:myorg/*` (every repo in the org, including ones created tomorrow) and
+> `repo:myorg/myrepo:*` (every branch, tag, and `pull_request` from a fork) both
+> pass it today. Grading subject breadth is tracked separately; until it lands,
+> pin the subject yourself — the examples in this README do.
 
 > **Trust-policy and permission checks compare against the intent recorded at
 > setup.** Mechanisms created before cloud-auth persisted that intent have
@@ -449,8 +488,8 @@ func main() {
         AccountID:        "123456789012",
         OIDCProviderURL:  "https://token.actions.githubusercontent.com",
         Audience:         "sts.amazonaws.com",
-        Subject:          "repo:myorg/myrepo:*",
-        SubjectCondition: "StringLike",
+        Subject:          "repo:myorg/myrepo:ref:refs/heads/main",
+        SubjectCondition: "StringEquals",
         Source:           core.GitHubOIDC,
         PolicyARNs: []string{
             "arn:aws:iam::aws:policy/ReadOnlyAccess",
@@ -594,7 +633,7 @@ cloud-auth/
 ├── config/                    # Runtime: declarative federation config + JSON Schema
 ├── internal/                  # imds, jwt, k8stoken, cache, audit
 ├── test/                      # Cloud integration harness (OpenTofu) + build-tagged tests
-├── docs/                      # TDD, task backlog, sprint plan
+├── docs/                      # BASELINE.md; internal/ holds planning history
 └── examples/                  # Example spec files
 ```
 

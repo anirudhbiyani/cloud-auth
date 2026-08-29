@@ -140,6 +140,9 @@ func (c *Config) RefreshBuffer() (time.Duration, error) {
 }
 
 // Target resolves a named target into a core.Target.
+// A core.Target is returned on every path including the error paths — never an
+// untyped nil, which would panic at the caller's first method call. See
+// core.NoTarget.
 func (c *Config) Target(name string) (core.Target, error) {
 	for _, t := range c.Targets {
 		if t.Name != name {
@@ -147,11 +150,11 @@ func (c *Config) Target(name string) (core.Target, error) {
 		}
 		cloud, err := core.ParseFederationTarget(t.Cloud)
 		if err != nil {
-			return nil, err
+			return core.NoTarget{}, err
 		}
 		return t.resolve(cloud)
 	}
-	return nil, fmt.Errorf("config: no target named %q", name)
+	return core.NoTarget{}, fmt.Errorf("config: no target named %q", name)
 }
 
 // resolve builds the concrete per-cloud target.
@@ -182,17 +185,17 @@ func (t Target) resolve(cloud core.Cloud) (core.Target, error) {
 			Scope:         t.Scope,
 		}
 	default:
-		return nil, fmt.Errorf("unsupported target cloud %q", cloud)
+		return core.NoTarget{}, fmt.Errorf("unsupported target cloud %q", cloud)
 	}
 
 	// Reject fields that belong to another cloud rather than ignoring them: a
 	// tenant on an AWS target means the operator has the wrong block, and
 	// silently dropping it is how a target ends up pointing somewhere unintended.
 	if err := t.rejectForeignFields(cloud); err != nil {
-		return nil, err
+		return core.NoTarget{}, err
 	}
 	if err := out.Validate(); err != nil {
-		return nil, err
+		return core.NoTarget{}, err
 	}
 	return out, nil
 }
