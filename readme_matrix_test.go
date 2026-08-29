@@ -99,7 +99,7 @@ func TestREADMEControlPlaneMatrixDoesNotOverstate(t *testing.T) {
 
 	// Providers that still have no concrete client. Remove a name from this list
 	// only in the same commit that adds its client.
-	for _, provider := range []string{"Azure", "Cloudflare", "Vault"} {
+	for _, provider := range []string{"Cloudflare", "Vault"} {
 		t.Run(provider, func(t *testing.T) {
 			var row string
 			for _, line := range strings.Split(section, "\n") {
@@ -130,7 +130,7 @@ func TestREADMEControlPlaneMatrixDoesNotOverstate(t *testing.T) {
 func TestREADMEControlPlaneMatrixCreditsWiredProviders(t *testing.T) {
 	section := readmeSection(t, "### 🌐 Multi-Cloud Support")
 
-	for _, provider := range []string{"AWS", "GCP"} {
+	for _, provider := range []string{"AWS", "GCP", "Azure"} {
 		t.Run(provider, func(t *testing.T) {
 			for _, line := range strings.Split(section, "\n") {
 				if !strings.HasPrefix(line, "| **"+provider+"**") {

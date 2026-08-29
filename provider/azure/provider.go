@@ -3,7 +3,9 @@ package azure
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/anirudhbiyani/cloud-auth/core"
@@ -11,9 +13,48 @@ import (
 
 // Provider implements core.LifecycleProvider for Azure.
 type Provider struct {
+	mu          sync.Mutex
 	graphClient GraphClient
 	armClient   ARMClient
 	tokenClient TokenClient
+
+	// resolveFailed caches a credential-resolution failure so the second call
+	// reports the original cause rather than silently retrying a lookup that
+	// will fail the same way.
+	resolveFailed error
+}
+
+// resolve lazily builds the Graph and ARM clients from DefaultAzureCredential.
+//
+// Lazily, because init() registers this Provider into the global registry at
+// import time, long before anyone has asked to talk to Azure. Building eagerly
+// would make every import of this package depend on resolvable credentials.
+// Injected clients always win.
+func (p *Provider) resolve(ctx context.Context) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.graphClient != nil && p.armClient != nil && p.tokenClient != nil {
+		return nil
+	}
+	if p.resolveFailed != nil {
+		return p.resolveFailed
+	}
+
+	clients, err := NewClients(ctx)
+	if err != nil {
+		p.resolveFailed = err
+		return err
+	}
+	if p.graphClient == nil {
+		p.graphClient = clients.Graph
+	}
+	if p.armClient == nil {
+		p.armClient = clients.ARM
+	}
+	if p.tokenClient == nil {
+		p.tokenClient = clients.Token
+	}
+	return nil
 }
 
 // TokenClient abstracts Azure token acquisition operations.
@@ -261,7 +302,14 @@ func (p *Provider) HasCapability(cap core.Capability) bool {
 // registers. Setup's nil-check only covered the create-application branch: the
 // path that fetched an existing application by ID, and the federated-credential
 // call after it, dereferenced the nil field and panicked.
-func (p *Provider) requireClients(needGraph, needARM bool) error {
+func (p *Provider) requireClients(ctx context.Context, needGraph, needARM bool) error {
+	if err := p.resolve(ctx); err != nil {
+		return core.ErrValidation("could not reach Azure: no usable credentials").
+			WithCause(err).
+			WithProvider(core.Azure).
+			WithDetail("hint", "Run `az login`, or set AZURE_CLIENT_ID/AZURE_TENANT_ID with a federated "+
+				"token file or client secret; --dry-run needs no credentials")
+	}
 	if needGraph && p.graphClient == nil {
 		return core.ErrValidation("Azure Graph client not configured").
 			WithProvider(core.Azure).
@@ -278,7 +326,7 @@ func (p *Provider) requireClients(needGraph, needARM bool) error {
 // Setup implements core.LifecycleProvider.
 func (p *Provider) Setup(ctx context.Context, spec core.MechanismSpec, opts core.SetupOptions) (*core.Outputs, error) {
 	if !opts.DryRun {
-		if err := p.requireClients(true, false); err != nil {
+		if err := p.requireClients(ctx, true, false); err != nil {
 			return nil, err
 		}
 	}
@@ -645,7 +693,7 @@ func (p *Provider) setupManagedIdentityFederated(ctx context.Context, spec *core
 
 // Validate implements core.LifecycleProvider.
 func (p *Provider) Validate(ctx context.Context, ref core.MechanismRef, opts core.ValidateOptions) (*core.ValidationReport, error) {
-	if err := p.requireClients(true, false); err != nil {
+	if err := p.requireClients(ctx, true, false); err != nil {
 		return nil, err
 	}
 	var validators []core.Validator
@@ -693,7 +741,7 @@ func (p *Provider) Validate(ctx context.Context, ref core.MechanismRef, opts cor
 // Delete implements core.LifecycleProvider.
 func (p *Provider) Delete(ctx context.Context, ref core.MechanismRef, opts core.DeleteOptions) error {
 	if !opts.DryRun {
-		if err := p.requireClients(true, false); err != nil {
+		if err := p.requireClients(ctx, true, false); err != nil {
 			return err
 		}
 	}
@@ -914,11 +962,22 @@ func (p *Provider) GenerateGCPWorkloadIdentityToken(ctx context.Context, input *
 
 // Helper functions
 
+// isNotFoundError reports whether err means "the resource is absent", as opposed
+// to "we could not tell" — a distinction Setup's create-or-update decision and
+// the delete path both depend on. A denied read is NOT evidence of absence.
+//
+// Both checks are typed. There is deliberately no substring fallback: the client
+// in this package returns *apiError carrying Graph's own code, so absence never
+// has to be recovered by matching English.
 func isNotFoundError(err error) bool {
 	if err == nil {
 		return false
 	}
-	return core.IsCategory(err, core.ErrCategoryNotFound)
+	if core.IsCategory(err, core.ErrCategoryNotFound) {
+		return true
+	}
+	var notFound interface{ NotFound() bool }
+	return errors.As(err, &notFound) && notFound.NotFound()
 }
 
 // Validators

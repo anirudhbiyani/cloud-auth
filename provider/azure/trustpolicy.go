@@ -45,7 +45,7 @@ func (p *Provider) TrustPolicy(ctx context.Context, ref core.MechanismRef) (*cor
 		if credID == "" {
 			return nil, fmt.Errorf("azure: mechanism ref %q names an application but no federated credential", ref.ID)
 		}
-		if err := p.requireClients(true, false); err != nil {
+		if err := p.requireClients(ctx, true, false); err != nil {
 			return nil, err
 		}
 		cred, err = p.graphClient.GetFederatedIdentityCredential(ctx, appID, credID)
@@ -62,7 +62,7 @@ func (p *Provider) TrustPolicy(ctx context.Context, ref core.MechanismRef) (*cor
 		if credName == "" {
 			return nil, fmt.Errorf("azure: mechanism ref %q names a managed identity but no federated credential", ref.ID)
 		}
-		if err := p.requireClients(false, true); err != nil {
+		if err := p.requireClients(ctx, false, true); err != nil {
 			return nil, err
 		}
 		cred, err = p.armClient.GetManagedIdentityFederatedCredential(ctx,
@@ -105,7 +105,7 @@ func (p *Provider) TrustPolicy(ctx context.Context, ref core.MechanismRef) (*cor
 // it catches a role that was removed, not a custom role definition that was
 // narrowed.
 func (p *Provider) GrantedPolicies(ctx context.Context, ref core.MechanismRef) ([]string, error) {
-	if err := p.requireClients(false, true); err != nil {
+	if err := p.requireClients(ctx, false, true); err != nil {
 		return nil, err
 	}
 	principalID := ref.ResourceIDs["service_principal_id"]

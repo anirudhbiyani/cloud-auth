@@ -63,7 +63,7 @@ Setting up cross-cloud authentication typically requires:
 
 ### 📍 Current status
 
-**AWS and GCP are wired to their clouds. Azure, Cloudflare and Vault are not
+**AWS, GCP and Azure are wired to their clouds. Cloudflare and Vault are not
 yet** — they define client interfaces, validation and dry-run plans but ship no
 concrete client, so every non-`--dry-run` `setup`, `validate` or `delete`
 against them stops at `<cloud> client not configured`. The runtime data plane
@@ -84,19 +84,41 @@ client (`--dry-run` works, a real run does not) · — not applicable.
 |----------|:-----:|:--------:|:------:|:-------:|------------------|
 | **AWS** | ✅ | ✅ | ✅ | ✅ | OIDC Trust |
 | **GCP** | ✅ | ✅ | ✅ | ✅ | Workload Identity |
-| **Azure** | 🅿️ | 🅿️ | 🅿️ | ✅ | Federated Credentials |
+| **Azure** | ✅ | ✅ | ✅ | ✅ | Federated Credentials |
 | **Cloudflare** | 🅿️ | 🅿️ | 🅿️ | ✅ | Access Service Tokens |
 | **Vault** | 🅿️ | 🅿️ | 🅿️ | ✅ | JWT Auth |
 | **GitHub OIDC** | — | — | — | — | Token source only |
 | **Kubernetes** | — | — | — | — | Token source only (`--type k8s-federation`, AWS target) |
 
 > **How far each ✅ has been verified.** AWS is exercised against live AWS in the
-> integration harness. GCP's client is covered by unit tests that speak the
-> documented IAM, STS and IAM Credentials wire protocol — the long-running-
-> operation envelope, the error envelope, the IAM policy etag — against a fake
-> server, and has not yet been run against live GCP. Credentials come from
-> Application Default Credentials: `GOOGLE_APPLICATION_CREDENTIALS`,
-> `gcloud auth application-default login`, or the metadata server.
+> integration harness. The GCP and Azure clients are covered by unit tests that
+> speak the documented wire protocols against a fake server — GCP's
+> long-running-operation envelope, error envelope and IAM policy etag; Azure's
+> Graph and ARM envelopes, `@odata.nextLink` paging and the Entra `AADSTS` codes
+> — and have not yet been run against their live clouds.
+>
+> Credentials: GCP uses Application Default Credentials
+> (`GOOGLE_APPLICATION_CREDENTIALS`, `gcloud auth application-default login`, or
+> the metadata server). Azure uses `DefaultAzureCredential` (`az login`, managed
+> identity, workload identity, or the `AZURE_*` environment variables).
+
+#### Azure constraints cloud-auth enforces for you
+
+These are Azure's, not cloud-auth's, and each one is checked *before* the API
+call rather than discovered from a refusal that names a limit without naming
+what is using it:
+
+| Constraint | What cloud-auth does |
+|---|---|
+| **20 federated identity credentials** per application or user-assigned managed identity | Refuses the 21st, naming the current count. The flexible-FIC preview raises this, but is readable only through Graph or the portal — Azure CLI, PowerShell and Terraform error on both read *and* write — so adopting it makes existing IaC state unreadable. cloud-auth does not use it, and says so in the error. |
+| **No wildcards in any FIC property** | Rejected up front. Azure matches issuer, subject, audience and name literally, so a wildcard produces a credential that is created successfully and then never matches a token. |
+| **Creation throttled to ~0.25 req/sec per resource; HTTP 409 on concurrent creation** | Credential creation is serialized and paced. Fanning out yields conflicts, not speed — and a conflict is indistinguishable from "already exists", so the two get conflated and a setup reports success having created nothing. |
+| **Propagation delay after creation** | `AADSTS70021` is retried with bounded backoff, in both the control plane and the runtime exchanger. Nothing else is: `AADSTS700213`, a genuinely wrong subject, fails on the first attempt. |
+
+> Azure matches issuer, subject and audience **case-sensitively**, and a wrong
+> subject produces a credential that Microsoft's own documentation describes as
+> failing without error. `cloud-auth doctor` reports a case-only audience
+> mismatch explicitly for that reason.
 
 ### 🔀 Runtime Federation Matrix
 

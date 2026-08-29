@@ -194,3 +194,50 @@ func TestRetryRespectsContextCancellation(t *testing.T) {
 		t.Errorf("error should reflect the cancellation, got %v", err)
 	}
 }
+
+// A newly created federated identity credential legitimately fails for a few
+// minutes while Entra replicates it. That is the one Azure 4xx worth retrying,
+// and the exception must not widen to the rejection that looks just like it.
+func TestRetryablePropagationVersusWrongSubject(t *testing.T) {
+	entra := func(description string) error {
+		return &httpError{
+			status: http.StatusUnauthorized,
+			body:   []byte(`{"error":"invalid_client","error_description":"` + description + `"}`),
+		}
+	}
+
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "AADSTS70021: the credential has not propagated",
+			err:  entra("AADSTS70021: No matching federated identity record found for presented assertion."),
+			want: true,
+		},
+		{
+			name: "AADSTS700213: the subject is wrong",
+			err:  entra("AADSTS700213: No matching federated identity record found for presented assertion subject."),
+			want: false,
+		},
+		{
+			name: "AADSTS700016: no such application",
+			err:  entra("AADSTS700016: Application with identifier was not found in the directory."),
+			want: false,
+		},
+		{
+			name: "AADSTS700027: the assertion failed signature validation",
+			err:  entra("AADSTS700027: Client assertion failed signature validation."),
+			want: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := retryable(tc.err); got != tc.want {
+				t.Errorf("retryable = %v, want %v — retrying a wrong subject turns a clear "+
+					"misconfiguration into a slow one, and not retrying propagation blames the operator "+
+					"for Entra's replication delay", got, tc.want)
+			}
+		})
+	}
+}

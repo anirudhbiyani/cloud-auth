@@ -16,6 +16,13 @@ import (
 // This is deliberately a structural test rather than one per method: the bug it
 // guards is "somebody added an entry point and forgot the client guard", and
 // only a test that walks every entry point catches that.
+//
+// Since this provider gained a real client it resolves Application Default Credentials on
+// first use, so a bare New() is no longer reliably clientless — on a developer
+// machine that has run the cloud's login, it would configure itself and this
+// test would quietly stop testing anything. unreachable() pins the condition
+// the test is actually about: a provider that cannot reach GCP must report
+// that, on every entry point, without panicking.
 func TestNoExportedMethodPanicsWithoutClients(t *testing.T) {
 	// A short deadline, because some of these reach for real credentials and a
 	// host without them can spend minutes in the AWS IMDS resolver. Either a
@@ -44,14 +51,14 @@ func TestNoExportedMethodPanicsWithoutClients(t *testing.T) {
 
 	calls := map[string]func() error{
 		"Setup": func() error {
-			_, err := New().Setup(ctx, unsupportedSpec{}, core.SetupOptions{})
+			_, err := unreachable().Setup(ctx, unsupportedSpec{}, core.SetupOptions{})
 			return err
 		},
 		// Validate is allowed to succeed: a report describing failed checks is
 		// the correct outcome, not an error. What it must never do is report a
 		// vacuous pass — "nothing failed" because nothing ran.
 		"Validate": func() error {
-			report, err := New().Validate(ctx, ref, core.ValidateOptions{})
+			report, err := unreachable().Validate(ctx, ref, core.ValidateOptions{})
 			if err != nil {
 				return err
 			}
@@ -64,14 +71,14 @@ func TestNoExportedMethodPanicsWithoutClients(t *testing.T) {
 			return errUnverified
 		},
 		"Delete": func() error {
-			return New().Delete(ctx, ref, core.DeleteOptions{})
+			return unreachable().Delete(ctx, ref, core.DeleteOptions{})
 		},
 		"TrustPolicy": func() error {
-			_, err := New().TrustPolicy(ctx, ref)
+			_, err := unreachable().TrustPolicy(ctx, ref)
 			return err
 		},
 		"GrantedPolicies": func() error {
-			_, err := New().GrantedPolicies(ctx, ref)
+			_, err := unreachable().GrantedPolicies(ctx, ref)
 			return err
 		},
 	}
@@ -103,3 +110,11 @@ func (unsupportedSpec) Type() core.MechanismType   { return core.MechanismType("
 func (unsupportedSpec) Validate() error            { return nil }
 func (unsupportedSpec) SourceProvider() core.Cloud { return core.Cloud("none") }
 func (unsupportedSpec) TargetProvider() core.Cloud { return core.Cloud("none") }
+
+// unreachable returns a provider whose credential resolution has already
+// failed, which is the state this file exists to exercise.
+func unreachable() *Provider {
+	p := New()
+	p.resolveFailed = errors.New("test: credentials deliberately unavailable")
+	return p
+}
