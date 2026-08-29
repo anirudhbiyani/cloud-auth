@@ -20,22 +20,37 @@ file wins** — every line here is command output, not static reading.
 | `go test -race ./...` | ✅ exit 0, 21 packages `ok` |
 | `go test ./test/architecture/ -v` | ✅ all 6 invariants PASS |
 | `go test -run 'Fuzz' ./...` | ✅ exit 0, seed corpora pass |
-| `golangci-lint run` | ⚠️ **could not run** — see below |
+| `golangci-lint run` | ⚠️ **could not run locally** — see below; passes in CI |
 | `git tag` | (empty) |
 
-### golangci-lint does not run against this module
+### golangci-lint does not run on this machine
 
 ```
 can't load config: the Go language version (go1.26) used to build golangci-lint
 is lower than the targeted Go version (1.27.0)
 ```
 
-This is not a local-only problem, and it sharpens **Task 1.6**. CI pins
-`version: latest` *and* sets `continue-on-error: true`, so if the released
-golangci-lint binary is still built against go1.26, the lint step has been
-failing silently on every run since the Go 1.27 bump in `e25b563`. Task 1.6
-must confirm a golangci-lint release that targets 1.27 exists before dropping
-`continue-on-error`, or the change turns a silent no-op into a hard red build.
+**Corrected 2026-08-29, while starting Task 1.6.** This entry originally claimed
+the failure was not local-only and that CI's lint step had been silently failing
+since the Go 1.27 bump. That was wrong, and it was inference rather than
+evidence — no CI log had been read when it was written.
+
+The CI log for run `33242663538` shows the opposite:
+
+```
+Requested golangci-lint 'latest', using 'v2.13.2', calculation took 15ms
+Running [.../golangci-lint run  --timeout=5m] ...
+Ran golangci-lint in 23911ms
+```
+
+It resolved, ran to completion and reported nothing. The go1.26 error is
+specific to the binary installed on this machine — v1.64.8, several major
+versions behind — and says nothing about CI.
+
+What this leaves for **Task 1.6** is the original, milder finding: the step is
+advisory (`continue-on-error: true`) and unpinned (`version: latest`), so it can
+neither fail the build nor be reproduced. Dropping `continue-on-error` is safe;
+lint currently passes clean.
 
 ## Coverage
 

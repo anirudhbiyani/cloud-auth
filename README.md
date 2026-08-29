@@ -181,6 +181,9 @@ path closes it. See [AWS proof selection](#aws-proof-selection).
 go install github.com/anirudhbiyani/cloud-auth@latest
 ```
 
+**Pre-built binaries** for linux, darwin and windows on amd64 and arm64, with
+checksums, are attached to each [release](https://github.com/anirudhbiyani/cloud-auth/releases).
+
 **From Source:**
 ```bash
 git clone https://github.com/anirudhbiyani/cloud-auth.git
@@ -775,7 +778,15 @@ Contributions are welcome! Here's how to get started:
    ```bash
    golangci-lint run
    ```
-7. **Submit** a pull request
+7. **Sign off** your commits (`git commit -s`) — see [CONTRIBUTING.md](CONTRIBUTING.md)
+8. **Submit** a pull request
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) first: it covers the DCO sign-off, what a
+change needs before it can merge, and the handful of things that will fail
+review — weakening an architecture test to make a change compile, turning a
+skipped validation check into a passing one, or retrying a 4xx.
+
+Found a security issue? Do not open a public issue — see [SECURITY.md](SECURITY.md).
 
 ### Development Setup
 

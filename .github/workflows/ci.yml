@@ -9,7 +9,18 @@ on:
 jobs:
   ci:
     name: Lint, Test, Build & Security
-    runs-on: ubuntu-latest
+    # A matrix, so the non-Unix code path is compiled somewhere. core/state.go
+    # locks with syscall.Flock under //go:build unix and has a documented no-op
+    # fallback in state_lock_other.go — which a single ubuntu runner never
+    # builds, so it could stop compiling and CI would not notice.
+    #
+    # Only ubuntu runs the full suite. Windows compiles, vets and tests: it is
+    # here for the build tag, not to be a second full CI.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v6
 
@@ -21,12 +32,30 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
-      # Lint
+      # Formatting and module hygiene. Cheap, and a failure here is unambiguous.
+      - name: gofmt
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt'd:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go mod tidy
+        if: matrix.os == 'ubuntu-latest'
+        run: go mod tidy -diff
+
+      # Lint. Pinned rather than 'latest', so a lint failure is attributable to a
+      # change in this repository and not to a linter release that landed
+      # overnight — and it no longer carries continue-on-error, which made the
+      # whole step advisory. It passes clean today; see docs/BASELINE.md.
       - name: golangci-lint
+        if: matrix.os == 'ubuntu-latest'
         uses: golangci/golangci-lint-action@v9
-        continue-on-error: true
         with:
-          version: latest
+          version: v2.13.2
           args: --timeout=5m
 
       # Test. One pass with the race detector and coverage, rather than three
@@ -38,7 +67,15 @@ jobs:
       # separately: a failure here is a layering regression, not a logic bug, and
       # the distinction saves a reviewer a minute.
       - name: Architecture invariants
+        if: matrix.os == 'ubuntu-latest'
         run: go test ./test/architecture/ -v
+
+      # Vet the default build. A build tag only ADDS files, so the tagged run
+      # below covers this too — but naming only that one hid the fact that vet
+      # runs at all, and a reader should not have to know the tag semantics to
+      # see it.
+      - name: Vet
+        run: go vet ./...
 
       # Compile the build-tagged integration suite. It needs real cloud
       # credentials to run, but it must at least keep compiling.
@@ -48,6 +85,7 @@ jobs:
       # Seed corpora only: fuzzing proper is not a CI-duration activity, but a
       # target that no longer compiles or fails its seeds should break the build.
       - name: Fuzz seed corpora
+        if: matrix.os == 'ubuntu-latest'
         run: go test -run 'Fuzz' ./...
 
       # Build
@@ -64,6 +102,7 @@ jobs:
       # live, so a newly-published advisory can turn this red without any
       # change to the code. That is the intended behaviour.
       - name: Run govulncheck
+        if: matrix.os == 'ubuntu-latest'
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
 
       # Gated on medium-or-higher severity AND confidence. Rationale: this
@@ -75,7 +114,10 @@ jobs:
       # Genuinely-intended patterns are annotated in-line with `#nosec` plus a
       # justification, so they stay visible in review rather than being silently
       # filtered here.
+      # Pinned: @master is a third-party action whose behaviour can change
+      # under us between two runs of the same commit.
       - name: Run Gosec Security Scanner
-        uses: securego/gosec@master
+        if: matrix.os == 'ubuntu-latest'
+        uses: securego/gosec@v2.29.0
         with:
           args: -severity medium -confidence medium ./...

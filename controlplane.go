@@ -1470,8 +1470,22 @@ func cmdProviders(_ context.Context, _ []string) error {
 	return nil
 }
 
+// Build metadata, set by goreleaser's ldflags at release time.
+//
+// The defaults are what a `go build` or `go install` from source produces, and
+// they say so rather than naming a version number nobody set. The previous
+// value was a hardcoded "0.2.0" printed by every binary ever built, which meant
+// a bug report's version line was worth nothing.
+var (
+	version   = "dev"
+	commit    = "none"
+	buildDate = "unknown"
+)
+
 func cmdVersion() error {
-	fmt.Println("cloud-auth version 0.2.0")
+	fmt.Printf("cloud-auth version %s\n", version)
+	fmt.Printf("  Commit: %s\n", commit)
+	fmt.Printf("  Built:  %s\n", buildDate)
 	fmt.Println("  Core: lifecycle management support")
 	fmt.Println("  Providers: aws, gcp, azure, vault")
 	return nil
