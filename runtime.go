@@ -231,23 +231,27 @@ func cmdExchange(ctx context.Context, args []string, defaultFormat string) error
 		return fmt.Errorf("--audience is required (pinned per target)")
 	}
 
-	auditLog := audit.New(os.Stderr)
-	start := time.Now()
-	creds, rt, err := brokerFor(sel).Exchange(ctx, target)
-	ev := audit.Event{
-		Timestamp: start.UTC(), TargetCloud: string(target.Cloud()), Role: auditRole(target),
-		LatencyMS: time.Since(start).Milliseconds(),
+	// credential-process is the same operation as exchange wearing a different
+	// output contract, but a SIEM should be able to tell them apart: one is a
+	// person or a script, the other is an SDK refreshing on its own schedule.
+	op := audit.OpExchange
+	if *format == "credential-process" {
+		op = audit.OpCredentialProcess
 	}
+	aud := newAuditor(op).with(func(e *audit.Event) {
+		e.TargetCloud = string(target.Cloud())
+		e.Role = auditRole(target)
+	})
+
+	creds, rt, err := brokerFor(sel).Exchange(ctx, target)
 	if rt != nil {
-		ev.SourceIdentity = rt.Subject
+		aud.with(func(e *audit.Event) { e.SourceIdentity = rt.Subject })
 	}
 	if err != nil {
-		ev.Outcome, ev.Error = "failure", err.Error()
-		auditLog.Emit(ev)
-		return err
+		return aud.finish(err)
 	}
-	ev.Outcome, ev.STSRequestID = "success", creds.STSRequestID
-	auditLog.Emit(ev)
+	aud.with(func(e *audit.Event) { e.STSRequestID = creds.STSRequestID })
+	_ = aud.finish(nil)
 
 	switch *format {
 	case "json", "credential-process":

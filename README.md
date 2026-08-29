@@ -631,7 +631,47 @@ malformed `aws-`, which is an error and not a synonym for `aws`.
 | `--dry-run` | Preview changes without applying them |
 | `--force` | Overwrite existing resources |
 | `--state <path>` | Custom state file path |
-| `-v, --verbose` | Verbose output |
+| `-v, --verbose` | Diagnostic output on **stderr** |
+
+## 📝 Output and audit
+
+**stdout carries results; stderr carries everything else.** A result is the thing
+you asked for — a validation report, a credential document, a table of
+mechanisms — and something downstream may be parsing it. Diagnostics, warnings,
+the delete confirmation prompt and audit records all go to stderr, so
+`cloud-auth list --output json | jq .` and `cloud-auth exchange --format json`
+stay clean whatever else the run has to say.
+
+`--verbose` raises the diagnostic level; without it a normal run is quiet unless
+something is worth saying.
+
+### Audit records
+
+Every operation that **issues a credential** or **changes a trust relationship**
+emits exactly one JSON record to stderr, whether it succeeds or fails:
+
+| Operation | Emitted by |
+|---|---|
+| `exchange` | `cloud-auth exchange` |
+| `credential-process` | `cloud-auth credential-process` |
+| `exec` | `cloud-auth exec` — written *before* the child runs, since the child may run for hours and replaces this process's exit path |
+| `setup` | `cloud-auth setup`, including `--dry-run`, which still reads live state |
+| `delete` | `cloud-auth delete` |
+
+```console
+$ cloud-auth setup --type aws-oidc ... --dry-run 2> audit.jsonl
+$ jq -c '{operation, outcome, mechanism_type, latency_ms}' audit.jsonl
+{"operation":"setup","outcome":"success","mechanism_type":"aws_role_trust_oidc","latency_ms":4011}
+```
+
+Records carry the source identity, target, role, STS request id, mechanism and
+latency — whichever apply to that operation. **Exactly one record per operation,
+including on the failure paths**, which are the ones worth reviewing. The `error`
+field is redacted before it is written: upstream token endpoints echo request
+material into their error descriptions, and the audit log is the one file built
+for long-term retention.
+
+Reads — `validate`, `list`, `describe`, `doctor` — do not emit records.
 
 ## 🏗️ Architecture
 
@@ -645,6 +685,9 @@ cloud-auth/
 ├── exec.go                    #   runtime.go: doctor/exchange/exec/config-validate
 ├── format.go                  #   diagnose.go: doctor's preflight logic (pure, no I/O)
 │                              #   scaffold.go, exec.go, format.go: init, exec, output shapes
+├── audit.go                   #   audit.go: one record per credential-issuing
+├── logging.go                 #     or trust-changing operation
+│                              #   logging.go: diagnostics to stderr
 ├── core/                      # Core domain package (one shared vocabulary)
 │   ├── federation.go          # Runtime types (Cloud, Target, SourceToken, Credentials)
 │   ├── federation_interfaces.go # SourceProvider, Exchanger, Runtime, sentinel errors

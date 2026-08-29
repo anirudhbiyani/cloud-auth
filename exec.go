@@ -9,6 +9,7 @@ import (
 	"os/exec"
 
 	"github.com/anirudhbiyani/cloud-auth/core"
+	"github.com/anirudhbiyani/cloud-auth/internal/audit"
 )
 
 // splitExecArgs splits an argv into the flags before "--" and the command
@@ -81,10 +82,29 @@ func cmdExec(ctx context.Context, args []string) error {
 		return fmt.Errorf("--audience is required (pinned per target)")
 	}
 
-	creds, _, err := brokerFor(sel).Exchange(ctx, target)
-	if err != nil {
-		return err
+	// exec injects live credentials into a child process. It is the operation
+	// most worth a record and had none: whatever the child then did with them is
+	// attributable only through this line.
+	aud := newAuditor(audit.OpExec).with(func(e *audit.Event) {
+		e.TargetCloud = string(target.Cloud())
+		e.Role = auditRole(target)
+	})
+
+	creds, rt, err := brokerFor(sel).Exchange(ctx, target)
+	if rt != nil {
+		aud.with(func(e *audit.Event) { e.SourceIdentity = rt.Subject })
 	}
+	if err != nil {
+		return aud.finish(err)
+	}
+	aud.with(func(e *audit.Event) { e.STSRequestID = creds.STSRequestID })
+
+	// Emitted BEFORE the child runs, not after. The child may run for hours, and
+	// it may replace this process's exit path entirely via os.Exit below — so a
+	// record written afterwards is a record that frequently never gets written.
+	// The event says credentials were issued and injected, which is the fact
+	// being audited; the child's own outcome is the child's to report.
+	_ = aud.finish(nil)
 
 	// Running an operator-supplied command IS this subcommand's purpose — the
 	// same contract as `env`, `aws-vault exec`, or `kubectl exec`. The argv comes
