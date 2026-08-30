@@ -180,6 +180,12 @@ func TestSetupEmitsAnAuditRecord(t *testing.T) {
 }
 
 // The path that used to be silent: a failing operation returning early.
+//
+// The failure has to happen INSIDE manager.Setup, after the auditor starts —
+// a spec rejected during flag parsing never reaches it and correctly produces
+// no record. This case previously used k8s-federation against GCP, which failed
+// only because no GCP handler existed; closing that gap made this test pass
+// vacuously, so it now uses a refusal that is meant to stay one.
 func TestSetupEmitsARecordOnFailure(t *testing.T) {
 	state := filepath.Join(t.TempDir(), "state.json")
 	stderr, err := captureStderr(t, func() error {
@@ -189,10 +195,12 @@ func TestSetupEmitsARecordOnFailure(t *testing.T) {
 			"--k8s-namespace", "ns",
 			"--k8s-sa-name", "sa",
 			"--oidc-url", "https://issuer.example.com",
-			"--target-cloud", "gcp", // no GCP handler for this spec: fails inside Setup
-			"--project-id", "my-project",
-			"--project-number", "123456789012",
-			"--service-account", "sa@my-project.iam.gserviceaccount.com",
+			// Managed identity needs a resource group and an identity name that
+			// azure_config cannot express, so the provider refuses inside Setup.
+			"--target-cloud", "azure",
+			"--identity-type", "managed-identity",
+			"--tenant-id", "11111111-1111-1111-1111-111111111111",
+			"--subscription-id", "22222222-2222-2222-2222-222222222222",
 			"--dry-run",
 			"--state", state,
 		})

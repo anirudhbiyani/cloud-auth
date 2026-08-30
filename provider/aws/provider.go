@@ -23,6 +23,12 @@ type Provider struct {
 	client    IAMClient
 	stsClient STSClient
 
+	// resolveFailed caches a credential-resolution failure so the second call
+	// reports the original cause rather than re-running a lookup that fails the
+	// same way — and, on a host with no credentials at all, so the AWS SDK's
+	// resolver chain is walked once per process instead of once per call.
+	resolveFailed error
+
 	// tlsConfig is used only when reading an OIDC issuer's certificate chain to
 	// compute its thumbprint. nil means the platform defaults.
 	tlsConfig *tls.Config
@@ -42,8 +48,12 @@ func (p *Provider) iam(ctx context.Context) (IAMClient, error) {
 	if p.client != nil {
 		return p.client, nil
 	}
+	if p.resolveFailed != nil {
+		return nil, p.resolveFailed
+	}
 	c, err := NewIAMClient(ctx)
 	if err != nil {
+		p.resolveFailed = err
 		return nil, err
 	}
 	p.client = c

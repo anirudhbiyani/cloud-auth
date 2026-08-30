@@ -389,6 +389,25 @@ cloud-auth setup --type azure-federated \
 
 Sets up federation between Kubernetes ServiceAccounts and cloud identities.
 
+A ServiceAccount federated to a cloud **is** that cloud's ordinary OIDC trust:
+the projected SA token is an OIDC token, its issuer is the cluster's OIDC
+issuer, and its `sub` claim is the fixed string
+`system:serviceaccount:<namespace>:<name>`. So this is a friendlier way to
+describe a mechanism that already exists, and the resource it creates is that
+mechanism — an `aws_role_trust_oidc`, a `gcp_workload_identity_pool`, or an
+`azure_federated_credential`. `validate` and `delete` work on the result without
+any special casing.
+
+| `--target-cloud` | Creates | Notes |
+|---|---|---|
+| `aws` | IAM role with OIDC trust | `StringEquals`, never `StringLike` — the subject is fully known |
+| `gcp` | Workload identity pool + OIDC provider | The attribute condition is derived and pins the subject, so the provider does not accept every identity the cluster's issuer serves |
+| `azure` | App registration + federated credential | Managed identity is **not** available here: it needs a resource group and an identity name that `azure_config` has no fields for. Use `--type azure-federated --identity-type managed-identity`. |
+
+Wildcards in the namespace or ServiceAccount name are rejected on all three, and
+`create_service_account` is refused rather than ignored — cloud-auth configures
+the cloud side of the trust and never talks to your cluster.
+
 ```bash
 cloud-auth setup --type k8s-federation \
   --cluster-name <name>        # Kubernetes cluster name

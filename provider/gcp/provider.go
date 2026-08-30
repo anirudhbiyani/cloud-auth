@@ -355,6 +355,8 @@ func (p *Provider) Setup(ctx context.Context, spec core.MechanismSpec, opts core
 	switch s := spec.(type) {
 	case *core.GCPWorkloadIdentityPoolSpec:
 		return p.setupWorkloadIdentityPool(ctx, s, opts)
+	case *core.K8sServiceAccountFederationSpec:
+		return p.setupK8sFederation(ctx, s, opts)
 	default:
 		return nil, core.ErrValidation(fmt.Sprintf("unsupported spec type: %T", spec)).
 			WithProvider(core.GCP)
