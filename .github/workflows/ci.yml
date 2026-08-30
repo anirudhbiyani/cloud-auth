@@ -122,10 +122,20 @@ jobs:
       # Genuinely-intended patterns are annotated in-line with `#nosec` plus a
       # justification, so they stay visible in review rather than being silently
       # filtered here.
-      # Pinned: @master is a third-party action whose behaviour can change
-      # under us between two runs of the same commit.
+      # Run through `go run`, not the Docker action, and pinned — the same
+      # pattern as govulncheck above.
+      #
+      # The action runs gosec inside an image carrying its OWN Go toolchain with
+      # GOTOOLCHAIN=local. At v2.29.0 that is go1.26.5, and this module requires
+      # 1.27, so every package failed to load and the scanner reported "Issues:
+      # 0" having read nothing — a green step that scanned an empty set. Pinning
+      # the action to a tag is what exposed it; `@master` had happened to carry a
+      # newer toolchain, which is precisely the non-reproducibility the pin was
+      # meant to remove.
+      #
+      # `go run` uses the toolchain this workflow already set up, so the scanner
+      # and the module agree by construction.
       - name: Run Gosec Security Scanner
         if: matrix.os == 'ubuntu-latest'
-        uses: securego/gosec@v2.29.0
-        with:
-          args: -severity medium -confidence medium ./...
+        shell: bash
+        run: go run github.com/securego/gosec/v2/cmd/gosec@v2.29.0 -severity medium -confidence medium ./...
