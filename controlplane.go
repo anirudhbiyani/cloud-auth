@@ -667,9 +667,17 @@ func buildAWSSpec(opts *setupOpts, source core.Cloud) (*core.AWSRoleTrustOIDCSpe
 		UnscopedJustification: opts.unscopedJustification,
 	}
 
-	// Set subject condition based on wildcards
+	// A wildcard in the subject switches the IAM operator to one that HONOURS
+	// it. That is the right behaviour — StringEquals would compare the "*"
+	// literally and the trust would match nothing — but it happened silently,
+	// so a wildcard both widened the trust and quietly upgraded the operator
+	// that makes the widening real. Say so.
 	if strings.Contains(opts.subject, "*") {
 		spec.SubjectCondition = "StringLike"
+		fmt.Fprintf(os.Stderr,
+			"note: subject %q contains a wildcard, so the IAM condition operator is StringLike "+
+				"rather than StringEquals — the wildcard will be expanded, not matched literally\n",
+			opts.subject)
 	} else if opts.subject != "" {
 		spec.SubjectCondition = "StringEquals"
 	}
@@ -960,6 +968,17 @@ func cmdSetup(ctx context.Context, args []string) error {
 		e.Provider = string(spec.TargetProvider())
 		e.DryRun = opts.dryRun
 	})
+
+	// Score the subject BEFORE the API call, so a broad trust is something an
+	// operator declines rather than something they discover afterwards.
+	//
+	// The gate was previously only `validateSubjectScope`, which tests exact
+	// membership in {"*", "?*", "*:*", "**"} — so `--subject "repo:org/repo:*"`,
+	// the value this project's own README used to suggest, passed with no
+	// warning at all.
+	if err := warnSubjectBreadth(spec, opts); err != nil {
+		return aud.finish(err)
+	}
 
 	// Execute setup
 	outputs, err := manager.Setup(ctx, spec, setupOpts)
@@ -1576,4 +1595,56 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen-3] + "..."
+}
+
+// subjectOf returns the subject a spec pins, where it has one.
+//
+// Only the specs that carry a single subject condition are scored. A GCP pool
+// provider constrains identities through a CEL attribute condition, which is a
+// different shape and needs its own analysis rather than a string score
+// pretending to be one.
+func subjectOf(spec core.MechanismSpec) (string, bool) {
+	switch s := spec.(type) {
+	case *core.AWSRoleTrustOIDCSpec:
+		return s.Subject, true
+	case *core.AzureFederatedCredentialSpec:
+		return s.Subject, true
+	default:
+		return "", false
+	}
+}
+
+// warnSubjectBreadth reports how much the spec's subject admits, and refuses
+// the widest without a recorded reason.
+//
+// Warnings go to stderr so `setup` output stays pipeable, and the refusal is an
+// error rather than a prompt: setup runs unattended in CI far more often than
+// it runs under a human.
+func warnSubjectBreadth(spec core.MechanismSpec, opts *setupOpts) error {
+	subject, scorable := subjectOf(spec)
+	if !scorable {
+		return nil
+	}
+
+	a := core.ScoreSubject(subject)
+	if a.Breadth == core.BreadthExact {
+		return nil
+	}
+
+	// A subject that pins nothing at all is already refused by the spec's own
+	// validation, with the --allow-unscoped-subject escape hatch and its
+	// required justification. Refusing again here would report one problem
+	// twice and describe the override inaccurately.
+	if a.NeedsJustification() && !opts.allowUnscopedSubject {
+		return fmt.Errorf("subject %q is %s breadth: it admits %s\n"+
+			"  %s\n"+
+			"  Pass --allow-unscoped-subject with --unscoped-justification to accept this "+
+			"deliberately, so the decision is recorded in the spec for the next reader.\n"+
+			"  Note: %s",
+			subject, a.Breadth, a.Admits, a.Advice, core.SharedIssuerNote)
+	}
+
+	fmt.Fprintf(os.Stderr, "warning: subject %q is %s breadth — it admits %s\n  %s\n",
+		subject, a.Breadth, a.Admits, a.Advice)
+	return nil
 }

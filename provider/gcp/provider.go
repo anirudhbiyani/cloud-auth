@@ -700,6 +700,13 @@ func (p *Provider) Validate(ctx context.Context, ref core.MechanismRef, opts cor
 			validators = append(validators, core.NewTrustPolicyMatchValidator(
 				expIssuer, expAudience, expSubject,
 				core.WithTrustPolicySource(p)))
+
+			// Breadth is scored unconditionally, unlike the match check above:
+			// it needs no recorded intent, only the live policy. A mechanism
+			// created before cloud-auth persisted its intent still has subjects
+			// worth grading, and that is exactly the pre-existing population
+			// most likely to carry an over-broad one.
+			validators = append(validators, core.NewSubjectBreadthValidator(p))
 		}
 
 		if raw := ref.ResourceIDs["expected_roles"]; raw != "" && saEmail != "" {

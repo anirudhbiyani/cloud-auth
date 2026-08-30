@@ -505,11 +505,9 @@ Validation checks, and their **current** implementation status:
 > and each would otherwise "match" whatever you compared it to.
 
 > **"Unscoped" is a narrow test, not a breadth score.** It answers *does this
-> pin nothing at all*. A subject that pins some characters is not flagged, so
-> `repo:myorg/*` (every repo in the org, including ones created tomorrow) and
-> `repo:myorg/myrepo:*` (every branch, tag, and `pull_request` from a fork) both
-> pass it today. Grading subject breadth is tracked separately; until it lands,
-> pin the subject yourself — the examples in this README do.
+> pin nothing at all*, and it stays that way — the two questions are different
+> and both answers are useful. How much a subject admits is scored separately,
+> below.
 
 > **Trust-policy and permission checks compare against the intent recorded at
 > setup.** Mechanisms created before cloud-auth persisted that intent have
@@ -523,6 +521,45 @@ Validation checks, and their **current** implementation status:
 > with `report.IsComplete()` — and use `report.SkippedChecks()` to see the gaps.
 > Every skipped check carries `Remediation` text telling you what to confirm by
 > hand.
+
+### Subject breadth
+
+`repo:myorg/myrepo:*` pins real characters, so it is *scoped*. It also admits
+every branch, every tag, and `pull_request` — which a pull request from a **fork**
+reaches. Both statements are true, and conflating them is why that subject
+passed every gate without a word.
+
+Subjects are now graded on how much they admit:
+
+| Breadth | Example | Admits |
+|---|---|---|
+| `critical` | *(no `sub` condition)*, `*`, `repo:*` | Any tenant of the issuer — and GitHub, GitLab and Terraform Cloud each run **one** issuer across every tenant on the platform |
+| `high` | `repo:myorg/*`, `system:serviceaccount:*:*` | Every repository in the org, or every ServiceAccount in the cluster — **including ones created later** |
+| `medium` | `repo:myorg/myrepo:*` | Every branch, tag and event of one workload, including `pull_request` from a fork |
+| `info` | `repo:myorg/myrepo:ref:refs/heads/*` | More than one workload, through an interior wildcard |
+| `exact` | `repo:myorg/myrepo:ref:refs/heads/main` | One workload |
+
+**`setup`** scores the subject *before* the API call and prints the score to
+stderr. `critical` is refused outright and needs `--allow-unscoped-subject` with
+`--unscoped-justification`, so the decision is recorded in the spec for the next
+reader rather than made silently.
+
+**`validate`** reports breadth as its own check at the scored severity. Only
+`high` and above invalidate the report — a `medium` subject is worth telling you
+about, and failing every deployment that uses one would train people to ignore
+the check.
+
+A wildcard in the subject also switches the IAM condition operator to
+`StringLike`, which is correct — `StringEquals` would compare the `*` literally
+and the trust would match nothing — but it used to happen silently, so one flag
+both widened the trust and quietly enabled the widening. `setup` now says so.
+
+> **Context worth knowing.** AWS's June 2025 shared-IdP guardrail blocks
+> *creation* of roles that do not evaluate the tenancy claim across 17 shared
+> identity providers. It requires only that `sub` be **evaluated**, not that it be
+> **narrow** — `repo:org/*` satisfies it — and it explicitly does not apply to
+> roles that already existed. The pre-guardrail backlog is the population this
+> scoring exists to serve.
 
 ### Runtime Configuration File
 
