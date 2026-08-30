@@ -275,12 +275,66 @@ exchanges it at the target cloud's STS:
 
 | Command | Description |
 |---------|-------------|
-| `doctor` | Detect the runtime and preflight a target; explains exactly why an exchange would be refused |
+| `doctor` | Detect the runtime and preflight a target; explains exactly why an exchange would be refused. `--explain` adds a claim-by-claim diff against the target's live trust; `--format json` for CI |
 | `exchange` | Obtain short-lived target credentials (`--format env\|json\|credential-process`) |
 | `exec` | Mint + exchange, then run a command with the credentials injected (`... -- <cmd>`) |
 | `init` | Print the target-side trust scaffold (Terraform/OpenTofu + CLI). Print-only; never applies changes |
 | `credential-process` | Emit the AWS `credential_process` JSON contract for zero-code SDK integration |
 | `config-validate` | Lint a declarative federation config file |
+
+### `doctor --explain`: which claim actually diverged
+
+One AWS `AccessDenied` covers roughly fifteen distinct root causes. GCP's most
+common failure — *"The attribute condition was not met"* — is not on Google's own
+troubleshooting page. Microsoft's documentation states outright that a wrong
+Azure subject produces a credential that is created successfully and then fails
+without error.
+
+`--explain` reads the target's live trust and diffs it against the assertion this
+workload actually presents:
+
+```console
+$ cloud-auth doctor --to aws --role arn:aws:iam::123456789012:role/deploy     --audience sts.amazonaws.com --explain
+
+Live trust configuration:
+  issuer:     https://token.actions.githubusercontent.com
+  sub:        StringEquals "repo:myorg/myrepo:ref:refs/heads/main"
+
+1 finding(s):
+
+  ✗ the trust policy uses GitHub's legacy subject format, but this token
+    presents the immutable format (the org and repo carry numeric ids)
+      claim:      sub
+      presented:  "repo:myorg@123456/myrepo@456789:ref:refs/heads/main"
+      configured: "repo:myorg/myrepo:ref:refs/heads/main"
+      fix:        update the policy's sub condition to
+                  "repo:myorg@123456/myrepo@456789:ref:refs/heads/main" — GitHub
+                  enforced immutable subject claims on 15 July 2026 …
+```
+
+It is **opt-in** because it needs target-side *read* credentials that plain
+`doctor` deliberately does not: `doctor` works from the workload's own identity,
+and requiring IAM read access would make the common case ask for permissions it
+has no use for.
+
+| Detector | What it catches |
+|---|---|
+| `github-immutable-subject` | Policy and token disagree on GitHub's legacy vs immutable `sub` format. Enforced since 15 July 2026 for new repos **and any repo renamed or transferred** — nothing in the workflow changes, the deploy just starts failing |
+| `github-environment-overrides-ref` | `sub` is a positional concatenation: adding `environment:` **replaces** the `ref:` segment rather than joining it |
+| `wildcard-under-exact-operator` | A `*` under `StringEquals` is matched literally, so the trust is not too wide — it is silently dead, and the `AccessDenied` looks identical to a wrong subject |
+| `case-only-mismatch` | Entra matches issuer, subject and audience case-sensitively |
+| `gcp-subject-too-long` | `google.subject` is capped at 127 bytes, and immutable subjects are longer by construction |
+| `github-fork-pull-request` | A trailing `:*` also matches `repo:…:pull_request`, which a **fork's** pull request reaches |
+| `issuer-not-registered` / `issuer-mismatch` | "No provider registered" and "registered, issuer differs" are the same `AccessDenied` and need opposite fixes |
+
+A critical finding exits non-zero. `--format json` emits one document with the
+checks, the live conditions and the findings, and a `complete` field that is
+`false` when the trust could not be read — a failed read is never rendered as a
+clean bill of health.
+
+**Support:** AWS and GCP. Azure trust is addressed by the application's *object*
+id while a runtime target carries its *client* id, so `--explain` says so rather
+than guessing; use `cloud-auth validate --ref <mechanism>` there.
 
 ### AWS proof selection
 

@@ -143,12 +143,20 @@ func cmdDoctor(ctx context.Context, args []string) error {
 	getTarget := targetFlags(fs)
 	configPath := fs.String("config", "", "config file to resolve a named target (optional)")
 	targetName := fs.String("target", "", "named target from --config to preflight")
+	explain := fs.Bool("explain", false,
+		"read the target's live trust and diff it against the presented assertion "+
+			"(needs target-side read credentials)")
+	format := fs.String("format", "text", "output format: text|json")
 	fs.Parse(args)
 
 	prov, rt, detectErr := source.Default().Detect(ctx)
 
-	// Always print what was detected (degrade gracefully off-cloud).
-	printRuntime(os.Stdout, rt, detectErr)
+	// Print what was detected, degrading gracefully off-cloud — but NOT in json
+	// mode, where stdout carries one document and a human preamble in front of
+	// it is exactly the bug `list --output json` had.
+	if *format != "json" {
+		printRuntime(os.Stdout, rt, detectErr)
+	}
 
 	flagTarget, err := getTarget()
 	if err != nil {
@@ -162,12 +170,20 @@ func cmdDoctor(ctx context.Context, args []string) error {
 	// succeeded while producing an identity the config forbids.
 	if detectErr == nil {
 		if mErr := sel.Match(rt); mErr != nil {
-			fmt.Fprintf(os.Stdout, "\n✗ %v\n", mErr)
+			if *format != "json" {
+				fmt.Fprintf(os.Stdout, "\n✗ %v\n", mErr)
+			}
 			return mErr
 		}
 	}
 	if target.Cloud() == "" {
-		return nil // detection-only
+		// Detection-only. In json mode that is still a report — a consumer
+		// asked for a document and must get one.
+		if *format == "json" {
+			return writeDoctorJSON(os.Stdout,
+				preflight{runtime: rt, detectErr: detectErr}, nil, nil, nil, nil)
+		}
+		return nil
 	}
 	if target.Audience() == "" {
 		return fmt.Errorf("doctor: --audience is required to preflight a target")
@@ -185,8 +201,52 @@ func cmdDoctor(ctx context.Context, args []string) error {
 		p.token, p.mintErr = prov.Mint(ctx, target.Audience())
 	}
 
-	writeDiagnoses(os.Stdout, p, diagnose(p))
+	diagnoses := diagnose(p)
+
+	// --explain performs the one piece of I/O diagnose() must never do, and
+	// does it HERE so diagnose() stays pure: the trust policy is fetched by the
+	// caller and compared as data.
+	var (
+		trust    *core.TrustPolicy
+		findings []core.Finding
+		trustErr error
+	)
+	if *explain {
+		trust, trustErr = trustForTarget(ctx, target)
+		if trustErr == nil {
+			findings = core.Explain(core.ExplainInput{
+				Trust: trust, Token: p.token, Target: target,
+				SourceCloud: runtimeCloud(rt),
+			})
+		}
+	}
+
+	if *format == "json" {
+		return writeDoctorJSON(os.Stdout, p, diagnoses, trust, findings, trustErr)
+	}
+
+	writeDiagnoses(os.Stdout, p, diagnoses)
+	if *explain {
+		writeExplanation(os.Stdout, trust, findings, trustErr)
+	}
+
+	// A critical finding means this exchange will not work. Exiting 0 on that
+	// would make --explain useless in a pipeline, which is half its point.
+	for _, f := range findings {
+		if f.Severity == core.FindingCritical {
+			return errValidationFailed(fmt.Errorf(
+				"%d trust finding(s), the most severe critical: %s", len(findings), f.Summary))
+		}
+	}
 	return nil
+}
+
+// runtimeCloud returns the detected cloud, or empty.
+func runtimeCloud(rt *core.Runtime) core.Cloud {
+	if rt == nil {
+		return ""
+	}
+	return rt.Cloud
 }
 
 // printRuntime writes the detected-runtime summary, degrading gracefully when
