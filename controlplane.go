@@ -59,6 +59,8 @@ func run(args []string) error {
 		return cmdDescribe(ctx, cmdArgs)
 	case "providers":
 		return cmdProviders(ctx, cmdArgs)
+	case "audit":
+		return cmdAudit(ctx, cmdArgs)
 	case "version":
 		return cmdVersion()
 	// Runtime (data-plane) commands — handlers live in runtime.go.
@@ -95,6 +97,7 @@ Control-plane commands (establish trust):
   list        List all managed mechanisms
   describe    Show details of a specific mechanism
   providers   List available providers and their capabilities
+  audit       Inventory every federated trust, scored and liveness-checked
 
 Runtime commands (obtain credentials, zero static secrets):
   doctor              Detect the runtime and preflight a target (--to/--role/... or --config/--target)

@@ -274,6 +274,7 @@ cloud-auth setup --type k8s-federation \
 | `list` | List all managed mechanisms |
 | `describe` | Show details of a specific mechanism |
 | `providers` | List available providers and their capabilities |
+| `audit` | Inventory every federated trust, scored and liveness-checked |
 | `version` | Show version information |
 
 **Runtime** — obtain short-lived credentials at workload run time, with zero
@@ -528,6 +529,67 @@ Validation checks, and their **current** implementation status:
 > with `report.IsComplete()` — and use `report.SkippedChecks()` to see the gaps.
 > Every skipped check carries `Remediation` text telling you what to confirm by
 > hand.
+
+### `cloud-auth audit`: which external identities can assume anything
+
+Nobody can answer that today. AWS IAM Access Analyzer surfaces federated
+principals but does not distinguish `repo:org/specific-repo:ref:refs/heads/main`
+from `repo:org/*`. Prowler and ScoutSuite do partial single-cloud trust checks.
+Cloudsplaining covers permissions policies, not trust policies. Every one of them
+is single-cloud.
+
+```console
+$ cloud-auth audit --github-owner myorg
+SEV    RESOURCE                       SUBJECT                          BREADTH   NAMESPACE
+------------------------------------------------------------------------------------------
+✗      role/legacy-deploy             repo:deletedorg/app:ref:refs/…   exact     unregistered
+✗      role/org-wide                  repo:myorg/*                     high      unknown
+⚠      role/branch-deploy             repo:myorg/api:*                 medium    live-and-ours
+
+3 trust relationship(s): 2 critical, 1 warning
+
+✗ role/legacy-deploy
+    subject:   repo:deletedorg/app:ref:refs/heads/main
+    namespace: unregistered — this namespace does not exist on GitHub: anyone
+               can register it and mint a token whose sub matches this trust
+               exactly
+```
+
+**The namespace check is the part nothing else does.** GitHub, GitLab and
+Terraform Cloud each run **one** OIDC issuer across every tenant, and each
+permits namespace reuse. Delete an org, someone re-registers the name, mints a
+token whose `sub` is character-for-character identical, and assumes a role still
+sitting in your account trusting it. Published 2026 telemetry found **14% of
+GitHub namespaces referenced in AWS trust policies were unregistered and
+claimable**, and 24% for Azure — each dead namespace trusted by roughly twelve
+distinct identities. It is one API call.
+
+| State | Meaning |
+|---|---|
+| `live-and-ours` | The namespace exists and is one of yours |
+| `live-but-not-ours` | **Critical.** It exists and belongs to somebody else, who can mint a token this trust accepts |
+| `unregistered` | **Critical.** It does not exist — anyone can claim it, right now |
+| `unknown` | Could not be determined. Never reported as fine |
+
+It enumerates the **account**, not cloud-auth's state file. The population this
+serves is roles that predate this tool — AWS's shared-IdP guardrail explicitly
+does not apply to roles created before June 2025 — and a state file lists what
+cloud-auth created, which is the one set already known to be fine.
+
+`--github-owner` names the organisations you control; without it, "the namespace
+exists" says nothing about *who* controls it, so ownership is reported as
+`unknown` rather than guessed. `GITHUB_TOKEN` is used when set — unauthenticated
+GitHub API requests are capped at 60 per hour.
+
+`--format json` for CI, and `--fail-on critical|warning` to gate a pipeline. A
+gate over an inventory that could not read a cloud **fails**: the unread cloud is
+exactly where an unseen finding would be.
+
+> **Scope today: AWS.** Adding a cloud is adding an `InventorySource`; the
+> normalization, scoring and liveness are already cloud-neutral. Records are
+> read live from the account, so this is one operator's view of one set of
+> credentials — a team-wide inventory wants the shared state backend that is
+> still outstanding.
 
 ### Subject breadth
 

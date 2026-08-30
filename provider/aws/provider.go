@@ -162,6 +162,11 @@ type AssumedRoleUser struct {
 type IAMClient interface {
 	// Role operations
 	GetRole(ctx context.Context, roleName string) (*Role, error)
+	// ListRoles enumerates every role in the account, each carrying its
+	// assume-role policy. `audit` needs roles this tool did NOT create — the
+	// pre-existing backlog is the whole population it serves — so enumerating
+	// from cloud-auth's own state would miss exactly the interesting ones.
+	ListRoles(ctx context.Context) ([]*Role, error)
 	CreateRole(ctx context.Context, input *CreateRoleInput) (*Role, error)
 	UpdateAssumeRolePolicy(ctx context.Context, roleName string, policy string) error
 	DeleteRole(ctx context.Context, roleName string) error

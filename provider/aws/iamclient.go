@@ -42,6 +42,7 @@ type iamAPI interface {
 	DeleteRolePolicy(context.Context, *iam.DeleteRolePolicyInput, ...func(*iam.Options)) (*iam.DeleteRolePolicyOutput, error)
 	ListAttachedRolePolicies(context.Context, *iam.ListAttachedRolePoliciesInput, ...func(*iam.Options)) (*iam.ListAttachedRolePoliciesOutput, error)
 	ListRolePolicies(context.Context, *iam.ListRolePoliciesInput, ...func(*iam.Options)) (*iam.ListRolePoliciesOutput, error)
+	ListRoles(context.Context, *iam.ListRolesInput, ...func(*iam.Options)) (*iam.ListRolesOutput, error)
 
 	GetOpenIDConnectProvider(context.Context, *iam.GetOpenIDConnectProviderInput, ...func(*iam.Options)) (*iam.GetOpenIDConnectProviderOutput, error)
 	CreateOpenIDConnectProvider(context.Context, *iam.CreateOpenIDConnectProviderInput, ...func(*iam.Options)) (*iam.CreateOpenIDConnectProviderOutput, error)
@@ -343,4 +344,38 @@ func (c *realIAMClient) ListOpenIDConnectProviders(ctx context.Context) ([]strin
 		arns = append(arns, aws.ToString(p.Arn))
 	}
 	return arns, nil
+}
+
+// ListRoles enumerates every role in the account.
+//
+// IAM's ListRoles returns each role's AssumeRolePolicyDocument inline, so this
+// is one paginated call rather than a GetRole per role — which matters on an
+// account with thousands of them, and matters more because IAM's rate limits
+// are not generous.
+func (c *realIAMClient) ListRoles(ctx context.Context) ([]*Role, error) {
+	var out []*Role
+	paginator := iam.NewListRolesPaginator(c.api, &iam.ListRolesInput{})
+
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("aws: listing roles: %w", err)
+		}
+		for i := range page.Roles {
+			r := page.Roles[i]
+			doc := aws.ToString(r.AssumeRolePolicyDocument)
+			// ListRoles returns the document URL-encoded, as GetRole does.
+			if decoded, derr := url.QueryUnescape(doc); derr == nil {
+				doc = decoded
+			}
+			out = append(out, &Role{
+				ARN:                      aws.ToString(r.Arn),
+				RoleName:                 aws.ToString(r.RoleName),
+				AssumeRolePolicyDocument: doc,
+				Description:              aws.ToString(r.Description),
+				MaxSessionDuration:       int(aws.ToInt32(r.MaxSessionDuration)),
+			})
+		}
+	}
+	return out, nil
 }
