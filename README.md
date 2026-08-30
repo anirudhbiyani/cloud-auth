@@ -696,7 +696,8 @@ A JSON Schema for editor completion and CI linting lives at
 
 ### State Management
 
-cloud-auth tracks created resources in a local state file (`~/.cloud-auth/state.json`):
+cloud-auth tracks created resources in a state store — a local file by default
+(`~/.cloud-auth/state.json`), or a shared S3 object:
 
 ```bash
 # List all managed mechanisms
@@ -707,7 +708,35 @@ cloud-auth describe aws_role_trust_oidc-aws-abc123
 
 # Use a custom state file
 cloud-auth list --state /path/to/state.json
+
+# Or a shared object, so a team sees one inventory
+cloud-auth list --state s3://my-bucket/cloud-auth/state.json
 ```
+
+#### Shared state
+
+`FileStateStore` is careful — flock, reload-before-write, fsync of the file
+*and* its directory, atomic rename — and every one of those protections stops at
+the machine boundary. Two laptops cannot flock each other, and `cloud-auth
+audit` is only a team's inventory if the state is shared.
+
+The S3 backend uses **conditional writes** rather than a lock: `If-None-Match`
+to create, `If-Match` to update, and a re-read-and-retry when the tag no longer
+matches. That is a compare-and-swap, which is stronger than a lock in the way
+that matters — a lock has to be released, and a process that dies holding one
+leaves the state unusable until somebody decides the lock is stale, which is a
+decision nobody can make correctly from outside. A failed compare-and-swap just
+retries.
+
+Retries use exponential backoff with full jitter. Without it, concurrent writers
+collide in lockstep and keep colliding, so contention never decays — the
+conformance suite reproduced exactly that with four writers before the backoff
+existed.
+
+> Both stores run the **same** conformance suite (`internal/statetest`), rather
+> than parallel suites that would drift. The file store's own tests additionally
+> cover file-specific properties — temp files, permission bits, fsync — that have
+> no remote equivalent.
 
 ### Library Usage
 

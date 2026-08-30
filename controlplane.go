@@ -949,7 +949,7 @@ func cmdSetup(ctx context.Context, args []string) error {
 	}
 
 	// Create state store
-	stateStore, err := core.NewFileStateStore(opts.statePath)
+	stateStore, err := openStateStore(ctx, opts.statePath)
 	if err != nil {
 		return fmt.Errorf("failed to initialize state store: %w", err)
 	}
@@ -1104,7 +1104,7 @@ func cmdValidate(ctx context.Context, args []string) error {
 	}
 
 	// Create state store
-	stateStore, err := core.NewFileStateStore(opts.statePath)
+	stateStore, err := openStateStore(ctx, opts.statePath)
 	if err != nil {
 		return fmt.Errorf("failed to initialize state store: %w", err)
 	}
@@ -1246,7 +1246,7 @@ func cmdDelete(ctx context.Context, args []string) error {
 	}
 
 	// Create state store
-	stateStore, err := core.NewFileStateStore(opts.statePath)
+	stateStore, err := openStateStore(ctx, opts.statePath)
 	if err != nil {
 		return fmt.Errorf("failed to initialize state store: %w", err)
 	}
@@ -1369,7 +1369,7 @@ func cmdList(ctx context.Context, args []string) error {
 	}
 
 	// Create state store
-	stateStore, err := core.NewFileStateStore(opts.statePath)
+	stateStore, err := openStateStore(ctx, opts.statePath)
 	if err != nil {
 		return fmt.Errorf("failed to initialize state store: %w", err)
 	}
@@ -1447,7 +1447,7 @@ func cmdDescribe(ctx context.Context, args []string) error {
 	}
 
 	// Create state store
-	stateStore, err := core.NewFileStateStore(statePath)
+	stateStore, err := openStateStore(ctx, statePath)
 	if err != nil {
 		return fmt.Errorf("failed to initialize state store: %w", err)
 	}
