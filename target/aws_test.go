@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -117,9 +118,35 @@ func TestAWSExchangeRetriesOn5xx(t *testing.T) {
 
 func TestAWSExchangeRejectsSigV4Token(t *testing.T) {
 	// AWS WebIdentity accepts only OIDC JWTs, not a SigV4 proof.
+	//
+	// This used to assert only err != nil, which would pass if the message were
+	// "no" — and it did pass while the error carried no sentinel at all, so
+	// core.CategoryOf filed a configuration problem as an internal fault and
+	// doctor printed the generic mint failure instead of the bridge options it
+	// already had written. Matching target/azure_test.go's rigour is the fix:
+	// the sentinel is the contract, and the remedies are the reason anyone
+	// reads the error.
 	e := NewAWSExchanger()
 	_, err := e.Exchange(context.Background(), &core.SourceToken{Kind: core.AWSSigV4}, awsTarget())
 	if err == nil {
 		t.Fatal("expected error exchanging a SigV4 proof at AWS")
+	}
+	if !errors.Is(err, core.ErrNoFirstClassPath) {
+		t.Errorf("error does not wrap ErrNoFirstClassPath, so doctor cannot recognise it: %v", err)
+	}
+	if got := core.CategoryOf(err); got != core.ErrCategoryValidation {
+		t.Errorf("category = %q, want %q: a proof kind mismatch is a configuration problem, "+
+			"not an internal fault", got, core.ErrCategoryValidation)
+	}
+	for _, want := range []string{
+		"sts:GetWebIdentityToken",
+		"iam:EnableOutboundWebIdentityFederation",
+		"EKS",
+		"broker",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error does not name %q; the bridge options are what make it actionable: %v",
+				want, err)
+		}
 	}
 }

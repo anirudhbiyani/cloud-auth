@@ -143,6 +143,20 @@ func diagnoseToken(p preflight) []diagnosis {
 	var out []diagnosis
 	tok := p.token
 
+	// Proof kind against the target BEFORE anything else, because when it is
+	// wrong nothing below it matters: an audience that matches perfectly is
+	// irrelevant if the target's STS will not accept this kind of proof at all.
+	//
+	// This is the check that made bridgeGuidance dead code. It was only reached
+	// from the mint-error path, and no source returns ErrNoFirstClassPath —
+	// sources return ErrNonFederatableSource, and the exchangers return
+	// ErrNoFirstClassPath, which doctor never calls. So a SigV4 proof minted
+	// successfully, doctor reported "minted successfully (kind AWSSigV4)", and
+	// said nothing about the target refusing it.
+	if d, ok := diagnoseProofKind(p); ok {
+		out = append(out, d)
+	}
+
 	// Audience match: a projected-token aud must equal the pinned target aud.
 	switch {
 	case p.target.Audience() == "":
@@ -180,6 +194,30 @@ func diagnoseToken(p preflight) []diagnosis {
 	}
 
 	return out
+}
+
+// diagnoseProofKind reports whether the target's STS accepts this proof kind.
+//
+// Only GCP accepts a SigV4 GetCallerIdentity proof: it calls the AWS API to
+// verify it. AWS's own AssumeRoleWithWebIdentity and Entra's client-credentials
+// grant both take an OIDC JWT and nothing else.
+func diagnoseProofKind(p preflight) (diagnosis, bool) {
+	tok := p.token
+	if tok == nil || tok.Kind == core.OIDC {
+		return diagnosis{}, false
+	}
+	targetCloud := p.target.Cloud()
+	if targetCloud == "" || targetCloud == core.GCP {
+		return diagnosis{}, false
+	}
+
+	sourceCloud := core.Cloud("")
+	if p.runtime != nil {
+		sourceCloud = p.runtime.Cloud
+	}
+	return diagnosis{false, fmt.Sprintf(
+		"%s's STS will not accept a %s proof.\n    %s",
+		targetCloud, tok.Kind, bridgeGuidance(sourceCloud, targetCloud))}, true
 }
 
 // bridgeGuidance returns the human guidance for a source→target pair that has
