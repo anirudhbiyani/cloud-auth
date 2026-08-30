@@ -71,9 +71,33 @@ type AWSRoleTrustOIDCSpec struct {
 	// PermissionsBoundary is the ARN of a permissions boundary policy.
 	PermissionsBoundary string `json:"permissions_boundary,omitempty" yaml:"permissions_boundary,omitempty"`
 
+	// RequireIdPAuthorizedRole adds the sts:RoleAuthorizedByIdp condition.
+	//
+	// AWS shipped this in July 2026. An identity provider may embed
+	// "https://aws.amazon.com/roles" in the OIDC token naming which roles that
+	// token may assume, and STS enforces it as an ALLOW-LIST *before* the role
+	// trust policy is evaluated. That inverts the usual direction: normally
+	// only the account decides who may assume a role, and this lets the issuer
+	// constrain it too, so a stolen token is useless against roles its issuer
+	// never authorized.
+	//
+	// Off by default, and it must stay that way: turning it on for an issuer
+	// that does not emit the claim locks every workload out of the role. There
+	// is no partial credit — the condition either matches or the exchange is
+	// refused before the trust policy is read.
+	RequireIdPAuthorizedRole bool `json:"require_idp_authorized_role,omitempty" yaml:"require_idp_authorized_role,omitempty"`
+
 	// SourceProvider identifies the OIDC provider type.
 	Source Cloud `json:"source" yaml:"source"`
 }
+
+// IdPAuthorizedRoleClaim is the claim STS reads for sts:RoleAuthorizedByIdp.
+//
+// A string or an array of role ARNs, embedded by the identity provider.
+const IdPAuthorizedRoleClaim = "https://aws.amazon.com/roles"
+
+// IdPAuthorizedRoleConditionKey is the IAM condition key STS evaluates.
+const IdPAuthorizedRoleConditionKey = "sts:RoleAuthorizedByIdp"
 
 // Type implements MechanismSpec.
 func (s *AWSRoleTrustOIDCSpec) Type() MechanismType {

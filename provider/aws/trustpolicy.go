@@ -165,6 +165,18 @@ func (p *Provider) TrustPolicy(ctx context.Context, ref core.MechanismRef) (*cor
 							tp.Subjects = append(tp.Subjects, v)
 						}
 					}
+				default:
+					// sts:RoleAuthorizedByIdp is not a claim on the token — it
+					// is a question STS answers about one — but it has to be
+					// retained, or --explain cannot see that the policy demands
+					// something the token may not carry.
+					if key == core.IdPAuthorizedRoleConditionKey {
+						for _, v := range values {
+							tp.Conditions = append(tp.Conditions, core.TrustCondition{
+								Operator: operator, Claim: core.IdPAuthorizedRoleConditionKey, Value: v,
+							})
+						}
+					}
 				}
 			}
 		}

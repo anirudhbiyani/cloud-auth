@@ -126,6 +126,11 @@ Setup Options (Flag-based):
     --subject <sub>         Subject claim pattern (e.g., repo:org/repo:*). REQUIRED:
                             a trust pinning only the audience is assumable by every
                             workload the issuer serves
+    --require-idp-authorized-role
+                            Require sts:RoleAuthorizedByIdp: the identity provider must
+                            name this role in its https://aws.amazon.com/roles claim.
+                            STS enforces it BEFORE the trust policy, so enabling it for
+                            an issuer that does not emit the claim locks everyone out.
     --allow-unscoped-subject      Create the trust with NO subject condition. Every
                             workload the issuer serves will be able to assume the role
     --unscoped-justification <s>  Why that is acceptable here (required with the above)
@@ -299,8 +304,10 @@ type setupOpts struct {
 	issuer   string
 
 	// Deliberate opt-out of subject scoping, plus the reason it is acceptable.
-	allowUnscopedSubject  bool
-	unscopedJustification string
+	allowUnscopedSubject bool
+	// requireIdPAuthorizedRole adds the sts:RoleAuthorizedByIdp condition.
+	requireIdPAuthorizedRole bool
+	unscopedJustification    string
 
 	// GCP pool scoping: who may federate, and who may then impersonate.
 	attributeCondition          string
@@ -374,6 +381,8 @@ func parseSetupOpts(args []string) (*setupOpts, error) {
 			i++
 		case "-v", "--verbose":
 			opts.verbose = true
+		case "--require-idp-authorized-role":
+			opts.requireIdPAuthorizedRole = true
 
 		// Mechanism type
 		case "--type":
@@ -668,6 +677,8 @@ func buildAWSSpec(opts *setupOpts, source core.Cloud) (*core.AWSRoleTrustOIDCSpe
 		Source:                source,
 		AllowUnscopedSubject:  opts.allowUnscopedSubject,
 		UnscopedJustification: opts.unscopedJustification,
+
+		RequireIdPAuthorizedRole: opts.requireIdPAuthorizedRole,
 	}
 
 	// A wildcard in the subject switches the IAM operator to one that HONOURS

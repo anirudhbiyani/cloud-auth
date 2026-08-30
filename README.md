@@ -334,6 +334,34 @@ has no use for.
 | `gcp-subject-too-long` | `google.subject` is capped at 127 bytes, and immutable subjects are longer by construction |
 | `github-fork-pull-request` | A trailing `:*` also matches `repo:…:pull_request`, which a **fork's** pull request reaches |
 | `issuer-not-registered` / `issuer-mismatch` | "No provider registered" and "registered, issuer differs" are the same `AccessDenied` and need opposite fixes |
+| `idp-authorized-role-missing` / `-mismatch` | The policy requires `sts:RoleAuthorizedByIdp` and the token's issuer did not authorize this role. STS evaluates that **before** the trust policy, so every other claim can match perfectly and the exchange is still refused |
+
+#### `sts:RoleAuthorizedByIdp`
+
+AWS shipped this in July 2026. An identity provider embeds
+`https://aws.amazon.com/roles` in the OIDC token naming which roles that token
+may assume, and **STS enforces it as an allow-list before the role trust policy
+is evaluated**. That inverts the usual direction: normally only the account
+decides who may assume a role; this lets the issuer constrain it too, so a
+stolen token is useless against roles its issuer never named.
+
+```bash
+cloud-auth setup --type aws-oidc --require-idp-authorized-role   --role-name deploy --account-id 123456789012   --oidc-url https://token.actions.githubusercontent.com   --subject "repo:myorg/myrepo:ref:refs/heads/main" --source github
+```
+
+`doctor --explain` validates the other half — that a presented token actually
+carries a matching role claim — and names it specifically when it does not.
+
+> **Off by default, and it should stay that way.** Enabling it for an issuer that
+> does not emit the claim locks every workload out of the role, and there is no
+> partial credit: the condition either matches or the exchange is refused before
+> the trust policy is read.
+>
+> **cloud-auth cannot emit the claim**, only require and validate it.
+> `sts:GetWebIdentityToken` takes four inputs — audience, algorithm, duration
+> and tags — and tags become namespaced `request_tags` claims, not this one. So
+> on the AWS→AWS outbound-federation path cloud-auth is the validator, not the
+> emitter; emitting is the identity provider's job.
 
 A critical finding exits non-zero. `--format json` emits one document with the
 checks, the live conditions and the findings, and a `complete` field that is

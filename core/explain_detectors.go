@@ -315,3 +315,49 @@ func normalizeIssuer(v string) string {
 	v = strings.TrimPrefix(v, "https://")
 	return strings.TrimPrefix(v, "http://")
 }
+
+// detectIdPAuthorizedRoleMismatch catches a trust policy demanding
+// sts:RoleAuthorizedByIdp against a token whose issuer did not authorize this
+// role.
+//
+// STS evaluates that condition BEFORE the trust policy, so when it fails
+// nothing else about the policy is even consulted — every other claim can match
+// perfectly and the exchange is still refused. Nothing in the resulting error
+// says which of the two happened.
+func detectIdPAuthorizedRoleMismatch(in ExplainInput) []Finding {
+	var required bool
+	for _, c := range in.Trust.Conditions {
+		if c.Claim == IdPAuthorizedRoleConditionKey && strings.EqualFold(c.Value, "true") {
+			required = true
+			break
+		}
+	}
+	if !required {
+		return nil
+	}
+
+	if len(in.IdPAuthorizedRoles) == 0 {
+		return []Finding{newFinding("idp-authorized-role-missing", FindingCritical,
+			"the trust policy requires sts:RoleAuthorizedByIdp, but this token carries no "+
+				IdPAuthorizedRoleClaim+" claim",
+			"either configure the identity provider to embed "+IdPAuthorizedRoleClaim+
+				" naming this role, or drop the condition. STS evaluates it BEFORE the trust "+
+				"policy, so while it fails nothing else in the policy is consulted at all").
+			withDiff(IdPAuthorizedRoleClaim, "(absent)", "required")}
+	}
+
+	if in.TargetRole == "" {
+		return nil // nothing to compare against
+	}
+	for _, role := range in.IdPAuthorizedRoles {
+		if strings.EqualFold(strings.TrimSpace(role), strings.TrimSpace(in.TargetRole)) {
+			return nil
+		}
+	}
+
+	return []Finding{newFinding("idp-authorized-role-mismatch", FindingCritical,
+		"the identity provider authorized this token for other roles, and this is not one of them",
+		fmt.Sprintf("add %q to the %s claim the identity provider embeds, or assume one of the roles "+
+			"it already names", in.TargetRole, IdPAuthorizedRoleClaim)).
+		withDiff(IdPAuthorizedRoleClaim, strings.Join(in.IdPAuthorizedRoles, ", "), in.TargetRole)}
+}

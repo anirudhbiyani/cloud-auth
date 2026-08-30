@@ -86,3 +86,44 @@ func audiences(raw json.RawMessage) []string {
 	}
 	return nil
 }
+
+// StringOrSliceClaim reads a claim that a JWT may encode as either a string or
+// an array of strings, and returns nothing when it is absent.
+//
+// It re-decodes the payload rather than widening Claims. Claims is the set of
+// fields every caller needs; this is for the occasional claim one caller cares
+// about — "https://aws.amazon.com/roles", which STS reads for
+// sts:RoleAuthorizedByIdp — and adding a map to Claims for that would put an
+// unvalidated blob in front of every consumer.
+//
+// Unverified, exactly like ParseUnverified: the signature is checked by whoever
+// the token is presented to, never here.
+func StringOrSliceClaim(token, name string) ([]string, error) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return nil, fmt.Errorf("jwt: expected 3 segments, got %d", len(parts))
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return nil, fmt.Errorf("jwt: decoding payload: %w", err)
+	}
+
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &all); err != nil {
+		return nil, fmt.Errorf("jwt: unmarshaling claims: %w", err)
+	}
+	raw, ok := all[name]
+	if !ok {
+		return nil, nil
+	}
+
+	var single string
+	if err := json.Unmarshal(raw, &single); err == nil {
+		return []string{single}, nil
+	}
+	var many []string
+	if err := json.Unmarshal(raw, &many); err != nil {
+		return nil, fmt.Errorf("jwt: claim %q is neither a string nor an array of strings", name)
+	}
+	return many, nil
+}

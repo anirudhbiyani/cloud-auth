@@ -928,6 +928,19 @@ func buildTrustPolicy(oidcProviderARN string, spec *core.AWSRoleTrustOIDCSpec) (
 			spec.RoleName, prefix)).WithProvider(core.AWS)
 	}
 
+	// sts:RoleAuthorizedByIdp, when asked for. STS evaluates this BEFORE the
+	// trust policy, against the "https://aws.amazon.com/roles" claim the issuer
+	// embedded — so the issuer gets a say in which roles its own tokens may
+	// assume, and a stolen token is useless against roles it never named.
+	//
+	// A Bool condition, not a String one: the key answers "did the IdP
+	// authorize this role", and the comparison against the claim is STS's.
+	if spec.RequireIdPAuthorizedRole {
+		condition["Bool"] = map[string]string{
+			core.IdPAuthorizedRoleConditionKey: "true",
+		}
+	}
+
 	return map[string]interface{}{
 		"Version": "2012-10-17",
 		"Statement": []map[string]interface{}{

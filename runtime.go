@@ -17,6 +17,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/config"
 	"github.com/anirudhbiyani/cloud-auth/core"
 	"github.com/anirudhbiyani/cloud-auth/internal/audit"
+	"github.com/anirudhbiyani/cloud-auth/internal/jwt"
 	"github.com/anirudhbiyani/cloud-auth/source"
 )
 
@@ -214,10 +215,18 @@ func cmdDoctor(ctx context.Context, args []string) error {
 	if *explain {
 		trust, trustErr = trustForTarget(ctx, target)
 		if trustErr == nil {
-			findings = core.Explain(core.ExplainInput{
+			input := core.ExplainInput{
 				Trust: trust, Token: p.token, Target: target,
 				SourceCloud: runtimeCloud(rt),
-			})
+				TargetRole:  targetRoleARN(target),
+			}
+			// Extracted here rather than in core, which is a leaf package and
+			// cannot import internal/jwt to read a token itself.
+			if p.token != nil {
+				input.IdPAuthorizedRoles, _ = jwt.StringOrSliceClaim(
+					p.token.Reveal(), core.IdPAuthorizedRoleClaim)
+			}
+			findings = core.Explain(input)
 		}
 	}
 
@@ -239,6 +248,14 @@ func cmdDoctor(ctx context.Context, args []string) error {
 		}
 	}
 	return nil
+}
+
+// targetRoleARN returns the role an AWS exchange will assume, or empty.
+func targetRoleARN(target core.Target) string {
+	if t, ok := target.(core.AWSTarget); ok {
+		return t.RoleARN
+	}
+	return ""
 }
 
 // runtimeCloud returns the detected cloud, or empty.

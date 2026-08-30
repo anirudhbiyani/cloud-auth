@@ -85,6 +85,14 @@ type ExplainInput struct {
 	Target Target
 	// SourceCloud is the detected source cloud, where known.
 	SourceCloud Cloud
+	// IdPAuthorizedRoles is the "https://aws.amazon.com/roles" claim from the
+	// presented token, if it carries one.
+	//
+	// Extracted by the caller rather than read here: core is a leaf package and
+	// cannot import internal/jwt to parse a token itself.
+	IdPAuthorizedRoles []string
+	// TargetRole is the role the exchange will attempt to assume.
+	TargetRole string
 }
 
 // Explain runs every detector and returns findings, most severe first.
@@ -102,6 +110,7 @@ func Explain(in ExplainInput) []Finding {
 		detectOversizedMappedSubject,
 		detectForkPullRequestExposure,
 		detectIssuerMismatch,
+		detectIdPAuthorizedRoleMismatch,
 	} {
 		out = append(out, detect(in)...)
 	}
