@@ -305,13 +305,14 @@ func (s *FileStateStore) save() error {
 }
 
 // syncDir fsyncs a directory so a rename within it survives a crash.
+//
+// Directory fsync is a POSIX concept. Windows cannot open a directory as a file
+// handle to sync it, so syncDirectory is build-tagged and is a no-op there —
+// see state_lock_other.go. Calling it unconditionally made every FileStateStore
+// save fail on Windows with "Access is denied", which is to say the state store
+// did not work on Windows at all.
 func syncDir(dir string) error {
-	d, err := os.Open(dir) // #nosec G304 -- the state directory we just wrote
-	if err != nil {
-		return err
-	}
-	defer func() { _ = d.Close() }()
-	return d.Sync()
+	return syncDirectory(dir)
 }
 
 // withLock runs fn holding an exclusive advisory lock on the state file's

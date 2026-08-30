@@ -165,7 +165,7 @@ func (v *OIDCIssuerReachableValidator) Validate(ctx context.Context, ref Mechani
 		check.Duration = time.Since(start)
 		return check
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	check.Evidence["status_code"] = resp.StatusCode
 

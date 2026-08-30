@@ -14,6 +14,19 @@ import (
 // real cloud resource undeletable through this tool, so concurrent writers must
 // not overwrite each other from stale in-memory copies.
 func TestConcurrentWritersDoNotLoseRecords(t *testing.T) {
+	// This test drives four independent stores over one file, so the in-process
+	// mutex does not cover them and flock is what genuinely arbitrates. Where
+	// the lock is a documented no-op — anything that is not unix — there is
+	// nothing to arbitrate and records legitimately are lost.
+	//
+	// Skipped loudly rather than quietly relaxed: the guarantee is absent on
+	// that platform, and a test that passed anyway would be asserting the
+	// opposite of the truth.
+	if !lockingIsReal {
+		t.Skip("cross-process file locking is a no-op on this platform; " +
+			"FileStateStore does not serialize concurrent processes here")
+	}
+
 	path := filepath.Join(t.TempDir(), "state.json")
 
 	// Two independent stores over one file: this is what two cloud-auth

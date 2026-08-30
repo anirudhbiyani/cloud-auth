@@ -60,7 +60,12 @@ jobs:
 
       # Test. One pass with the race detector and coverage, rather than three
       # separate runs of the same suite.
+      #
+      # shell: bash on every run step, because the Windows runner defaults to
+      # PowerShell, which parses `-coverprofile=coverage.out ./...` as its own
+      # arguments and hands go a package named ".out".
       - name: Test
+        shell: bash
         run: go test -race -covermode=atomic -coverprofile=coverage.out ./...
 
       # The architecture tests shell out to `go list`, so they are worth naming
@@ -75,11 +80,13 @@ jobs:
       # runs at all, and a reader should not have to know the tag semantics to
       # see it.
       - name: Vet
+        shell: bash
         run: go vet ./...
 
       # Compile the build-tagged integration suite. It needs real cloud
       # credentials to run, but it must at least keep compiling.
       - name: Vet integration-tagged tests
+        shell: bash
         run: go vet -tags integration ./...
 
       # Seed corpora only: fuzzing proper is not a CI-duration activity, but a
@@ -90,6 +97,7 @@ jobs:
 
       # Build
       - name: Build
+        shell: bash
         run: go build -v ./...
 
       # Security

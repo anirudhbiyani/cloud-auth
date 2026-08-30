@@ -1110,5 +1110,11 @@ func (v *serviceAccountExistsValidator) Validate(ctx context.Context, ref core.M
 
 func init() {
 	// Register with default registry
-	core.Register(New())
+	// Panic rather than discard: Register fails only on a duplicate name, which
+	// is a programming error, and the alternative is a provider that silently
+	// does not exist. Every command that reaches for it would then report
+	// "provider not found" and send the reader looking in the wrong place.
+	if err := core.Register(New()); err != nil {
+		panic("cloud-auth/provider/gcp: registering the GCP provider: " + err.Error())
+	}
 }
