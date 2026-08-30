@@ -206,7 +206,7 @@ func doWithRetry(ctx context.Context, client *http.Client, maxRetries int, backo
 			continue // transport error: retryable
 		}
 		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			return body, resp.StatusCode, nil
 		}

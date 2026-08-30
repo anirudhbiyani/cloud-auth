@@ -102,7 +102,7 @@ func (a *Azure) imdsGet(ctx context.Context, path, rawQuery string) ([]byte, err
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("azure imds %s: status %d", path, resp.StatusCode)
@@ -279,7 +279,7 @@ func (a *Azure) mintFromIdentityEndpoint(ctx context.Context, audience string) (
 	if err != nil {
 		return nil, fmt.Errorf("azure: minting managed-identity token: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("azure: managed-identity endpoint status %d: %s", resp.StatusCode, string(body))

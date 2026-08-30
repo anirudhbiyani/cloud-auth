@@ -75,7 +75,7 @@ func STSGetCallerIdentityProbe(client *http.Client) Probe {
 		if err != nil {
 			return "", err
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 		if resp.StatusCode != http.StatusOK {
 			// The body is an STS error document; it can echo request detail, so
