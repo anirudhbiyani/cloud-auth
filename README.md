@@ -88,11 +88,17 @@ client (`--dry-run` works, a real run does not) · — not applicable.
 | **Kubernetes** | — | — | — | — | Token source only (`--type k8s-federation`, AWS target) |
 
 > **How far each ✅ has been verified.** AWS is exercised against live AWS in the
-> integration harness. The GCP and Azure clients are covered by unit tests that
-> speak the documented wire protocols against a fake server — GCP's
+> integration harness. The GCP, Azure and Vault clients are covered by unit tests
+> that speak the documented wire protocols against a fake server — GCP's
 > long-running-operation envelope, error envelope and IAM policy etag; Azure's
-> Graph and ARM envelopes, `@odata.nextLink` paging and the Entra `AADSTS` codes
-> — and have not yet been run against their live clouds.
+> Graph and ARM envelopes, `@odata.nextLink` paging and the Entra `AADSTS` codes;
+> Vault's `/v1` paths and error envelope.
+>
+> Live `setup` → `validate` → `delete` cases now exist for all three in
+> [`test/integration`](test/integration/README.md), behind `-tags integration`.
+> They **skip** unless the environment names a real project, so they do not turn
+> a contributor without a GCP account into a wall of red — which also means a
+> green CI run is not evidence they passed. Run them deliberately.
 >
 > Credentials: GCP uses Application Default Credentials
 > (`GOOGLE_APPLICATION_CREDENTIALS`, `gcloud auth application-default login`, or

@@ -1,69 +1,61 @@
-# Cloud integration tests
+# Live control-plane tests
 
-Go tests that exercise the source→target pair matrix in
-[`../harness/CONTRACT.md`](../harness/CONTRACT.md) against **real cloud
-infrastructure**. They are behind the `integration` build tag, so
-`go test ./...` never runs them.
+`matrix_test.go` covers the **runtime** half — a workload exchanging a proof for
+credentials — and is driven by the OpenTofu harness in `../harness/`.
 
-```sh
-go test -tags integration -v ./test/integration/...
+`controlplane_test.go` covers the other half: `setup` → `validate` → `delete`
+against a real cloud API. It exists because the GCP, Azure and Vault clients
+otherwise have only fake-server coverage, and **a fake agrees with whatever the
+code believes the protocol is**. That is precisely the class of mistake it
+cannot catch — `client_arm.go` silently not compiling was found by a build
+matrix, not by its tests.
+
+Everything here is behind `//go:build integration` and **skips** unless the
+environment names a real project. Skipping rather than failing is deliberate: a
+contributor without a GCP project should see the suite pass, not a wall of red
+they cannot act on.
+
+```bash
+go test -tags integration ./test/integration/ -run Lifecycle -v
 ```
 
-On a laptop with no harness state this **skips** every test with an explanatory
-message. It never fails and never hangs: plan loading is a file check, and
-runtime detection is bounded to 10s.
+## Environment
 
-## What must exist first
-
-1. **Harness applied.** `test/harness/scripts/up.sh` applies stage 1 (compute)
-   then stage 2 (trust) for all three clouds and writes
-   `test/harness/state/<cloud>-stage<n>.json`.
-2. **Merged plan.** The driver merges the stage-2 outputs into
-   `test/harness/state/targets.json` — the only file these tests read. They do
-   not read tofu state.
-3. **Execution inside a source runtime.** Each case declares the
-   `source_runtime` it belongs to. A test process runs only the cases matching
-   the runtime it detects (via cloud-auth's own detector) and skips the rest, so
-   the full matrix is covered by running this same suite in *every* source
-   runtime: EKS-IRSA pod, AKS workload-identity pod, EC2 instance, GCE instance.
-4. **Ambient identity only.** No static credentials. The pod/instance identity
-   is the input; anything else means the test is not testing what it claims to.
-
-## Inputs
-
-| Input | Default | Meaning |
-|---|---|---|
-| `../harness/state/targets.json` | — | merged plan (tests run with this package as cwd) |
-| `$CLOUD_AUTH_TARGETS_FILE` | unset | path override for the plan |
-| `$CLOUD_AUTH_TARGETS_JSON` | unset | the plan inline, for ConfigMap/user-data delivery |
-
-## Tests
-
-| Test | What it asserts |
+| Variable | Used by |
 |---|---|
-| `TestPairMatrix` | one subtest per case, named after the case. Cases for other runtimes skip; a matching case must produce non-empty, unexpired credentials (`expect: "success"`) or fail with the named sentinel via `errors.Is` (`expect: "error"`). |
-| `TestPlanCoversTheDocumentedGap` | the plan actually contains the negative row — AWS-EC2 → Azure asserting `ErrNoFirstClassPath`. Without it the suite could go green while the guard rotted away. |
-| `TestPlanRuntimeCoverage` | logs how many cases each source runtime owns, so a run where a runtime was never scheduled is visible instead of silently all-skipped. |
+| `CLOUD_AUTH_IT_OIDC_ISSUER` | all — an issuer already registered in each account |
+| `CLOUD_AUTH_IT_AWS_ACCOUNT_ID` | AWS |
+| `CLOUD_AUTH_IT_GCP_PROJECT_ID`, `_GCP_PROJECT_NUMBER`, `_GCP_SERVICE_ACCOUNT` | GCP |
+| `CLOUD_AUTH_IT_AZURE_TENANT_ID`, `_AZURE_SUBSCRIPTION_ID` | Azure |
+| `CLOUD_AUTH_IT_AZURE_APP_OBJECT_ID` | the manual FIC-cap case |
 
-Subtest names come from the plan, so failures read as the pair that broke:
+Credentials come from the ambient chain each provider already uses — AWS shared
+config, `gcloud auth application-default login`, `az login`.
 
-```
---- FAIL: TestPairMatrix/azure-aks-wi-to-gcp
-```
+## What these assert
 
-## Relationship to the verifier
+Beyond "it worked":
 
-These tests and `test/harness/verifier` share one implementation
-(`test/harness/verifier/verify`): the same case selection, sentinel mapping,
-credential assertions, probes, and redaction. The verifier is the container
-image the harness schedules in each runtime; this suite is the same logic driven
-by `go test` when you are already on the box and want per-pair output.
+- **Cleanup is registered immediately after setup**, so a failure part-way still
+  removes the trust relationship. A test that leaves a federated role behind is
+  worse than one that fails — it leaves a trust nobody is watching.
+- **A dry run creates nothing**, checked by the delete at the end finding exactly
+  one thing to remove.
+- **Validate ran real checks.** `HasChecks()` is asserted before the result is
+  read at all: a report with no checks is a vacuous pass, not a pass.
+- **Setup is idempotent.** Re-running must not fail and must not create a second
+  resource — an operator re-running a pipeline is the common case, not an edge
+  one.
 
-Both go through `broker.Broker` — the real detect→mint→exchange path — never a
-reimplementation of it.
+## Costs and limits
 
-## Output safety
+These create real resources. They are cheap, but they are not free, and two
+Azure limits make that suite slower than it looks: federated credential creation
+is throttled to roughly 0.25 requests per second per resource, and a newly
+created credential does not work for the first few minutes while Entra
+replicates it.
 
-No credential, token, or assertion value is ever logged. Results are emitted as
-scrubbed JSON: identity metadata (issuer, subject, role, pool, client id, STS
-request id, expiry) and outcomes only. See `verify.Scrubber` and its tests.
+The 20-credentials-per-application cap has a placeholder case that **skips by
+default**. Proving the 21st is refused means creating twenty first, which is
+destructive and slow, so it is something to run deliberately rather than on
+every CI pass.

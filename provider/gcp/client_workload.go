@@ -89,8 +89,14 @@ func (c *restClient) CreateWorkloadIdentityPool(ctx context.Context, parent, poo
 		Description: pool.Description,
 		Disabled:    pool.Disabled,
 	}
+	release, err := c.paceWrite(ctx)
+	if err != nil {
+		return nil, err
+	}
 	var op operation
-	if err := c.do(ctx, http.MethodPost, endpoint, body, &op, poolID); err != nil {
+	err = c.do(ctx, http.MethodPost, endpoint, body, &op, poolID)
+	release()
+	if err != nil {
 		return nil, err
 	}
 	var created wifPool
@@ -155,8 +161,14 @@ func (c *restClient) CreateWorkloadIdentityPoolProvider(ctx context.Context, par
 		}
 	}
 
+	release, err := c.paceWrite(ctx)
+	if err != nil {
+		return nil, err
+	}
 	var op operation
-	if err := c.do(ctx, http.MethodPost, endpoint, body, &op, providerID); err != nil {
+	err = c.do(ctx, http.MethodPost, endpoint, body, &op, providerID)
+	release()
+	if err != nil {
 		return nil, err
 	}
 	var created wifProvider
