@@ -1,0 +1,71 @@
+# End-to-end proof that cloud-auth works inside GitHub Actions.
+#
+# The README opens with GitHub Actions → AWS, and until the source provider
+# landed, `cloud-auth exchange` in a runner probed AWS, GCP and Azure metadata,
+# failed all three, and reported "no supported runtime detected". This workflow
+# is what stops that regressing silently.
+#
+# Manual only, and it degrades to a detection-only check when no role is
+# configured — a fork has no access to the repository's variables, and a
+# workflow that fails for everyone who forks it is noise rather than a signal.
+name: Federation smoke test
+
+on:
+  workflow_dispatch:
+    inputs:
+      role-arn:
+        description: "IAM role to assume (defaults to the AWS_SMOKE_ROLE_ARN variable)"
+        required: false
+
+permissions:
+  contents: read
+  # Without this the runner injects no token endpoint at all. Naming ANY
+  # permission drops every default, which is why contents: read is spelled out
+  # above rather than relied upon.
+  id-token: write
+
+jobs:
+  smoke:
+    name: doctor and exchange inside a runner
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.27.0"
+
+      - name: Build
+        run: go build -o cloud-auth .
+
+      # Detection alone proves the half that needs no cloud account: that the
+      # runner is recognised, the subject is reconstructed, and a token can be
+      # minted for a requested audience.
+      - name: doctor
+        run: |
+          ./cloud-auth doctor | tee doctor.txt
+          grep -q "cloud:       github_oidc" doctor.txt
+          grep -q "sub-runtime: actions" doctor.txt
+          grep -q "federatable: true" doctor.txt
+
+      - name: Resolve the role
+        id: role
+        run: |
+          role="${{ inputs.role-arn || vars.AWS_SMOKE_ROLE_ARN }}"
+          echo "arn=$role" >> "$GITHUB_OUTPUT"
+          if [ -z "$role" ]; then
+            echo "::notice::No role configured; skipping the live exchange."
+          fi
+
+      - name: exchange against AWS
+        if: steps.role.outputs.arn != ''
+        run: |
+          ./cloud-auth doctor \
+            --to aws --role "${{ steps.role.outputs.arn }}" \
+            --audience sts.amazonaws.com --explain
+
+          ./cloud-auth exec \
+            --to aws --role "${{ steps.role.outputs.arn }}" \
+            --audience sts.amazonaws.com \
+            -- aws sts get-caller-identity

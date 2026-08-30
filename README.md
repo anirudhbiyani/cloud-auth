@@ -127,13 +127,20 @@ what is using it:
 ### 🔀 Runtime Federation Matrix
 
 Which source runtimes can obtain credentials at which targets, and the proof
-each one presents. This is the `exchange`/`exec` path, not the control plane:
+each one presents. This is the `exchange`/`exec` path, not the control plane.
+
+**GitHub Actions is probed first.** Its detection is two environment-variable
+reads, while the cloud probes reach for a metadata endpoint — and a hosted
+runner *is* a virtual machine in somebody's cloud, so probing IMDS first would
+spend a timeout on every exchange before reaching the answer that was in the
+environment all along.
 
 **Legend:** ✅ works · ❌ the target STS will not accept this proof · 🚫 **refused
 by design** — cloud-auth returns `ErrNonFederatableSource` rather than attempt it.
 
 | Source runtime | Proof it mints | → AWS | → GCP | → Azure |
 |---|---|:---:|:---:|:---:|
+| **GitHub Actions** — `actions` | OIDC (runner token endpoint) | ✅ | ✅ | ✅ |
 | **AWS** — `eks-irsa` | OIDC (projected SA token) | ✅ | ✅ | ✅ |
 | **AWS** — `ec2`, `ecs`, `lambda` | OIDC via `sts:GetWebIdentityToken` | ✅ | ✅ | ✅ |
 | **AWS** — `ec2`, `ecs`, `lambda` | SigV4 `GetCallerIdentity` | ✅ | ✅ | ❌ |
@@ -725,11 +732,14 @@ CLOUD_AUTH_SOURCE_DETECT   # auto, a cloud, or a cloud and sub-runtime
 CLOUD_AUTH_REFRESH_BUFFER  # credential refresh lead time, e.g. 5m
 ```
 
-`source.detect` accepts `auto`, one of `aws` / `gcp` / `azure`, or a cloud plus
-a known sub-runtime:
+`source.detect` accepts `auto`, one of `github` / `aws` / `gcp` / `azure`, or a
+source plus a known sub-runtime. Note that the **source** set is not the
+**target** set: a workload can be a GitHub Actions job and obtain AWS
+credentials, but nothing obtains "GitHub credentials".
 
 | Cloud | Sub-runtimes |
 |---|---|
+| `github` | `actions` |
 | `aws` | `ec2`, `ecs`, `lambda`, `eks-irsa`, `eks-pod-identity` |
 | `gcp` | `gce`, `gke`, `cloud-run`, `cloud-functions` |
 | `azure` | `vm`, `aks-workload-identity`, `app-service`, `container-apps` |

@@ -53,6 +53,41 @@ func ParseCloud(s string) (Cloud, error) {
 		"vault, okta, github_oidc, or kubernetes)", s)
 }
 
+// sourceClouds are the clouds a workload can authenticate AS.
+//
+// A different set from federationTargets, and the difference is the point: a
+// workload can be a GitHub Actions job and obtain AWS credentials, but nothing
+// obtains "GitHub Actions credentials". Using federationTargets for both is why
+// `source.detect` could not name a CI platform at all.
+var sourceClouds = map[Cloud]bool{AWS: true, GCP: true, Azure: true, GitHubOIDC: true}
+
+// sourceCloudAliases map the spelling an operator writes to the Cloud constant.
+//
+// "github" rather than "github_oidc", because source.detect splits on "-" and
+// the natural value is "github-actions" — cloud "github", sub-runtime
+// "actions".
+var sourceCloudAliases = map[string]Cloud{
+	"github":      GitHubOIDC,
+	"github_oidc": GitHubOIDC,
+}
+
+// ParseSourceCloud parses a cloud a workload can authenticate as.
+func ParseSourceCloud(s string) (Cloud, error) {
+	normalized := strings.ToLower(strings.TrimSpace(s))
+	if c, ok := sourceCloudAliases[normalized]; ok {
+		return c, nil
+	}
+	c, err := ParseCloud(normalized)
+	if err != nil {
+		return "", err
+	}
+	if !sourceClouds[c] {
+		return "", fmt.Errorf("cloud-auth: %s is not a source a workload can authenticate as "+
+			"(want aws, gcp, azure, or github)", c)
+	}
+	return c, nil
+}
+
 // ParseFederationTarget parses a cloud a workload can obtain credentials for.
 func ParseFederationTarget(s string) (Cloud, error) {
 	c, err := ParseCloud(s)

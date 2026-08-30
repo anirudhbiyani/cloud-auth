@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"fmt"
 )
 
 // SourceProvider detects the local runtime and mints a proof of identity.
@@ -39,6 +40,19 @@ type Exchanger interface {
 var (
 	// ErrNotThisRuntime means a SourceProvider is not running in its cloud.
 	ErrNotThisRuntime = errors.New("cloud-auth: not running in this runtime")
+
+	// ErrRuntimeNotConfigured means a SourceProvider recognised its platform but
+	// the platform is not set up to federate — a GitHub Actions job without
+	// `permissions: id-token: write` is the archetype.
+	//
+	// A distinct sentinel rather than a message, because it is a distinct
+	// answer: "you are not here" and "you are here and it is switched off" send
+	// an operator to entirely different places, and the second is the single
+	// most common setup mistake. It WRAPS ErrNotThisRuntime so the registry
+	// keeps probing — the same host may legitimately have another identity —
+	// while the reason survives to be reported if nothing else matches.
+	ErrRuntimeNotConfigured = fmt.Errorf("%w: recognised, but not configured to federate",
+		ErrNotThisRuntime)
 
 	// ErrNonFederatableSource means the runtime cannot mint a portable token
 	// (e.g. EKS Pod Identity); the caller must use an OIDC-native source.
