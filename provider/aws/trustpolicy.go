@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/anirudhbiyani/cloud-auth/core"
@@ -128,8 +129,15 @@ func (p *Provider) TrustPolicy(ctx context.Context, ref core.MechanismRef) (*cor
 		}
 		// Condition keys are "<provider>:aud" / ":sub" / ":oaud", across any
 		// operator (StringEquals, StringLike, ForAllValues:StringEquals, ...).
-		// Match on the claim suffix rather than enumerating operators.
-		for _, kv := range st.Condition {
+		// The claim suffix is what identifies the claim, and the operator is
+		// what says how it is matched — this used to keep the first and discard
+		// the second, which makes a literal "*" under StringEquals (matches
+		// nothing, trust silently dead) indistinguishable from the same "*"
+		// under StringLike (matches everything, trust wide open).
+		//
+		// Iteration order over the operator map is random, so conditions are
+		// sorted before returning.
+		for operator, kv := range st.Condition {
 			for key, raw := range kv {
 				claim := key
 				if i := strings.LastIndex(key, ":"); i >= 0 {
@@ -141,6 +149,8 @@ func (p *Provider) TrustPolicy(ctx context.Context, ref core.MechanismRef) (*cor
 				// mapped to the azp claim — collect both.
 				case "aud", "oaud":
 					for _, v := range values {
+						tp.Conditions = append(tp.Conditions,
+							core.TrustCondition{Operator: operator, Claim: claim, Value: v})
 						if !seenAud[v] {
 							seenAud[v] = true
 							tp.Audiences = append(tp.Audiences, v)
@@ -148,6 +158,8 @@ func (p *Provider) TrustPolicy(ctx context.Context, ref core.MechanismRef) (*cor
 					}
 				case "sub":
 					for _, v := range values {
+						tp.Conditions = append(tp.Conditions,
+							core.TrustCondition{Operator: operator, Claim: claim, Value: v})
 						if !seenSub[v] {
 							seenSub[v] = true
 							tp.Subjects = append(tp.Subjects, v)
@@ -157,6 +169,17 @@ func (p *Provider) TrustPolicy(ctx context.Context, ref core.MechanismRef) (*cor
 			}
 		}
 	}
+	// Deterministic order: the operator map above iterates randomly, and a
+	// diff that reorders itself between runs is unreadable.
+	slices.SortFunc(tp.Conditions, func(a, b core.TrustCondition) int {
+		if n := strings.Compare(a.Claim, b.Claim); n != 0 {
+			return n
+		}
+		if n := strings.Compare(a.Operator, b.Operator); n != 0 {
+			return n
+		}
+		return strings.Compare(a.Value, b.Value)
+	})
 	return tp, nil
 }
 
