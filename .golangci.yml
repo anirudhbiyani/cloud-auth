@@ -1,0 +1,36 @@
+# golangci-lint configuration.
+#
+# The CI step is no longer advisory, so what is excluded here has to be
+# defensible rather than convenient. Each exclusion below says why.
+version: "2"
+
+linters:
+  # v2's default set: errcheck, govet, ineffassign, staticcheck, unused.
+  default: standard
+
+  exclusions:
+    rules:
+      # Writing a diagnostic and failing to write it is not an error this
+      # program can do anything about — the destination it would report the
+      # failure to is the one that just failed. The results that MATTER are
+      # checked: credentialProcessJSON, the audit logger, and every cloud call.
+      - linters: [errcheck]
+        source: '^\s*fmt\.(Fprint|Fprintf|Fprintln|Print|Printf|Println)\('
+
+      # flag.FlagSet is constructed with flag.ExitOnError throughout, so Parse
+      # does not return on a bad flag — it exits. Checking a value that cannot
+      # arrive reads as though it can.
+      - linters: [errcheck]
+        source: '^\s*fs\.Parse\('
+
+      # The delete confirmation prompt. A failed read leaves the answer empty,
+      # which is not "y", which cancels — the safe direction, and the one an
+      # error branch would have to choose anyway.
+      - linters: [errcheck]
+        source: 'fmt\.Scanln\('
+
+      # In tests, an unchecked write to a test buffer or temp file fails the
+      # assertion that follows it. Requiring a check there adds noise to the
+      # files people read most.
+      - linters: [errcheck]
+        path: _test\.go

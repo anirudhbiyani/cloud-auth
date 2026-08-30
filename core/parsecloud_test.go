@@ -11,7 +11,7 @@ import (
 func TestParseCloudAcceptsEveryDeclaredCloud(t *testing.T) {
 	for _, in := range []string{
 		"aws", "gcp", "azure",
-		"cloudflare", "vault", "okta", "github_oidc", "kubernetes",
+		"vault", "okta", "github_oidc", "kubernetes",
 		"AWS", "  Azure  ",
 	} {
 		if _, err := ParseCloud(in); err != nil {
@@ -33,7 +33,7 @@ func TestParseFederationTargetRejectsTrustPeers(t *testing.T) {
 			t.Errorf("ParseFederationTarget(%q) = %v, want nil", in, err)
 		}
 	}
-	for _, in := range []string{"cloudflare", "vault", "okta", "github_oidc", "kubernetes"} {
+	for _, in := range []string{"vault", "okta", "github_oidc", "kubernetes"} {
 		_, err := ParseFederationTarget(in)
 		if err == nil {
 			t.Errorf("ParseFederationTarget(%q) should be refused", in)

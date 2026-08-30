@@ -1,0 +1,56 @@
+# goreleaser config for cloud-auth.
+#
+# The binary lives at the module root — that is what makes
+# `go install github.com/anirudhbiyani/cloud-auth@latest` produce a command
+# named cloud-auth — so main is "." rather than a ./cmd path.
+version: 2
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - id: cloud-auth
+    main: .
+    binary: cloud-auth
+    env:
+      # Static binaries: a release artifact should not depend on the glibc of
+      # whatever runner happened to build it.
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .Commit }}
+      - -X main.buildDate={{ .CommitDate }}
+    # Reproducibility: without this the binary embeds the build time, so two
+    # builds of one tag differ and a checksum cannot be independently confirmed.
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: cloud-auth
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+
+checksums:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  # The changelog is written by hand in CHANGELOG.md; a commit-log dump would
+  # duplicate it badly.
+  disable: true
+
+release:
+  draft: false
+  prerelease: auto
+  footer: |
+    **Which providers reach their cloud:** see the capability matrix in the
+    README. `--dry-run` needs no cloud credentials on any provider.

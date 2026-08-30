@@ -17,9 +17,9 @@
       "additionalProperties": false,
       "properties": {
         "detect": {
-          "description": "Which runtime this workload may authenticate as. \"auto\" (default) detects by probe order; a cloud (\"aws\") or a cloud and sub-runtime (\"aws-ec2\") requires that runtime and makes anything else a hard error. Enforced by doctor, exchange and exec.",
+          "description": "Which runtime this workload may authenticate as. \"auto\" (default) detects by probe order; a cloud (\"aws\") or a cloud and sub-runtime (\"aws-ec2\") requires that runtime and makes anything else a hard error. The separator may be -, : or /, matching what the binary accepts. Enforced by doctor, exchange and exec.",
           "type": "string",
-          "pattern": "^(auto|aws|gcp|azure|aws-(ec2|ecs|lambda|eks-irsa|eks-pod-identity)|gcp-(gce|gke|cloud-run|cloud-functions)|azure-(vm|aks-workload-identity|app-service|container-apps))$"
+          "pattern": "^(auto|aws|gcp|azure|aws[-:/](ec2|ecs|lambda|eks-irsa|eks-pod-identity)|gcp[-:/](gce|gke|cloud-run|cloud-functions)|azure[-:/](vm|aks-workload-identity|app-service|container-apps))$"
         }
       }
     },

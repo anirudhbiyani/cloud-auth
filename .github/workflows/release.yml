@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+# The token is scoped at the job, not the workflow: only the release job needs
+# to write, and a tag push should not hand write access to anything else.
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # goreleaser needs the full history to resolve the previous tag.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.27.0"
+
+      # A tag that does not pass its own tests must not become a release.
+      # Re-run rather than trusting the CI run on the commit: a tag can be
+      # placed on any commit, including one CI never saw.
+      - name: Test
+        run: go test -race ./...
+
+      - name: Run goreleaser
+        uses: goreleaser/goreleaser-action@v7.2.3
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

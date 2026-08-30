@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strconv"
 )
 
 // This file makes the two secret-bearing types safe to hand to a logger.
@@ -70,12 +71,7 @@ func (c Credentials) expiryString() string {
 // Format routes %v, %s, %q, %+v and %#v through String. Without it, %+v walks
 // the struct fields directly and prints the secrets that String exists to hide.
 func (c Credentials) Format(f fmt.State, verb rune) {
-	switch verb {
-	case 'v', 's', 'q':
-		_, _ = io.WriteString(f, c.String())
-	default:
-		_, _ = io.WriteString(f, c.String())
-	}
+	writeRedacted(f, verb, c.String())
 }
 
 // LogValue implements slog.LogValuer.
@@ -132,7 +128,26 @@ func (t SourceToken) expiryString() string {
 
 // Format routes every verb through String, for the same reason as Credentials.
 func (t SourceToken) Format(f fmt.State, verb rune) {
-	_, _ = io.WriteString(f, t.String())
+	writeRedacted(f, verb, t.String())
+}
+
+// writeRedacted emits the redacted string for any verb.
+//
+// %q quotes it; every other verb writes it plainly. The switch used to have two
+// identical arms, so %q silently produced an unquoted string — which is only
+// cosmetic, but a caller who wrote %q to get a safely-delimited value in a log
+// line did not get one, and the code read as though they had.
+//
+// The default arm is the load-bearing half: without Format at all, %+v and %#v
+// walk the struct fields directly and print exactly the secrets String exists to
+// hide. Every verb therefore lands on the redacted form, including ones that do
+// not exist yet.
+func writeRedacted(f fmt.State, verb rune, s string) {
+	if verb == 'q' {
+		_, _ = io.WriteString(f, strconv.Quote(s))
+		return
+	}
+	_, _ = io.WriteString(f, s)
 }
 
 // LogValue implements slog.LogValuer.

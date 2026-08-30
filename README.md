@@ -31,7 +31,7 @@ cloud-auth setup --type aws-oidc \
   --role-name github-deploy-role \
   --account-id 123456789012 \
   --oidc-url https://token.actions.githubusercontent.com \
-  --subject "repo:myorg/myrepo:*" \
+  --subject "repo:myorg/myrepo:ref:refs/heads/main" \
   --source github
 ```
 
@@ -61,31 +61,100 @@ Setting up cross-cloud authentication typically requires:
 - **Delete** - Safely remove mechanisms and associated resources
 - **Dry-Run** - Preview changes before applying them
 
-### 🌐 Multi-Cloud Support
-Full lifecycle support for major cloud providers:
+### 📍 Current status
 
-| Provider | Token | Setup | Validate | Delete | Federation Types |
-|----------|:-----:|:-----:|:--------:|:------:|------------------|
+**All four providers are wired.** AWS, GCP, Azure and HashiCorp Vault each reach
+their service on a real run. The runtime data plane
+(`doctor`, `exchange`, `exec`) is the more mature half of this project and works
+across all three clouds.
+
+`--dry-run` needs no cloud credentials on any provider. That is deliberate:
+planning is what you do *before* you have them.
+
+### 🌐 Multi-Cloud Support
+
+Control-plane lifecycle — establishing the trust relationship.
+
+**Legend:** ✅ implemented and reaches the cloud · 🅿️ plan/validation only, no
+client (`--dry-run` works, a real run does not) · — not applicable.
+
+| Provider | Setup | Validate | Delete | Dry-run | Federation Types |
+|----------|:-----:|:--------:|:------:|:-------:|------------------|
 | **AWS** | ✅ | ✅ | ✅ | ✅ | OIDC Trust |
 | **GCP** | ✅ | ✅ | ✅ | ✅ | Workload Identity |
 | **Azure** | ✅ | ✅ | ✅ | ✅ | Federated Credentials |
-| **Cloudflare** | ✅ | ✅ | ✅ | ✅ | Access Service Tokens |
 | **Vault** | ✅ | ✅ | ✅ | ✅ | JWT Auth |
-| **GitHub OIDC** | ✅ | - | - | - | Token Source |
-| **Kubernetes** | ✅ | - | - | - | Token Source |
+| **GitHub OIDC** | — | — | — | — | Token source only |
+| **Kubernetes** | — | — | — | — | Token source only (`--type k8s-federation`, AWS target) |
+
+> **How far each ✅ has been verified.** AWS is exercised against live AWS in the
+> integration harness. The GCP and Azure clients are covered by unit tests that
+> speak the documented wire protocols against a fake server — GCP's
+> long-running-operation envelope, error envelope and IAM policy etag; Azure's
+> Graph and ARM envelopes, `@odata.nextLink` paging and the Entra `AADSTS` codes
+> — and have not yet been run against their live clouds.
+>
+> Credentials: GCP uses Application Default Credentials
+> (`GOOGLE_APPLICATION_CREDENTIALS`, `gcloud auth application-default login`, or
+> the metadata server). Azure uses `DefaultAzureCredential` (`az login`, managed
+> identity, workload identity, or the `AZURE_*` environment variables). Vault
+> uses `VAULT_ADDR` and `VAULT_TOKEN`, plus `VAULT_NAMESPACE` on Enterprise —
+> there is deliberately no discovery chain, because guessing an address would
+> mean sending a token somewhere you did not name.
+
+> **Cloudflare was removed.** Cloudflare Access has no workload identity
+> federation — only service tokens and mTLS, which are shared secrets. Shipping
+> that under this project's banner would have been the opposite of the point.
+
+#### Azure constraints cloud-auth enforces for you
+
+These are Azure's, not cloud-auth's, and each one is checked *before* the API
+call rather than discovered from a refusal that names a limit without naming
+what is using it:
+
+| Constraint | What cloud-auth does |
+|---|---|
+| **20 federated identity credentials** per application or user-assigned managed identity | Refuses the 21st, naming the current count. The flexible-FIC preview raises this, but is readable only through Graph or the portal — Azure CLI, PowerShell and Terraform error on both read *and* write — so adopting it makes existing IaC state unreadable. cloud-auth does not use it, and says so in the error. |
+| **No wildcards in any FIC property** | Rejected up front. Azure matches issuer, subject, audience and name literally, so a wildcard produces a credential that is created successfully and then never matches a token. |
+| **Creation throttled to ~0.25 req/sec per resource; HTTP 409 on concurrent creation** | Credential creation is serialized and paced. Fanning out yields conflicts, not speed — and a conflict is indistinguishable from "already exists", so the two get conflated and a setup reports success having created nothing. |
+| **Propagation delay after creation** | `AADSTS70021` is retried with bounded backoff, in both the control plane and the runtime exchanger. Nothing else is: `AADSTS700213`, a genuinely wrong subject, fails on the first attempt. |
+
+> Azure matches issuer, subject and audience **case-sensitively**, and a wrong
+> subject produces a credential that Microsoft's own documentation describes as
+> failing without error. `cloud-auth doctor` reports a case-only audience
+> mismatch explicitly for that reason.
 
 ### 🔀 Runtime Federation Matrix
 
 Which source runtimes can obtain credentials at which targets, and the proof
 each one presents. This is the `exchange`/`exec` path, not the control plane:
 
+**Legend:** ✅ works · ❌ the target STS will not accept this proof · 🚫 **refused
+by design** — cloud-auth returns `ErrNonFederatableSource` rather than attempt it.
+
 | Source runtime | Proof it mints | → AWS | → GCP | → Azure |
 |---|---|:---:|:---:|:---:|
-| **AWS** — `eks-irsa`, `eks-pod-identity` | OIDC (projected SA token) | ✅ | ✅ | ✅ |
+| **AWS** — `eks-irsa` | OIDC (projected SA token) | ✅ | ✅ | ✅ |
 | **AWS** — `ec2`, `ecs`, `lambda` | OIDC via `sts:GetWebIdentityToken` | ✅ | ✅ | ✅ |
 | **AWS** — `ec2`, `ecs`, `lambda` | SigV4 `GetCallerIdentity` | ✅ | ✅ | ❌ |
+| **AWS** — `eks-pod-identity` | *none* | 🚫 | 🚫 | 🚫 |
 | **GCP** — `gce`, `gke`, `cloud-run`, `cloud-functions` | OIDC (metadata identity token) | ✅ | ✅ | ✅ |
-| **Azure** — `vm`, `aks-workload-identity`, `app-service`, `container-apps` | OIDC (managed identity token) | ✅ | ✅ | ✅ |
+| **Azure** — `aks-workload-identity` | OIDC (projected SA token) | ✅ | ✅ | ✅ |
+| **Azure** — `vm`, `app-service`, `container-apps` | *none* | 🚫 | 🚫 | 🚫 |
+
+**Why two runtimes are refused rather than attempted.**
+
+*EKS Pod Identity* vends AWS-internal credentials. There is no
+externally-verifiable token to present, so no other cloud's STS can check
+anything. Use EKS IRSA, which projects a real OIDC token.
+
+*Azure managed identity* — a bare VM, App Service, Container Apps — vends Entra
+**access tokens**. An access token is a live bearer credential for whatever
+Azure resource was named in the request, not an audience-pinned assertion about
+the workload. Forwarding one to a third-party STS discloses a working Azure
+credential **and still fails**, because its `aud` is an Azure resource rather
+than the target's audience. Use AKS Workload Identity
+(`AZURE_FEDERATED_TOKEN_FILE`), or bridge the identity through an OIDC issuer.
 
 Azure Entra accepts **only** RS256 OIDC JWTs. Until AWS shipped outbound
 identity federation, an EC2/ECS/Lambda workload had no OIDC token of its own and
@@ -111,6 +180,9 @@ path closes it. See [AWS proof selection](#aws-proof-selection).
 ```bash
 go install github.com/anirudhbiyani/cloud-auth@latest
 ```
+
+**Pre-built binaries** for linux, darwin and windows on amd64 and arm64, with
+checksums, are attached to each [release](https://github.com/anirudhbiyani/cloud-auth/releases).
 
 **From Source:**
 ```bash
@@ -269,8 +341,8 @@ Or using a spec file:
   "account_id": "123456789012",
   "oidc_provider_url": "https://token.actions.githubusercontent.com",
   "audience": "sts.amazonaws.com",
-  "subject": "repo:myorg/myrepo:*",
-  "subject_condition": "StringLike",
+  "subject": "repo:myorg/myrepo:ref:refs/heads/main",
+  "subject_condition": "StringEquals",
   "source": "github_oidc",
   "policy_arns": [
     "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
@@ -317,6 +389,25 @@ cloud-auth setup --type azure-federated \
 
 Sets up federation between Kubernetes ServiceAccounts and cloud identities.
 
+A ServiceAccount federated to a cloud **is** that cloud's ordinary OIDC trust:
+the projected SA token is an OIDC token, its issuer is the cluster's OIDC
+issuer, and its `sub` claim is the fixed string
+`system:serviceaccount:<namespace>:<name>`. So this is a friendlier way to
+describe a mechanism that already exists, and the resource it creates is that
+mechanism — an `aws_role_trust_oidc`, a `gcp_workload_identity_pool`, or an
+`azure_federated_credential`. `validate` and `delete` work on the result without
+any special casing.
+
+| `--target-cloud` | Creates | Notes |
+|---|---|---|
+| `aws` | IAM role with OIDC trust | `StringEquals`, never `StringLike` — the subject is fully known |
+| `gcp` | Workload identity pool + OIDC provider | The attribute condition is derived and pins the subject, so the provider does not accept every identity the cluster's issuer serves |
+| `azure` | App registration + federated credential | Managed identity is **not** available here: it needs a resource group and an identity name that `azure_config` has no fields for. Use `--type azure-federated --identity-type managed-identity`. |
+
+Wildcards in the namespace or ServiceAccount name are rejected on all three, and
+`create_service_account` is refused rather than ignored — cloud-auth configures
+the cloud side of the trust and never talks to your cluster.
+
 ```bash
 cloud-auth setup --type k8s-federation \
   --cluster-name <name>        # Kubernetes cluster name
@@ -350,7 +441,7 @@ Validation checks, and their **current** implementation status:
 | OIDC provider configuration | ✅ implemented — fetches the issuer's `.well-known/openid-configuration` |
 | Token acquisition | ✅ implemented (opt-in via `--include-token-test`) |
 | Clock skew | ✅ implemented — requires a remote time source; reports **skipped** without one |
-| Trust policy configuration | ✅ implemented for **AWS, GCP and Azure** — reads the live trust object and checks the issuer, audience and subject still match what was configured, and flags an unscoped trust outright |
+| Trust policy configuration | ✅ implemented for **AWS, GCP and Azure** — reads the live trust object and checks the issuer, audience and subject still match what was configured, and flags a *totally* unscoped trust outright |
 | Permission policies | ✅ implemented for **AWS, GCP and Azure** — confirms the expected policies/roles are still attached |
 
 > **What "unscoped" means per cloud.** The trust check fails outright when a
@@ -358,6 +449,13 @@ Validation checks, and their **current** implementation status:
 > workload identity pool provider with **no attribute condition**, or an Azure
 > federated credential with an empty subject. Each is a confused-deputy hole,
 > and each would otherwise "match" whatever you compared it to.
+
+> **"Unscoped" is a narrow test, not a breadth score.** It answers *does this
+> pin nothing at all*. A subject that pins some characters is not flagged, so
+> `repo:myorg/*` (every repo in the org, including ones created tomorrow) and
+> `repo:myorg/myrepo:*` (every branch, tag, and `pull_request` from a fork) both
+> pass it today. Grading subject breadth is tracked separately; until it lands,
+> pin the subject yourself — the examples in this README do.
 
 > **Trust-policy and permission checks compare against the intent recorded at
 > setup.** Mechanisms created before cloud-auth persisted that intent have
@@ -449,8 +547,8 @@ func main() {
         AccountID:        "123456789012",
         OIDCProviderURL:  "https://token.actions.githubusercontent.com",
         Audience:         "sts.amazonaws.com",
-        Subject:          "repo:myorg/myrepo:*",
-        SubjectCondition: "StringLike",
+        Subject:          "repo:myorg/myrepo:ref:refs/heads/main",
+        SubjectCondition: "StringEquals",
         Source:           core.GitHubOIDC,
         PolicyARNs: []string{
             "arn:aws:iam::aws:policy/ReadOnlyAccess",
@@ -555,7 +653,47 @@ malformed `aws-`, which is an error and not a synonym for `aws`.
 | `--dry-run` | Preview changes without applying them |
 | `--force` | Overwrite existing resources |
 | `--state <path>` | Custom state file path |
-| `-v, --verbose` | Verbose output |
+| `-v, --verbose` | Diagnostic output on **stderr** |
+
+## 📝 Output and audit
+
+**stdout carries results; stderr carries everything else.** A result is the thing
+you asked for — a validation report, a credential document, a table of
+mechanisms — and something downstream may be parsing it. Diagnostics, warnings,
+the delete confirmation prompt and audit records all go to stderr, so
+`cloud-auth list --output json | jq .` and `cloud-auth exchange --format json`
+stay clean whatever else the run has to say.
+
+`--verbose` raises the diagnostic level; without it a normal run is quiet unless
+something is worth saying.
+
+### Audit records
+
+Every operation that **issues a credential** or **changes a trust relationship**
+emits exactly one JSON record to stderr, whether it succeeds or fails:
+
+| Operation | Emitted by |
+|---|---|
+| `exchange` | `cloud-auth exchange` |
+| `credential-process` | `cloud-auth credential-process` |
+| `exec` | `cloud-auth exec` — written *before* the child runs, since the child may run for hours and replaces this process's exit path |
+| `setup` | `cloud-auth setup`, including `--dry-run`, which still reads live state |
+| `delete` | `cloud-auth delete` |
+
+```console
+$ cloud-auth setup --type aws-oidc ... --dry-run 2> audit.jsonl
+$ jq -c '{operation, outcome, mechanism_type, latency_ms}' audit.jsonl
+{"operation":"setup","outcome":"success","mechanism_type":"aws_role_trust_oidc","latency_ms":4011}
+```
+
+Records carry the source identity, target, role, STS request id, mechanism and
+latency — whichever apply to that operation. **Exactly one record per operation,
+including on the failure paths**, which are the ones worth reviewing. The `error`
+field is redacted before it is written: upstream token endpoints echo request
+material into their error descriptions, and the audit log is the one file built
+for long-term retention.
+
+Reads — `validate`, `list`, `describe`, `doctor` — do not emit records.
 
 ## 🏗️ Architecture
 
@@ -569,6 +707,9 @@ cloud-auth/
 ├── exec.go                    #   runtime.go: doctor/exchange/exec/config-validate
 ├── format.go                  #   diagnose.go: doctor's preflight logic (pure, no I/O)
 │                              #   scaffold.go, exec.go, format.go: init, exec, output shapes
+├── audit.go                   #   audit.go: one record per credential-issuing
+├── logging.go                 #     or trust-changing operation
+│                              #   logging.go: diagnostics to stderr
 ├── core/                      # Core domain package (one shared vocabulary)
 │   ├── federation.go          # Runtime types (Cloud, Target, SourceToken, Credentials)
 │   ├── federation_interfaces.go # SourceProvider, Exchanger, Runtime, sentinel errors
@@ -584,7 +725,6 @@ cloud-auth/
 │   ├── aws/                   # AWS IAM, STS, OIDC
 │   ├── gcp/                   # GCP Workload Identity
 │   ├── azure/                 # Azure AD Federated Credentials
-│   ├── cloudflare/            # Cloudflare Access
 │   └── vault/                 # HashiCorp Vault
 ├── source/                    # Runtime: source-identity detection + minting
 │   └── aws_outbound.go        #   sts:GetWebIdentityToken OIDC proof (AWS → Azure)
@@ -594,7 +734,7 @@ cloud-auth/
 ├── config/                    # Runtime: declarative federation config + JSON Schema
 ├── internal/                  # imds, jwt, k8stoken, cache, audit
 ├── test/                      # Cloud integration harness (OpenTofu) + build-tagged tests
-├── docs/                      # TDD, task backlog, sprint plan
+├── docs/                      # BASELINE.md; internal/ holds planning history
 └── examples/                  # Example spec files
 ```
 
@@ -657,7 +797,15 @@ Contributions are welcome! Here's how to get started:
    ```bash
    golangci-lint run
    ```
-7. **Submit** a pull request
+7. **Sign off** your commits (`git commit -s`) — see [CONTRIBUTING.md](CONTRIBUTING.md)
+8. **Submit** a pull request
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) first: it covers the DCO sign-off, what a
+change needs before it can merge, and the handful of things that will fail
+review — weakening an architecture test to make a change compile, turning a
+skipped validation check into a passing one, or retrying a 4xx.
+
+Found a security issue? Do not open a public issue — see [SECURITY.md](SECURITY.md).
 
 ### Development Setup
 

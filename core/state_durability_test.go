@@ -14,6 +14,19 @@ import (
 // real cloud resource undeletable through this tool, so concurrent writers must
 // not overwrite each other from stale in-memory copies.
 func TestConcurrentWritersDoNotLoseRecords(t *testing.T) {
+	// This test drives four independent stores over one file, so the in-process
+	// mutex does not cover them and flock is what genuinely arbitrates. Where
+	// the lock is a documented no-op — anything that is not unix — there is
+	// nothing to arbitrate and records legitimately are lost.
+	//
+	// Skipped loudly rather than quietly relaxed: the guarantee is absent on
+	// that platform, and a test that passed anyway would be asserting the
+	// opposite of the truth.
+	if !lockingIsReal {
+		t.Skip("cross-process file locking is a no-op on this platform; " +
+			"FileStateStore does not serialize concurrent processes here")
+	}
+
 	path := filepath.Join(t.TempDir(), "state.json")
 
 	// Two independent stores over one file: this is what two cloud-auth
@@ -96,7 +109,22 @@ func TestStateFileIsNotWorldReadable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
+	perm := info.Mode().Perm()
+	if !posixFileModes {
+		// Windows has no POSIX permission bits: os.Chmod toggles a read-only
+		// flag and Perm() reports 0666 whatever was requested. The state file is
+		// genuinely NOT protected by mode there — it relies on the ACL of the
+		// directory it sits in — so this asserts the platform's actual behaviour
+		// rather than pretending the guarantee holds.
+		if perm == 0o600 {
+			t.Errorf("mode = 0600 on a platform without POSIX modes; " +
+				"posixFileModes is wrong for this build")
+		}
+		t.Logf("state file mode = %04o; POSIX modes are unavailable here, so the "+
+			"file's protection comes from the containing directory's ACL", perm)
+		return
+	}
+	if perm != 0o600 {
 		t.Errorf("state file mode = %04o, want 0600", perm)
 	}
 }

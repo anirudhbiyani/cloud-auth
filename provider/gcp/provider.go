@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anirudhbiyani/cloud-auth/core"
@@ -16,9 +17,55 @@ import (
 
 // Provider implements core.LifecycleProvider for GCP.
 type Provider struct {
+	mu        sync.Mutex
 	iamClient IAMClient
 	wifClient WorkloadIdentityClient
 	stsClient STSClient
+
+	// resolveFailed records that Application Default Credentials could not be
+	// resolved, so the next call reports the original cause instead of silently
+	// retrying a lookup that will fail the same way.
+	resolveFailed error
+}
+
+// resolve lazily builds the REST clients from Application Default Credentials.
+//
+// Lazily, because init() registers this Provider into the global registry at
+// import time, long before anyone has asked to talk to GCP. Building eagerly
+// would make every import of this package depend on resolvable credentials, and
+// would surface a credential problem as an import-time failure rather than at
+// the operation that needed it. Injected clients always win.
+func (p *Provider) resolve(ctx context.Context, needWIF, needIAM bool) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// Resolve only what is actually missing for THIS call. Requiring all three
+	// clients before skipping resolution meant a caller who injected the two it
+	// needed still reached for ambient credentials to fill the third — so
+	// whether the call worked depended on the host, which is how the rollback
+	// tests passed on one CI runner and failed on another.
+	if (!needWIF || p.wifClient != nil) && (!needIAM || p.iamClient != nil) {
+		return nil
+	}
+	if p.resolveFailed != nil {
+		return p.resolveFailed
+	}
+
+	clients, err := NewClients(ctx)
+	if err != nil {
+		p.resolveFailed = err
+		return err
+	}
+	if p.iamClient == nil {
+		p.iamClient = clients.IAM
+	}
+	if p.wifClient == nil {
+		p.wifClient = clients.Workload
+	}
+	if p.stsClient == nil {
+		p.stsClient = clients.STS
+	}
+	return nil
 }
 
 // STSClient abstracts GCP Security Token Service operations for token exchange.
@@ -283,10 +330,19 @@ func (p *Provider) HasCapability(cap core.Capability) bool {
 
 // requireClients reports whether this provider can talk to GCP at all.
 //
-// There is no lazy constructor here — the clients are injected — so an
-// unconfigured Provider is the one init() registers, and every lifecycle method
-// used to dereference the nil field and panic.
-func (p *Provider) requireClients(needWIF, needIAM bool) error {
+// resolve() builds the REST clients from Application Default Credentials on
+// first use, so reaching one of these errors now means ADC could not be
+// resolved — not that the feature is unimplemented, which is what it used to
+// mean. The cause from resolve is attached so the operator sees which step of
+// credential discovery failed.
+func (p *Provider) requireClients(ctx context.Context, needWIF, needIAM bool) error {
+	if err := p.resolve(ctx, needWIF, needIAM); err != nil {
+		return core.ErrValidation("could not reach GCP: no usable credentials").
+			WithCause(err).
+			WithProvider(core.GCP).
+			WithDetail("hint", "Set GOOGLE_APPLICATION_CREDENTIALS, run `gcloud auth application-default login`, "+
+				"or pass gcp.WithIAMClient/WithWorkloadIdentityClient; --dry-run needs no credentials")
+	}
 	if needWIF && p.wifClient == nil {
 		return core.ErrValidation("GCP Workload Identity client not configured").
 			WithProvider(core.GCP).
@@ -305,6 +361,8 @@ func (p *Provider) Setup(ctx context.Context, spec core.MechanismSpec, opts core
 	switch s := spec.(type) {
 	case *core.GCPWorkloadIdentityPoolSpec:
 		return p.setupWorkloadIdentityPool(ctx, s, opts)
+	case *core.K8sServiceAccountFederationSpec:
+		return p.setupK8sFederation(ctx, s, opts)
 	default:
 		return nil, core.ErrValidation(fmt.Sprintf("unsupported spec type: %T", spec)).
 			WithProvider(core.GCP)
@@ -312,6 +370,14 @@ func (p *Provider) Setup(ctx context.Context, spec core.MechanismSpec, opts core
 }
 
 func (p *Provider) setupWorkloadIdentityPool(ctx context.Context, spec *core.GCPWorkloadIdentityPoolSpec, opts core.SetupOptions) (*core.Outputs, error) {
+	// A dry run plans without touching GCP, so it must not require credentials:
+	// planning is exactly what someone does before they have them.
+	if !opts.DryRun {
+		if err := p.requireClients(ctx, true, true); err != nil {
+			return nil, err
+		}
+	}
+
 	var plan core.Plan
 
 	poolName := fmt.Sprintf("projects/%s/locations/global/workloadIdentityPools/%s",
@@ -596,7 +662,7 @@ func (p *Provider) setupWorkloadIdentityPool(ctx context.Context, spec *core.GCP
 
 // Validate implements core.LifecycleProvider.
 func (p *Provider) Validate(ctx context.Context, ref core.MechanismRef, opts core.ValidateOptions) (*core.ValidationReport, error) {
-	if err := p.requireClients(true, true); err != nil {
+	if err := p.requireClients(ctx, true, true); err != nil {
 		return nil, err
 	}
 
@@ -661,7 +727,7 @@ func (p *Provider) deleteWorkloadIdentityPool(ctx context.Context, ref core.Mech
 	if opts.DryRun {
 		return nil
 	}
-	if err := p.requireClients(true, false); err != nil {
+	if err := p.requireClients(ctx, true, false); err != nil {
 		return err
 	}
 
@@ -1050,5 +1116,11 @@ func (v *serviceAccountExistsValidator) Validate(ctx context.Context, ref core.M
 
 func init() {
 	// Register with default registry
-	core.Register(New())
+	// Panic rather than discard: Register fails only on a duplicate name, which
+	// is a programming error, and the alternative is a provider that silently
+	// does not exist. Every command that reaches for it would then report
+	// "provider not found" and send the reader looking in the wrong place.
+	if err := core.Register(New()); err != nil {
+		panic("cloud-auth/provider/gcp: registering the GCP provider: " + err.Error())
+	}
 }

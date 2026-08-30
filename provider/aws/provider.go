@@ -23,6 +23,12 @@ type Provider struct {
 	client    IAMClient
 	stsClient STSClient
 
+	// resolveFailed caches a credential-resolution failure so the second call
+	// reports the original cause rather than re-running a lookup that fails the
+	// same way — and, on a host with no credentials at all, so the AWS SDK's
+	// resolver chain is walked once per process instead of once per call.
+	resolveFailed error
+
 	// tlsConfig is used only when reading an OIDC issuer's certificate chain to
 	// compute its thumbprint. nil means the platform defaults.
 	tlsConfig *tls.Config
@@ -42,8 +48,12 @@ func (p *Provider) iam(ctx context.Context) (IAMClient, error) {
 	if p.client != nil {
 		return p.client, nil
 	}
+	if p.resolveFailed != nil {
+		return nil, p.resolveFailed
+	}
 	c, err := NewIAMClient(ctx)
 	if err != nil {
+		p.resolveFailed = err
 		return nil, err
 	}
 	p.client = c
@@ -279,6 +289,8 @@ func (p *Provider) Setup(ctx context.Context, spec core.MechanismSpec, opts core
 	switch s := spec.(type) {
 	case *core.AWSRoleTrustOIDCSpec:
 		return p.setupRoleTrustOIDC(ctx, s, opts)
+	case *core.K8sServiceAccountFederationSpec:
+		return p.setupK8sFederation(ctx, s, opts)
 	default:
 		return nil, core.ErrValidation(fmt.Sprintf("unsupported spec type: %T", spec)).
 			WithProvider(core.AWS)
@@ -775,27 +787,6 @@ func (p *Provider) GenerateAzureFederatedToken(ctx context.Context, input *Azure
 		WithDetail("prerequisite", "the account must have outbound identity federation enabled: aws iam enable-outbound-web-identity-federation")
 }
 
-// sanitizeSessionName removes invalid characters from role session name.
-// AWS requires session names to match [\w+=,.@-]*
-func sanitizeSessionName(name string) string {
-	var result strings.Builder
-	for _, r := range name {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
-			r == '_' || r == '+' || r == '=' || r == ',' || r == '.' || r == '@' || r == '-' {
-			result.WriteRune(r)
-		}
-	}
-	sanitized := result.String()
-	if sanitized == "" {
-		return "cloud-auth-session"
-	}
-	// AWS limits session name to 64 characters
-	if len(sanitized) > 64 {
-		sanitized = sanitized[:64]
-	}
-	return sanitized
-}
-
 // Helper functions
 
 func (p *Provider) findOIDCProviderByURL(ctx context.Context, url string) (string, error) {
@@ -1095,5 +1086,11 @@ func (v *oidcProviderExistsValidator) Validate(ctx context.Context, ref core.Mec
 
 func init() {
 	// Register with default registry
-	core.Register(New())
+	// Panic rather than discard: Register fails only on a duplicate name, which
+	// is a programming error, and the alternative is a provider that silently
+	// does not exist. Every command that reaches for it would then report
+	// "provider not found" and send the reader looking in the wrong place.
+	if err := core.Register(New()); err != nil {
+		panic("cloud-auth/provider/aws: registering the AWS provider: " + err.Error())
+	}
 }

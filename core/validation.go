@@ -165,7 +165,7 @@ func (v *OIDCIssuerReachableValidator) Validate(ctx context.Context, ref Mechani
 		check.Duration = time.Since(start)
 		return check
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	check.Evidence["status_code"] = resp.StatusCode
 
@@ -801,9 +801,4 @@ func RunValidation(ctx context.Context, ref MechanismRef, validators []Validator
 
 	report.Summary.IsValid = report.IsValid()
 	return report
-}
-
-// standardValidatorsFor returns standard validators for a mechanism type.
-func standardValidatorsFor(t MechanismType) []Validator {
-	return DefaultValidators.GetForType(t)
 }

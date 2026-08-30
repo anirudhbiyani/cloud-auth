@@ -57,17 +57,33 @@ func asHTTPError(err error, target **httpError) bool { return errors.As(err, tar
 var throttleCodes = []string{"Throttling", "ThrottlingException", "SlowDown",
 	"TooManyRequestsException", "RequestLimitExceeded", "rateLimitExceeded"}
 
+// propagationCodes are 4xx answers meaning "the trust is right, it is not
+// replicated yet" — as opposed to "the trust is wrong", which is what every
+// other 4xx here means.
+//
+// AADSTS70021 is Entra's answer while a newly created federated identity
+// credential propagates, which takes a few minutes. A workload that runs
+// immediately after `cloud-auth setup` hits it, and the operator cannot tell it
+// apart from a wrong subject without knowing the number.
+//
+// This is the third and last documented exception to "4xx never retries", and it
+// is deliberately a list of exact codes rather than a rule about a status class.
+// AADSTS700213 — a genuinely wrong subject — is superficially identical in every
+// respect except this number, and it must keep failing on the first attempt.
+var propagationCodes = []string{"AADSTS70021"}
+
 // retryable reports whether an error should be retried.
 //
 // Transport errors and 5xx are retryable. 4xx generally is not — a rejected
 // trust does not become accepted on the third attempt, and retrying it turns a
 // clear misconfiguration into a slow one.
 //
-// The exceptions are throttles. 429 is the obvious one and was previously
-// treated as a permanent failure, so a brief rate limit surfaced as what looked
-// like a trust error. AWS additionally returns 400 with a Throttling code in the
-// body, which no status-code rule can see, so the body is checked for the known
-// codes.
+// The exceptions are throttles and propagation. 429 is the obvious one and was
+// previously treated as a permanent failure, so a brief rate limit surfaced as
+// what looked like a trust error. AWS additionally returns 400 with a Throttling
+// code in the body, which no status-code rule can see, so the body is checked
+// for the known codes. Entra's AADSTS70021 is the third case: the trust is
+// correct and has not replicated yet. See propagationCodes.
 func retryable(err error) bool {
 	var he *httpError
 	if errors.As(err, &he) {
@@ -81,11 +97,40 @@ func retryable(err error) bool {
 					return true
 				}
 			}
+			for _, code := range propagationCodes {
+				if containsErrorCode(body, code) {
+					return true
+				}
+			}
 		}
 		return false
 	}
 	// Nil means success; any non-httpError (transport/timeout) is retryable.
 	return err != nil
+}
+
+// containsErrorCode reports whether body carries code as a whole identifier.
+//
+// A plain substring match is wrong for the AADSTS family, because the codes are
+// prefixes of each other: "AADSTS700213" — a genuinely wrong subject, which must
+// fail immediately — contains "AADSTS70021", the propagation code that must be
+// retried. Matching loosely would retry every wrong-subject exchange four times
+// and then report the propagation message, which is precisely the wrong advice.
+//
+// So a match requires that the next character is not a digit. The throttle codes
+// above are alphabetic and unambiguous, and keep using a plain substring match.
+func containsErrorCode(body, code string) bool {
+	for i := 0; ; {
+		j := strings.Index(body[i:], code)
+		if j < 0 {
+			return false
+		}
+		end := i + j + len(code)
+		if end >= len(body) || body[end] < '0' || body[end] > '9' {
+			return true
+		}
+		i = end
+	}
 }
 
 // retryAfter returns the delay an upstream asked for, if any. Honouring it is
@@ -161,7 +206,7 @@ func doWithRetry(ctx context.Context, client *http.Client, maxRetries int, backo
 			continue // transport error: retryable
 		}
 		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			return body, resp.StatusCode, nil
 		}

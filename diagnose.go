@@ -30,6 +30,21 @@ type preflight struct {
 	skew time.Duration
 }
 
+// normalize replaces a nil target with core.NoTarget so every reader can call
+// Cloud() and Audience() unconditionally.
+//
+// The production caller cannot produce a nil target — targetFlags returns a
+// typed zero — but preflight is a plain struct that tests and future callers
+// build by hand, and core.Target is an interface, so a field left unset is a
+// panic waiting at the first method call rather than an empty report. Absorb it
+// here, once, instead of guarding at each of the eleven p.target uses.
+func (p preflight) normalize() preflight {
+	if p.target == nil {
+		p.target = core.NoTarget{}
+	}
+	return p
+}
+
 // diagnosis is one line of the preflight report: a status symbol and message.
 type diagnosis struct {
 	ok      bool
@@ -49,6 +64,7 @@ func (d diagnosis) String() string {
 // and is passed in via preflight. Each failure mode maps to a distinct,
 // specific message so an operator knows exactly what to fix.
 func diagnose(p preflight) []diagnosis {
+	p = p.normalize()
 	var out []diagnosis
 
 	// Detection outcome.
@@ -210,6 +226,7 @@ func exchangeAdvisory(target core.Target) string {
 
 // writeDiagnoses renders the runtime summary and the diagnosis lines to w.
 func writeDiagnoses(w io.Writer, p preflight, ds []diagnosis) {
+	p = p.normalize()
 	if p.target.Cloud() != "" {
 		fmt.Fprintf(w, "\nPreflight target %s", p.target.Cloud())
 		if p.target.Audience() != "" {

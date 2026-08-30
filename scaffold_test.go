@@ -93,11 +93,11 @@ func TestScaffoldPlaceholdersWhenNoRuntime(t *testing.T) {
 }
 
 // unsupportedTarget stands in for a cloud the scaffolder does not handle. With
-// per-cloud target types there is no way to write down "a Cloudflare target",
+// per-cloud target types there is no way to write down "an Okta target",
 // which is the improvement — so the default branch is exercised with a type
 // defined here instead.
 type unsupportedTarget struct{}
 
-func (unsupportedTarget) Cloud() core.Cloud { return core.Cloudflare }
+func (unsupportedTarget) Cloud() core.Cloud { return core.Okta }
 func (unsupportedTarget) Audience() string  { return "aud" }
 func (unsupportedTarget) Validate() error   { return nil }

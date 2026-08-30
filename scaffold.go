@@ -200,7 +200,7 @@ func cmdInit(ctx context.Context, args []string, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if target == nil {
+	if target.Cloud() == "" {
 		return fmt.Errorf("--to is required")
 	}
 

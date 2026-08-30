@@ -84,9 +84,9 @@ func TestAzureManagedIdentityTokenPassesClientID(t *testing.T) {
 		"AZURE_CLIENT_ID":    "the-uami-client-id",
 	})))
 
-	tok, err := a.mintManagedIdentityToken(context.Background(), "api://target")
+	tok, err := a.mintFromIdentityEndpoint(context.Background(), "api://target")
 	if err != nil {
-		t.Fatalf("mintManagedIdentityToken: %v", err)
+		t.Fatalf("mintFromIdentityEndpoint: %v", err)
 	}
 	if tok.Kind != core.OIDC || tok.Value == "" {
 		t.Errorf("token = %+v", tok)
@@ -125,7 +125,7 @@ func TestAzureRefusesRemoteIdentityEndpoint(t *testing.T) {
 		"IDENTITY_ENDPOINT":  "http://attacker.example.com/token",
 		"IDENTITY_HEADER":    "the-secret",
 	})))
-	if _, err := a.mintManagedIdentityToken(context.Background(), "api://target"); err == nil {
+	if _, err := a.mintFromIdentityEndpoint(context.Background(), "api://target"); err == nil {
 		t.Fatal("want a refusal for a non-local IDENTITY_ENDPOINT")
 	} else if !strings.Contains(err.Error(), "non-local host") {
 		t.Errorf("unexpected error: %v", err)

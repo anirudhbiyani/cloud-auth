@@ -56,7 +56,7 @@ func subjectsFromAttributeCondition(cond string) []string {
 
 // TrustPolicy reads the live workload identity pool provider and normalizes it.
 func (p *Provider) TrustPolicy(ctx context.Context, ref core.MechanismRef) (*core.TrustPolicy, error) {
-	if err := p.requireClients(true, false); err != nil {
+	if err := p.requireClients(ctx, true, false); err != nil {
 		return nil, err
 	}
 	providerName := ref.ResourceIDs["provider_name"]
@@ -116,7 +116,7 @@ func (p *Provider) TrustPolicy(ctx context.Context, ref core.MechanismRef) (*cor
 // that was removed or never granted, but not a custom role whose contents were
 // narrowed.
 func (p *Provider) GrantedPolicies(ctx context.Context, ref core.MechanismRef) ([]string, error) {
-	if err := p.requireClients(false, true); err != nil {
+	if err := p.requireClients(ctx, false, true); err != nil {
 		return nil, err
 	}
 	sa := ref.ResourceIDs["service_account_email"]

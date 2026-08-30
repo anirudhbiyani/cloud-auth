@@ -107,8 +107,18 @@ func (s *Scrubber) Scrub(in string) string {
 	if in == "" {
 		return in
 	}
+	// Copy the CONTENTS, not the slice header. The header alone still points at
+	// the backing array that AddSecret sorts in place, so releasing the lock and
+	// then ranging over it raced with a concurrent registration — and the race
+	// was not benign here: re-ordering the array mid-iteration can move a
+	// literal past the cursor, so a secret that was registered is never
+	// substituted and reaches the output intact.
+	//
+	// The copy is a handful of strings; the alternative is holding the lock
+	// across every ReplaceAll, which serializes redaction on the slowest caller.
 	s.mu.RLock()
-	literals := s.literals
+	literals := make([]string, len(s.literals))
+	copy(literals, s.literals)
 	s.mu.RUnlock()
 
 	out := in

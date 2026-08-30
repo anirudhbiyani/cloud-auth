@@ -22,6 +22,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 )
@@ -34,9 +35,26 @@ const (
 	exitValidationError = 2
 )
 
+// errValidationFailed marks a validation outcome, as opposed to an operational
+// failure. It travels up through run() so main can map it to its own exit code
+// without any command reaching for os.Exit.
+//
+// Calling os.Exit inside a command function skipped every deferred cleanup on
+// the way out, and made cmdValidate impossible to test — invoking it from a test
+// killed the test binary rather than returning.
+type validationFailure struct{ error }
+
+// errValidationFailed wraps err as a validation failure.
+func errValidationFailed(err error) error { return validationFailure{err} }
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+
+		var vf validationFailure
+		if errors.As(err, &vf) {
+			os.Exit(exitValidationError)
+		}
 		os.Exit(exitError)
 	}
 }

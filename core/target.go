@@ -28,6 +28,33 @@ type Target interface {
 	Validate() error
 }
 
+// NoTarget is the absence of a target binding, expressed as a value.
+//
+// Target is an interface, so an untyped nil has no method table and any method
+// call on it panics. Returning nil for "the caller passed no --to" therefore put
+// the burden on every consumer to nil-check before dispatch, in the right order,
+// forever — and `cloud-auth doctor` with no arguments, the tool's most common
+// invocation, shipped a segfault because one consumer checked after the call
+// rather than before.
+//
+// A typed zero removes the class rather than patching the call sites. Cloud()
+// returns the empty string, which is already the idiom the runtime commands use
+// to mean "no target was named", and Validate() refuses rather than pretending
+// an empty binding is usable.
+type NoTarget struct{}
+
+// Cloud reports the empty cloud: no target was named.
+func (NoTarget) Cloud() Cloud { return "" }
+
+// Audience is empty. A caller must not pin a proof to a target that is absent.
+func (NoTarget) Audience() string { return "" }
+
+// Validate always fails. Reaching it means a binding that was never named got
+// as far as a network call.
+func (NoTarget) Validate() error {
+	return fmt.Errorf("no target: pass --to, or --config with --target")
+}
+
 // Default audiences. Each is the only value its cloud accepts, or the
 // conventional one, so requiring the caller to restate it adds nothing.
 const (

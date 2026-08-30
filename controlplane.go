@@ -17,11 +17,11 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/anirudhbiyani/cloud-auth/core"
+	"github.com/anirudhbiyani/cloud-auth/internal/audit"
 
 	// Import providers to register them
 	_ "github.com/anirudhbiyani/cloud-auth/provider/aws"
 	_ "github.com/anirudhbiyani/cloud-auth/provider/azure"
-	_ "github.com/anirudhbiyani/cloud-auth/provider/cloudflare"
 	_ "github.com/anirudhbiyani/cloud-auth/provider/gcp"
 	"github.com/anirudhbiyani/cloud-auth/provider/vault"
 )
@@ -943,19 +943,34 @@ func cmdSetup(ctx context.Context, args []string) error {
 		Force:  opts.force,
 	}
 
-	if opts.verbose {
-		fmt.Printf("Setting up mechanism: %s\n", spec.Type())
-		fmt.Printf("Source: %s -> Target: %s\n", spec.SourceProvider(), spec.TargetProvider())
-		if opts.dryRun {
-			fmt.Println("Dry-run mode: no changes will be made")
-		}
-	}
+	log := newLogger(opts.verbose)
+	log.Info("setting up mechanism",
+		"type", spec.Type(),
+		"source", spec.SourceProvider(),
+		"target", spec.TargetProvider(),
+		"dry_run", opts.dryRun)
+
+	// Setup creates or updates a trust relationship, so it is audited whatever
+	// the outcome. A dry run is recorded too: it reads live state to build the
+	// plan, and "who looked" is worth as much as "who changed" when
+	// reconstructing what happened.
+	aud := newAuditor(audit.OpSetup).with(func(e *audit.Event) {
+		e.MechanismType = string(spec.Type())
+		e.TargetCloud = string(spec.TargetProvider())
+		e.Provider = string(spec.TargetProvider())
+		e.DryRun = opts.dryRun
+	})
 
 	// Execute setup
 	outputs, err := manager.Setup(ctx, spec, setupOpts)
 	if err != nil {
-		return fmt.Errorf("setup failed: %w", err)
+		return aud.finish(fmt.Errorf("setup failed: %w", err))
 	}
+	aud.with(func(e *audit.Event) {
+		e.MechanismID = outputs.Ref.ID
+		e.Provider = string(outputs.Ref.Provider)
+	})
+	_ = aud.finish(nil)
 
 	// Print results
 	if opts.dryRun {
@@ -1000,6 +1015,7 @@ type validateOpts struct {
 	includeTokenTest bool
 	timeout          time.Duration
 	statePath        string
+	verbose          bool
 }
 
 func parseValidateOpts(args []string) (*validateOpts, error) {
@@ -1034,6 +1050,8 @@ func parseValidateOpts(args []string) (*validateOpts, error) {
 			}
 			opts.statePath = args[i+1]
 			i++
+		case "-v", "--verbose":
+			opts.verbose = true
 		default:
 			return nil, fmt.Errorf("unknown option: %s", args[i])
 		}
@@ -1075,7 +1093,7 @@ func cmdValidate(ctx context.Context, args []string) error {
 		Timeout:          opts.timeout,
 	}
 
-	fmt.Printf("Validating mechanism: %s\n", ref.ID)
+	newLogger(opts.verbose).Info("validating mechanism", "id", ref.ID)
 
 	// Execute validation
 	report, err := manager.Validate(ctx, *ref, validateOpts)
@@ -1098,7 +1116,7 @@ func cmdValidate(ctx context.Context, args []string) error {
 		fmt.Printf("\n⚠ NO CHECKS RAN — this mechanism was NOT verified. \"Valid: true\"\n" +
 			"  above only means nothing failed, and nothing was tested. Treat this as\n" +
 			"  unverified and report it: the provider registered no validators.\n")
-		os.Exit(exitValidationError)
+		return errValidationFailed(fmt.Errorf("mechanism %s was not verified: no checks ran", ref.ID))
 	}
 
 	// "Valid" only means nothing failed. If a security-relevant check never ran,
@@ -1133,7 +1151,8 @@ func cmdValidate(ctx context.Context, args []string) error {
 	}
 
 	if !report.IsValid() {
-		os.Exit(exitValidationError)
+		return errValidationFailed(fmt.Errorf("mechanism %s failed validation: %d of %d checks failed",
+			ref.ID, report.Summary.FailedChecks, report.Summary.TotalChecks))
 	}
 
 	return nil
@@ -1145,6 +1164,7 @@ type deleteOpts struct {
 	force     bool
 	yes       bool
 	statePath string
+	verbose   bool
 }
 
 func parseDeleteOpts(args []string) (*deleteOpts, error) {
@@ -1172,6 +1192,8 @@ func parseDeleteOpts(args []string) (*deleteOpts, error) {
 			}
 			opts.statePath = args[i+1]
 			i++
+		case "-v", "--verbose":
+			opts.verbose = true
 		default:
 			return nil, fmt.Errorf("unknown option: %s", args[i])
 		}
@@ -1204,10 +1226,12 @@ func cmdDelete(ctx context.Context, args []string) error {
 
 	// Confirmation
 	if !opts.yes && !opts.dryRun {
-		fmt.Printf("About to delete mechanism: %s\n", ref.ID)
-		fmt.Printf("Type: %s, Provider: %s\n", ref.Type, ref.Provider)
-		fmt.Printf("Resources: %v\n", ref.ResourceIDs)
-		fmt.Print("\nAre you sure? [y/N]: ")
+		fmt.Fprintf(os.Stderr, "About to delete mechanism: %s\n", ref.ID)
+		fmt.Fprintf(os.Stderr, "Type: %s, Provider: %s\n", ref.Type, ref.Provider)
+		fmt.Fprintf(os.Stderr, "Resources: %v\n", ref.ResourceIDs)
+		// The prompt goes to stderr, or `delete > log.txt` hides the question
+		// while the process sits waiting for an answer nobody can see.
+		fmt.Fprint(os.Stderr, "\nAre you sure? [y/N]: ")
 
 		var response string
 		fmt.Scanln(&response)
@@ -1229,14 +1253,25 @@ func cmdDelete(ctx context.Context, args []string) error {
 		OwnedOnly: !opts.force,
 	}
 
-	if opts.dryRun {
-		fmt.Println("Dry-run mode: no changes will be made")
-	}
+	log := newLogger(opts.verbose)
+	log.Info("deleting mechanism",
+		"id", ref.ID, "type", ref.Type, "provider", ref.Provider, "dry_run", opts.dryRun)
+
+	// Delete destroys a trust relationship. If any operation in this tool
+	// deserves a record, it is this one.
+	aud := newAuditor(audit.OpDelete).with(func(e *audit.Event) {
+		e.MechanismID = ref.ID
+		e.MechanismType = string(ref.Type)
+		e.Provider = string(ref.Provider)
+		e.TargetCloud = string(ref.Provider)
+		e.DryRun = opts.dryRun
+	})
 
 	// Execute deletion
 	if err := manager.Delete(ctx, *ref, deleteOpts); err != nil {
-		return fmt.Errorf("delete failed: %w", err)
+		return aud.finish(fmt.Errorf("delete failed: %w", err))
 	}
+	_ = aud.finish(nil)
 
 	if opts.dryRun {
 		fmt.Println("Would delete mechanism and associated resources")
@@ -1321,18 +1356,27 @@ func cmdList(ctx context.Context, args []string) error {
 		return fmt.Errorf("failed to list mechanisms: %w", err)
 	}
 
-	if len(refs) == 0 {
-		fmt.Println("No mechanisms found")
-		return nil
-	}
-
+	// The empty case is handled INSIDE the switch, not before it. Returning early
+	// meant `list --output json` printed the prose "No mechanisms found" whenever
+	// there was nothing to list, so the one case a script is most likely to hit
+	// was the one case that did not emit JSON.
 	switch opts.output {
 	case "json":
-		data, _ := json.MarshalIndent(refs, "", "  ")
+		if refs == nil {
+			refs = []core.MechanismRef{} // marshals as [], not null
+		}
+		data, err := json.MarshalIndent(refs, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to encode mechanisms as JSON: %w", err)
+		}
 		fmt.Println(string(data))
 	case "table":
+		if len(refs) == 0 {
+			fmt.Println("No mechanisms found")
+			return nil
+		}
 		fmt.Printf("%-40s %-30s %-12s %-6s %s\n", "ID", "TYPE", "PROVIDER", "OWNED", "CREATED")
-		fmt.Println(string(make([]byte, 100)))
+		fmt.Println(strings.Repeat("-", 100))
 		for _, ref := range refs {
 			owned := "no"
 			if ref.Owned {
@@ -1426,10 +1470,24 @@ func cmdProviders(_ context.Context, _ []string) error {
 	return nil
 }
 
+// Build metadata, set by goreleaser's ldflags at release time.
+//
+// The defaults are what a `go build` or `go install` from source produces, and
+// they say so rather than naming a version number nobody set. The previous
+// value was a hardcoded "0.2.0" printed by every binary ever built, which meant
+// a bug report's version line was worth nothing.
+var (
+	version   = "dev"
+	commit    = "none"
+	buildDate = "unknown"
+)
+
 func cmdVersion() error {
-	fmt.Println("cloud-auth version 0.2.0")
+	fmt.Printf("cloud-auth version %s\n", version)
+	fmt.Printf("  Commit: %s\n", commit)
+	fmt.Printf("  Built:  %s\n", buildDate)
 	fmt.Println("  Core: lifecycle management support")
-	fmt.Println("  Providers: aws, gcp, azure, cloudflare, vault")
+	fmt.Println("  Providers: aws, gcp, azure, vault")
 	return nil
 }
 

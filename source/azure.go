@@ -102,7 +102,7 @@ func (a *Azure) imdsGet(ctx context.Context, path, rawQuery string) ([]byte, err
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("azure imds %s: status %d", path, resp.StatusCode)
@@ -169,6 +169,14 @@ func (a *Azure) Detect(ctx context.Context) (*core.Runtime, error) {
 	if _, err := a.imdsGet(ctx, "/metadata/instance", "api-version=2021-02-01"); err != nil {
 		return nil, fmt.Errorf("%w: %v", core.ErrNotThisRuntime, err)
 	}
+	// A scale-set instance reports "vm" too. The collapse is deliberate: the
+	// sub-runtime exists to tell an operator which identity path applies, and
+	// VMSS and a standalone VM share one — IMDS, managed identity, not
+	// federatable. Distinguishing them would add a name to knownSubRuntimes that
+	// source.detect could pin, without changing a single outcome, and every
+	// message here would still have to say the same thing.
+	//
+	// Revisit if VMSS ever gains an identity path a VM does not have.
 	return &core.Runtime{
 		Cloud:       core.Azure,
 		SubRuntime:  "vm",
@@ -198,19 +206,6 @@ func (a *Azure) Mint(ctx context.Context, audience string) (*core.SourceToken, e
 	return nil, fmt.Errorf("%w: an Azure VM's IMDS vends Entra access tokens, not audience-pinned "+
 		"assertions; run the workload on AKS with Workload Identity enabled, or bridge this "+
 		"identity through an OIDC issuer", core.ErrNonFederatableSource)
-}
-
-// mintManagedIdentityToken obtains an Entra access token for resource.
-//
-// This is NOT a federation source — see Mint, which refuses those paths. It
-// exists for same-cloud use and for `cloud-auth doctor`, which reports what the
-// runtime can and cannot do. Both callers are local to this process, so the
-// token never crosses a trust boundary.
-func (a *Azure) mintManagedIdentityToken(ctx context.Context, resource string) (*core.SourceToken, error) {
-	if a.managedIdentitySubRuntime() != "" {
-		return a.mintFromIdentityEndpoint(ctx, resource)
-	}
-	return a.mintFromIMDS(ctx, resource)
 }
 
 func (a *Azure) mintFromFile(ctx context.Context, audience string) (*core.SourceToken, error) {
@@ -284,7 +279,7 @@ func (a *Azure) mintFromIdentityEndpoint(ctx context.Context, audience string) (
 	if err != nil {
 		return nil, fmt.Errorf("azure: minting managed-identity token: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("azure: managed-identity endpoint status %d: %s", resp.StatusCode, string(body))
