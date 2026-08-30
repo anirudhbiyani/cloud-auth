@@ -245,6 +245,3 @@ func urlQueryEscape(v string) string { return url.QueryEscape(v) }
 
 // sortStrings sorts in place. Kept local so the helpers file needs no import.
 func sortStrings(in []string) { slices.Sort(in) }
-
-// asAPIError unwraps err into an *apiError if present.
-func asAPIError(err error, target **apiError) bool { return errors.As(err, target) }

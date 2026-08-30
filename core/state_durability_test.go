@@ -109,7 +109,22 @@ func TestStateFileIsNotWorldReadable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
+	perm := info.Mode().Perm()
+	if !posixFileModes {
+		// Windows has no POSIX permission bits: os.Chmod toggles a read-only
+		// flag and Perm() reports 0666 whatever was requested. The state file is
+		// genuinely NOT protected by mode there — it relies on the ACL of the
+		// directory it sits in — so this asserts the platform's actual behaviour
+		// rather than pretending the guarantee holds.
+		if perm == 0o600 {
+			t.Errorf("mode = 0600 on a platform without POSIX modes; " +
+				"posixFileModes is wrong for this build")
+		}
+		t.Logf("state file mode = %04o; POSIX modes are unavailable here, so the "+
+			"file's protection comes from the containing directory's ACL", perm)
+		return
+	}
+	if perm != 0o600 {
 		t.Errorf("state file mode = %04o, want 0600", perm)
 	}
 }

@@ -787,27 +787,6 @@ func (p *Provider) GenerateAzureFederatedToken(ctx context.Context, input *Azure
 		WithDetail("prerequisite", "the account must have outbound identity federation enabled: aws iam enable-outbound-web-identity-federation")
 }
 
-// sanitizeSessionName removes invalid characters from role session name.
-// AWS requires session names to match [\w+=,.@-]*
-func sanitizeSessionName(name string) string {
-	var result strings.Builder
-	for _, r := range name {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
-			r == '_' || r == '+' || r == '=' || r == ',' || r == '.' || r == '@' || r == '-' {
-			result.WriteRune(r)
-		}
-	}
-	sanitized := result.String()
-	if sanitized == "" {
-		return "cloud-auth-session"
-	}
-	// AWS limits session name to 64 characters
-	if len(sanitized) > 64 {
-		sanitized = sanitized[:64]
-	}
-	return sanitized
-}
-
 // Helper functions
 
 func (p *Provider) findOIDCProviderByURL(ctx context.Context, url string) (string, error) {

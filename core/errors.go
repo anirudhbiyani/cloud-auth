@@ -230,15 +230,6 @@ func IsRetryable(err error) bool {
 	return false
 }
 
-// errorProvider extracts the provider from an error.
-func errorProvider(err error) Cloud {
-	var caErr *CloudAuthError
-	if errors.As(err, &caErr) {
-		return caErr.Provider
-	}
-	return ""
-}
-
 // RollbackError represents an error during rollback with partial cleanup info.
 type RollbackError struct {
 	// OriginalError is the error that triggered rollback.

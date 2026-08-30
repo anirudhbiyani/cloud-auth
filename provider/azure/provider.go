@@ -30,10 +30,14 @@ type Provider struct {
 // import time, long before anyone has asked to talk to Azure. Building eagerly
 // would make every import of this package depend on resolvable credentials.
 // Injected clients always win.
-func (p *Provider) resolve(ctx context.Context) error {
+func (p *Provider) resolve(ctx context.Context, needGraph, needARM bool) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.graphClient != nil && p.armClient != nil && p.tokenClient != nil {
+
+	// Resolve only what THIS call needs. Requiring all three before skipping
+	// meant a caller who injected the two it uses still reached for ambient
+	// credentials to fill the third, making the outcome depend on the host.
+	if (!needGraph || p.graphClient != nil) && (!needARM || p.armClient != nil) {
 		return nil
 	}
 	if p.resolveFailed != nil {
@@ -303,7 +307,7 @@ func (p *Provider) HasCapability(cap core.Capability) bool {
 // path that fetched an existing application by ID, and the federated-credential
 // call after it, dereferenced the nil field and panicked.
 func (p *Provider) requireClients(ctx context.Context, needGraph, needARM bool) error {
-	if err := p.resolve(ctx); err != nil {
+	if err := p.resolve(ctx, needGraph, needARM); err != nil {
 		return core.ErrValidation("could not reach Azure: no usable credentials").
 			WithCause(err).
 			WithProvider(core.Azure).

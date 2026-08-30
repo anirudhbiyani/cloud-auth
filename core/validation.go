@@ -802,8 +802,3 @@ func RunValidation(ctx context.Context, ref MechanismRef, validators []Validator
 	report.Summary.IsValid = report.IsValid()
 	return report
 }
-
-// standardValidatorsFor returns standard validators for a mechanism type.
-func standardValidatorsFor(t MechanismType) []Validator {
-	return DefaultValidators.GetForType(t)
-}

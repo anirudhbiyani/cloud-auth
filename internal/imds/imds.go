@@ -105,7 +105,7 @@ func (c *Client) mintToken(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("imds: minting session token: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("imds: token endpoint returned %d (IMDSv2 required, not falling back to v1)", resp.StatusCode)
@@ -133,7 +133,7 @@ func (c *Client) Get(ctx context.Context, path string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("imds: GET %s: %w", path, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("imds: reading %s: %w", path, err)

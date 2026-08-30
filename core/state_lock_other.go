@@ -26,3 +26,7 @@ func syncDirectory(string) error { return nil }
 // False here, and tests that assert multi-process durability check it so they
 // skip loudly rather than fail — or, worse, pass for the wrong reason.
 const lockingIsReal = false
+
+// posixFileModes reports whether this platform honours POSIX permission bits.
+// False: see the unix build's comment.
+const posixFileModes = false

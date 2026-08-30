@@ -25,3 +25,10 @@ func syncDirectory(dir string) error {
 // where the lock is a no-op they skip loudly instead of failing or, worse,
 // passing for the wrong reason.
 const lockingIsReal = true
+
+// posixFileModes reports whether this platform honours POSIX permission bits.
+//
+// True here. On Windows os.Chmod toggles a read-only flag and Perm() reports
+// 0666 whatever was requested, so a 0600 assertion cannot hold and the file's
+// protection comes from the containing directory's ACL instead.
+const posixFileModes = true

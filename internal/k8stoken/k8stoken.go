@@ -98,7 +98,7 @@ func (c *Client) Mint(ctx context.Context, audience string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("k8stoken: calling TokenRequest API: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode/100 != 2 {
 		return "", fmt.Errorf("k8stoken: TokenRequest returned status %d: %s", resp.StatusCode, string(body))

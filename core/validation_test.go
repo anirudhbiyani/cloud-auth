@@ -13,9 +13,9 @@ import (
 // inverted the gate: critical failures were ignored while info-level failures
 // invalidated the report. Rank gives it a real ordering.
 func TestSeverityRankOrdering(t *testing.T) {
-	if !(SeverityInfo.Rank() < SeverityWarning.Rank() &&
-		SeverityWarning.Rank() < SeverityError.Rank() &&
-		SeverityError.Rank() < SeverityCritical.Rank()) {
+	if SeverityInfo.Rank() >= SeverityWarning.Rank() ||
+		SeverityWarning.Rank() >= SeverityError.Rank() ||
+		SeverityError.Rank() >= SeverityCritical.Rank() {
 		t.Fatalf("severity ranks are not strictly increasing: info=%d warning=%d error=%d critical=%d",
 			SeverityInfo.Rank(), SeverityWarning.Rank(), SeverityError.Rank(), SeverityCritical.Rank())
 	}
