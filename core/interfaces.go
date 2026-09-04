@@ -111,9 +111,3 @@ type LifecycleProvider interface {
 	// Delete removes mechanism resources.
 	Delete(ctx context.Context, ref MechanismRef, opts DeleteOptions) error
 }
-
-// ProviderFactory creates provider instances.
-type ProviderFactory interface {
-	// Create creates a new provider instance with the given configuration.
-	Create(ctx context.Context, config map[string]interface{}) (Provider, error)
-}

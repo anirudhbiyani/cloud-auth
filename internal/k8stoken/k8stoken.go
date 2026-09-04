@@ -46,7 +46,6 @@ type Option func(*Client)
 func WithBaseURL(u string) Option          { return func(c *Client) { c.baseURL = u } }
 func WithHTTPClient(h *http.Client) Option { return func(c *Client) { c.httpClient = h } }
 func WithBearerToken(t string) Option      { return func(c *Client) { c.bearerToken = t } }
-func WithExpirationSeconds(s int) Option   { return func(c *Client) { c.expirySecs = s } }
 func WithServiceAccount(ns, sa string) Option {
 	return func(c *Client) { c.namespace, c.serviceAcct = ns, sa }
 }

@@ -77,14 +77,10 @@ type AWS struct {
 // AWSOption configures an AWS provider.
 type AWSOption func(*AWS)
 
-func WithAWSEnv(f func(string) string) AWSOption { return func(a *AWS) { a.getenv = f } }
-func WithAWSFileReader(f func(string) ([]byte, error)) AWSOption {
-	return func(a *AWS) { a.readFile = f }
-}
+func WithAWSEnv(f func(string) string) AWSOption             { return func(a *AWS) { a.getenv = f } }
 func WithAWSIMDS(c *imds.Client) AWSOption                   { return func(a *AWS) { a.imds = c } }
 func WithAWSRegion(r string) AWSOption                       { return func(a *AWS) { a.region = r } }
 func WithAWSCredentials(p aws.CredentialsProvider) AWSOption { return func(a *AWS) { a.creds = p } }
-func WithAWSSTSEndpoint(e string) AWSOption                  { return func(a *AWS) { a.stsEndpoint = e } }
 
 // WithAWSK8sTokenClient injects a Kubernetes TokenRequest client used by the
 // EKS-IRSA mint path to dynamically re-mint a projected token for a requested

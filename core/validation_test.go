@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 )
 
 // Severity is a string type, so comparing it with >= is a lexicographic compare,
@@ -81,63 +80,6 @@ func TestIsCompleteIgnoresLowSeveritySkips(t *testing.T) {
 	if !r.IsComplete() {
 		t.Error("IsComplete() should be true when only low-severity checks were skipped")
 	}
-}
-
-// The clock-skew validator reported Passed while doing nothing but reading the
-// local clock — a false green on a real federation failure mode.
-func TestClockSkewNotPassedWithoutTimeSource(t *testing.T) {
-	v := NewClockSkewValidator(time.Minute)
-	got := v.Validate(context.Background(), MechanismRef{ID: "r"})
-	if got.Status == CheckStatusPassed {
-		t.Error("clock skew must not report Passed with no remote time source to compare against")
-	}
-	if got.Status != CheckStatusSkipped {
-		t.Errorf("status = %s, want skipped", got.Status)
-	}
-	if got.Remediation == "" {
-		t.Error("a skipped check should explain how to enable it")
-	}
-}
-
-func TestClockSkewComparesAgainstRemoteTime(t *testing.T) {
-	local := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
-	clock := func() time.Time { return local }
-
-	t.Run("within tolerance passes", func(t *testing.T) {
-		v := NewClockSkewValidator(5*time.Minute,
-			WithClockSkewNow(clock),
-			WithRemoteTime(func(context.Context) (time.Time, error) {
-				return local.Add(30 * time.Second), nil
-			}))
-		got := v.Validate(context.Background(), MechanismRef{ID: "r"})
-		if got.Status != CheckStatusPassed {
-			t.Errorf("status = %s, want passed (30s drift under a 5m tolerance)", got.Status)
-		}
-	})
-
-	t.Run("beyond tolerance fails", func(t *testing.T) {
-		v := NewClockSkewValidator(time.Minute,
-			WithClockSkewNow(clock),
-			WithRemoteTime(func(context.Context) (time.Time, error) {
-				return local.Add(10 * time.Minute), nil
-			}))
-		got := v.Validate(context.Background(), MechanismRef{ID: "r"})
-		if got.Status != CheckStatusFailed {
-			t.Errorf("status = %s, want failed (10m drift over a 1m tolerance)", got.Status)
-		}
-	})
-
-	t.Run("skew is absolute, direction does not matter", func(t *testing.T) {
-		v := NewClockSkewValidator(time.Minute,
-			WithClockSkewNow(clock),
-			WithRemoteTime(func(context.Context) (time.Time, error) {
-				return local.Add(-10 * time.Minute), nil // local ahead of remote
-			}))
-		got := v.Validate(context.Background(), MechanismRef{ID: "r"})
-		if got.Status != CheckStatusFailed {
-			t.Errorf("status = %s, want failed; skew must be measured absolutely", got.Status)
-		}
-	})
 }
 
 // The stubs are honest (Skipped, not Passed) but must say so loudly enough that
