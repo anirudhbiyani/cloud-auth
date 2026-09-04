@@ -144,16 +144,16 @@ environment all along.
 **Legend:** ✅ works · ❌ the target STS will not accept this proof · 🚫 **refused
 by design** — cloud-auth returns `ErrNonFederatableSource` rather than attempt it.
 
-| Source runtime | Proof it mints | → AWS | → GCP | → Azure |
-|---|---|:---:|:---:|:---:|
-| **GitHub Actions** — `actions` | OIDC (runner token endpoint) | ✅ | ✅ | ✅ |
-| **AWS** — `eks-irsa` | OIDC (projected SA token) | ✅ | ✅ | ✅ |
-| **AWS** — `ec2`, `ecs`, `lambda` | OIDC via `sts:GetWebIdentityToken` | ✅ | ✅ | ✅ |
-| **AWS** — `ec2`, `ecs`, `lambda` | SigV4 `GetCallerIdentity` | ✅ | ✅ | ❌ |
-| **AWS** — `eks-pod-identity` | *none* | 🚫 | 🚫 | 🚫 |
-| **GCP** — `gce`, `gke`, `cloud-run`, `cloud-functions` | OIDC (metadata identity token) | ✅ | ✅ | ✅ |
-| **Azure** — `aks-workload-identity` | OIDC (projected SA token) | ✅ | ✅ | ✅ |
-| **Azure** — `vm`, `app-service`, `container-apps` | *none* | 🚫 | 🚫 | 🚫 |
+| Source runtime | Proof it mints | → AWS | → GCP | → Azure | → Anthropic |
+|---|---|:---:|:---:|:---:|:---:|
+| **GitHub Actions** — `actions` | OIDC (runner token endpoint) | ✅ | ✅ | ✅ | ✅ |
+| **AWS** — `eks-irsa` | OIDC (projected SA token) | ✅ | ✅ | ✅ | ✅ |
+| **AWS** — `ec2`, `ecs`, `lambda` | OIDC via `sts:GetWebIdentityToken` | ✅ | ✅ | ✅ | ✅ |
+| **AWS** — `ec2`, `ecs`, `lambda` | SigV4 `GetCallerIdentity` | ✅ | ✅ | ❌ | ❌ |
+| **AWS** — `eks-pod-identity` | *none* | 🚫 | 🚫 | 🚫 | 🚫 |
+| **GCP** — `gce`, `gke`, `cloud-run`, `cloud-functions` | OIDC (metadata identity token) | ✅ | ✅ | ✅ | ✅ |
+| **Azure** — `aks-workload-identity` | OIDC (projected SA token) | ✅ | ✅ | ✅ | ✅ |
+| **Azure** — `vm`, `app-service`, `container-apps` | *none* | 🚫 | 🚫 | 🚫 | 🚫 |
 
 **Why two runtimes are refused rather than attempted.**
 
@@ -295,6 +295,42 @@ exchanges it at the target cloud's STS:
 | `init` | Print the target-side trust scaffold (Terraform/OpenTofu + CLI). Print-only; never applies changes |
 | `credential-process` | Emit the AWS `credential_process` JSON contract for zero-code SDK integration |
 | `config-validate` | Lint a declarative federation config file |
+
+### Anthropic Claude Platform
+
+The Claude Platform's [Workload Identity Federation](https://platform.claude.com/docs/en/manage-claude/workload-identity-federation)
+exchanges an OIDC proof for a short-lived `sk-ant-oat01-...` token bound to a
+service account, replacing a static `sk-ant-...` API key — so it is a federation
+target in exactly the sense the three clouds are.
+
+```bash
+cloud-auth exec --to anthropic   --federation-rule fdrl_...   --organization 00000000-0000-0000-0000-000000000000   --service-account-id svac_...   --workspace wrkspc_...   --audience https://api.anthropic.com   -- your-program
+```
+
+Two things differ from the clouds, and both change how it behaves:
+
+**The trust conditions live on a rule, not on the resource.** AWS and Azure carry
+the issuer, subject and audience on the target-side resource, and the request
+names only what to assume. Anthropic evaluates a *federation rule* identified by
+id, and rules are **looked up by id and never searched** — a proof that would
+satisfy a different rule is refused rather than quietly matched against it. The
+refusal message says so, because the obvious assumption otherwise is that some
+other rule would have matched.
+
+**Identity tokens are single-use.** A JWT carrying a `jti` may be exchanged
+once; re-presenting it fails as `jti_reused`. cloud-auth mints a fresh proof on
+every exchange, so this is satisfied by construction — and a broker test pins
+that, because an optimisation which cached the source proof would break Anthropic
+while leaving AWS, GCP and Azure working, which is not a regression anyone would
+attribute to a cache.
+
+> `--audience` has **no default here**, unlike the clouds. A federation rule may
+> match on an exact audience, and which value that is belongs to whoever wrote
+> the rule — guessing would pin the proof to the wrong party, which is a
+> disclosure whether or not the exchange then succeeds.
+>
+> Also worth knowing: `ANTHROPIC_API_KEY` sits *above* federation in the SDKs'
+> credential precedence, so a leftover key silently shadows it.
 
 ### `doctor --explain`: which claim actually diverged
 

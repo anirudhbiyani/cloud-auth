@@ -26,7 +26,7 @@ import (
 // It returns an error rather than swallowing one: --to used to discard the parse
 // failure, so a typo became the empty cloud and surfaced as "--to is required".
 func targetFlags(fs *flag.FlagSet) func() (core.Target, error) {
-	to := fs.String("to", "", "target cloud: aws|gcp|azure")
+	to := fs.String("to", "", "target: aws|gcp|azure|anthropic")
 	role := fs.String("role", "", "AWS role ARN")
 	sessionName := fs.String("session-name", "", "AWS sts:RoleSessionName (default: the proof's subject)")
 	pool := fs.String("pool", "", "GCP workload identity pool provider resource name")
@@ -35,6 +35,12 @@ func targetFlags(fs *flag.FlagSet) func() (core.Target, error) {
 	clientID := fs.String("client-id", "", "Azure app/UAMI client id")
 	scope := fs.String("scope", "", "Azure resource scope (required for azure)")
 	audience := fs.String("audience", "", "token audience (defaults per cloud)")
+	// Anthropic: the federation rule holds the match conditions, so the request
+	// names the rule and the identity rather than what the token must contain.
+	federationRule := fs.String("federation-rule", "", "Anthropic federation rule id (fdrl_...)")
+	organizationID := fs.String("organization", "", "Anthropic organization id")
+	serviceAccount := fs.String("service-account-id", "", "Anthropic service account id (svac_...)")
+	workspaceID := fs.String("workspace", "", "Anthropic workspace id (wrkspc_...)")
 
 	return func() (core.Target, error) {
 		if strings.TrimSpace(*to) == "" {
@@ -45,6 +51,15 @@ func targetFlags(fs *flag.FlagSet) func() (core.Target, error) {
 		cloud, err := core.ParseCloud(*to)
 		if err != nil {
 			return nil, err
+		}
+		if cloud == core.Anthropic {
+			return core.AnthropicTarget{
+				FederationRuleID: *federationRule,
+				OrganizationID:   *organizationID,
+				ServiceAccountID: *serviceAccount,
+				WorkspaceID:      *workspaceID,
+				TokenAudience:    *audience,
+			}, nil
 		}
 		switch cloud {
 		case core.AWS:
@@ -126,6 +141,10 @@ func auditRole(t core.Target) string {
 		return v.WorkloadIdentityPool
 	case core.AzureTarget:
 		return v.ClientID
+	case core.AnthropicTarget:
+		// The service account is the identity the minted token acts as, which
+		// is what an audit record needs — the rule id says how it was reached.
+		return v.ServiceAccountID
 	default:
 		return ""
 	}

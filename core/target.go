@@ -225,3 +225,77 @@ func (t AzureTarget) Validate() error {
 	}
 	return nil
 }
+
+// AnthropicTarget requests a short-lived Claude Platform access token.
+//
+// The Claude Platform's Workload Identity Federation exchanges an OIDC proof
+// for an `sk-ant-oat01-...` token bound to a service account, so it is a
+// federation target in exactly the sense the other three are — an OIDC proof in,
+// a short-lived native credential out.
+//
+// It differs from them in where the trust conditions live. AWS and Azure carry
+// the issuer, subject and audience on the target-side resource, and the request
+// names only what to assume. Anthropic evaluates a FEDERATION RULE identified by
+// id, and the rule holds the match conditions — so the request names the rule
+// and the identity to act as, and nothing about what the token must contain.
+// Rules are looked up by id and never searched: a proof that satisfies a
+// different rule is refused rather than quietly matched against it.
+type AnthropicTarget struct {
+	// FederationRuleID is the rule to evaluate this proof against (fdrl_...).
+	FederationRuleID string
+
+	// OrganizationID is the Anthropic organization (a UUID).
+	OrganizationID string
+
+	// ServiceAccountID is the identity the minted token acts as (svac_...).
+	ServiceAccountID string
+
+	// WorkspaceID scopes the minted token (wrkspc_...). Required when the rule
+	// covers more than one workspace; the platform resolves it otherwise.
+	WorkspaceID string
+
+	// TokenAudience is the audience the source proof must be minted for.
+	//
+	// No default, deliberately. A federation rule MAY match on an exact
+	// audience, and which value that is belongs to whoever wrote the rule —
+	// guessing it would mint a proof pinned to the wrong party, which is a
+	// disclosure whether or not the exchange then succeeds.
+	TokenAudience string
+}
+
+func (t AnthropicTarget) Cloud() Cloud { return Anthropic }
+
+func (t AnthropicTarget) Audience() string { return t.TokenAudience }
+
+func (t AnthropicTarget) Validate() error {
+	if strings.TrimSpace(t.FederationRuleID) == "" {
+		return fmt.Errorf("anthropic target: federation_rule_id is required (fdrl_...); " +
+			"rules are looked up by id and never searched")
+	}
+	if !strings.HasPrefix(t.FederationRuleID, "fdrl_") {
+		return fmt.Errorf("anthropic target: federation_rule_id %q does not look like a rule id "+
+			"(expected fdrl_...)", t.FederationRuleID)
+	}
+	if strings.TrimSpace(t.OrganizationID) == "" {
+		return fmt.Errorf("anthropic target: organization_id is required")
+	}
+	if strings.TrimSpace(t.ServiceAccountID) == "" {
+		return fmt.Errorf("anthropic target: service_account_id is required (svac_...)")
+	}
+	if !strings.HasPrefix(t.ServiceAccountID, "svac_") {
+		return fmt.Errorf("anthropic target: service_account_id %q does not look like a service "+
+			"account id (expected svac_...)", t.ServiceAccountID)
+	}
+	if t.WorkspaceID != "" && !strings.HasPrefix(t.WorkspaceID, "wrkspc_") {
+		return fmt.Errorf("anthropic target: workspace_id %q does not look like a workspace id "+
+			"(expected wrkspc_...)", t.WorkspaceID)
+	}
+	// Audience has no default and is checked here rather than left to the
+	// exchanger, so a missing one fails before a proof is minted at all.
+	if strings.TrimSpace(t.TokenAudience) == "" {
+		return fmt.Errorf("anthropic target: audience is required and has no default — " +
+			"a federation rule may match on an exact audience, and guessing it would pin the " +
+			"proof to the wrong party")
+	}
+	return nil
+}

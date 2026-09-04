@@ -294,6 +294,8 @@ func For(c core.Cloud) (core.Exchanger, error) {
 		return NewGCPExchanger(), nil
 	case core.Azure:
 		return NewAzureExchanger(), nil
+	case core.Anthropic:
+		return NewAnthropicExchanger(), nil
 	default:
 		return nil, fmt.Errorf("cloud-auth/target: unsupported target cloud %q", c)
 	}

@@ -17,18 +17,22 @@ import (
 type Cloud string
 
 const (
-	AWS        Cloud = "aws"
-	GCP        Cloud = "gcp"
-	Azure      Cloud = "azure"
+	AWS   Cloud = "aws"
+	GCP   Cloud = "gcp"
+	Azure Cloud = "azure"
+	// Anthropic is the Claude Platform. Not a cloud, but it is a federation
+	// TARGET in exactly the sense this type means: a workload presents an OIDC
+	// proof and receives a short-lived credential for it.
+	Anthropic  Cloud = "anthropic"
 	Vault      Cloud = "vault"
 	Okta       Cloud = "okta"
 	GitHubOIDC Cloud = "github_oidc"
 	Kubernetes Cloud = "kubernetes"
 )
 
-// federationTargets are the clouds a workload can obtain credentials FOR. Only
-// these three have a Target type and an Exchanger.
-var federationTargets = map[Cloud]bool{AWS: true, GCP: true, Azure: true}
+// federationTargets are the destinations a workload can obtain credentials FOR.
+// Each has a Target type and an Exchanger.
+var federationTargets = map[Cloud]bool{AWS: true, GCP: true, Azure: true, Anthropic: true}
 
 // trustPeers are the additional providers the control plane can establish trust
 // WITH. They are valid Cloud values — providers are registered for them — but
@@ -97,7 +101,7 @@ func ParseFederationTarget(s string) (Cloud, error) {
 	if !federationTargets[c] {
 		return "", fmt.Errorf("cloud-auth: %s is a trust peer, not a federation target: "+
 			"cloud-auth can establish trust with it but cannot obtain credentials for it "+
-			"(want aws, gcp, or azure)", c)
+			"(want aws, gcp, azure, or anthropic)", c)
 	}
 	return c, nil
 }
