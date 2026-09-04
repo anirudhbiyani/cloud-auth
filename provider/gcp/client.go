@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -63,6 +64,22 @@ const (
 	maxAttributeMappings = 50
 	// maxAttributeMappingBytes is the ceiling on the total mapping expression.
 	maxAttributeMappingBytes = 8192
+	// GCP's per-project, per-minute rate quotas.
+	//
+	// Unlike the size limits above, a rate cannot be checked before a single
+	// call — one request is never over a per-minute quota. What CAN be done is
+	// pace a burst so it does not provoke one, and name the quota when the API
+	// says no, because "RESOURCE_EXHAUSTED" alone sends an operator to look at
+	// storage.
+	//
+	// wifWritesPerMinute governs pool and provider mutations. 60/minute is one
+	// per second, which a loop creating providers reaches immediately.
+	wifWritesPerMinute = 60
+	// stsExchangesPerMinute governs token exchanges. Documented for the error
+	// message; the exchange path is the data plane's, and te.go already backs
+	// off on 429.
+	stsExchangesPerMinute = 6000
+
 	// maxMappedSubjectBytes is the ceiling on the resolved google.subject. It
 	// cannot be checked statically — the value is produced at exchange time by a
 	// CEL expression over a token this code has not seen — but a literal mapping
@@ -103,6 +120,16 @@ func (e *apiError) NotFound() bool {
 	return e.StatusCode == http.StatusNotFound || e.Status == "NOT_FOUND"
 }
 
+// RateLimited reports whether a per-project quota was exceeded.
+//
+// GCP answers with 429 and RESOURCE_EXHAUSTED, which is also what it says when a
+// storage or CPU quota is exhausted — so the message this produces names the
+// quota that actually applies, rather than leaving the operator to guess which
+// of their limits they hit.
+func (e *apiError) RateLimited() bool {
+	return e.StatusCode == http.StatusTooManyRequests || e.Status == "RESOURCE_EXHAUSTED"
+}
+
 // AlreadyExists reports that the resource is already there, which Setup treats
 // as success rather than failure when it was creating idempotently.
 func (e *apiError) AlreadyExists() bool {
@@ -129,6 +156,20 @@ type restClient struct {
 
 	// pollInterval is the LRO poll cadence, shortened by tests.
 	pollInterval time.Duration
+
+	// writeMu and lastWrite pace workload-identity mutations against the
+	// 60-per-minute project quota. A setup creating a pool and a provider is
+	// two writes; a loop over repositories is many, and hitting the quota
+	// mid-loop leaves a half-built pool behind.
+	writeMu   sync.Mutex
+	lastWrite time.Time
+	// writeInterval is the minimum gap between mutations.
+	writeInterval time.Duration
+
+	// now and sleep are injectable so pacing can be tested without spending
+	// real seconds.
+	now   func() time.Time
+	sleep func(context.Context, time.Duration) error
 }
 
 // ClientOption configures the REST client.
@@ -164,6 +205,9 @@ func NewClients(ctx context.Context, opts ...ClientOption) (*Clients, error) {
 		stsURL:         stsEndpoint,
 		credentialsURL: credentialsEndpoint,
 		pollInterval:   operationPollInterval,
+		writeInterval:  time.Minute / wifWritesPerMinute,
+		now:            time.Now,
+		sleep:          sleepCtx,
 	}
 	for _, o := range opts {
 		o(c)
@@ -177,6 +221,38 @@ func NewClients(ctx context.Context, opts ...ClientOption) (*Clients, error) {
 		c.tokens = creds.TokenSource
 	}
 	return &Clients{IAM: c, Workload: c, STS: c}, nil
+}
+
+// sleepCtx waits for d, or until ctx is done.
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+// paceWrite serializes workload-identity mutations to the project quota.
+func (c *restClient) paceWrite(ctx context.Context) (release func(), err error) {
+	c.writeMu.Lock()
+	if !c.lastWrite.IsZero() {
+		if wait := c.writeInterval - c.now().Sub(c.lastWrite); wait > 0 {
+			if err := c.sleep(ctx, wait); err != nil {
+				c.writeMu.Unlock()
+				return nil, err
+			}
+		}
+	}
+	return func() {
+		c.lastWrite = c.now()
+		c.writeMu.Unlock()
+	}, nil
 }
 
 // do performs one authenticated JSON call and decodes the result into out.
@@ -222,7 +298,7 @@ func (c *restClient) do(ctx context.Context, method, endpoint string, body, out 
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return parseAPIError(resp.StatusCode, raw, resource)
+		return annotateQuota(parseAPIError(resp.StatusCode, raw, resource), endpoint)
 	}
 	if out == nil || len(raw) == 0 {
 		return nil
@@ -305,6 +381,27 @@ func parseAPIError(status int, raw []byte, resource string) error {
 		e.Message = http.StatusText(status)
 	}
 	return e
+}
+
+// annotateQuota names the quota behind a RESOURCE_EXHAUSTED answer.
+//
+// GCP uses one code for every exhausted quota, so the raw error sends an
+// operator to check storage or CPU. Which quota applies is decided by the
+// endpoint, which this layer knows and the caller does not.
+func annotateQuota(err error, endpoint string) error {
+	var apiErr *apiError
+	if !errors.As(err, &apiErr) || !apiErr.RateLimited() {
+		return err
+	}
+
+	quota := fmt.Sprintf("workload identity writes are capped at %d per project per minute",
+		wifWritesPerMinute)
+	if strings.Contains(endpoint, "/token") || strings.Contains(endpoint, "sts.googleapis.com") {
+		quota = fmt.Sprintf("STS token exchanges are capped at %d per project per minute",
+			stsExchangesPerMinute)
+	}
+	apiErr.Message = fmt.Sprintf("%s (%s)", apiErr.Message, quota)
+	return apiErr
 }
 
 // operation is the long-running-operation envelope the IAM API returns for pool

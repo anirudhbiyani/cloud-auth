@@ -23,6 +23,8 @@ var sourceRuntimes = map[string]bool{
 	"eks-pod-identity": false,
 	// GCP — source/gcp.go:97
 	"gce": true, "gke": true, "cloud-run": true, "cloud-functions": true,
+	// GitHub Actions — source/github.go
+	"actions": true,
 	// Azure — source/azure.go:152,165,175
 	"aks-workload-identity": true,
 	"vm":                    false,
@@ -31,7 +33,7 @@ var sourceRuntimes = map[string]bool{
 }
 
 // matrixRow matches a table row in the Runtime Federation Matrix.
-var matrixRow = regexp.MustCompile(`(?m)^\|\s+\*\*(AWS|GCP|Azure)\*\*[^|]*\|([^|]*)\|(.*)$`)
+var matrixRow = regexp.MustCompile(`(?m)^\|\s+\*\*(AWS|GCP|Azure|GitHub Actions)\*\*[^|]*\|([^|]*)\|(.*)$`)
 
 func readmeSection(t *testing.T, heading string) string {
 	t.Helper()

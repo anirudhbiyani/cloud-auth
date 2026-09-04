@@ -356,8 +356,36 @@ func (s *FileStateStore) Save(ctx context.Context, ref MechanismRef) error {
 	})
 }
 
+// refreshForRead re-reads the file so a read reflects other processes' writes.
+//
+// Save, Delete and UpdateOwnership already re-read inside the lock, with the
+// comment "our in-memory copy may predate another process's writes". Exactly
+// the same is true on the READ side, and it was not being done: a store loaded
+// at process start reported a mechanism another operator had just created as
+// absent. That is worse than a stale write, because nothing about the answer
+// looks stale — `describe` says not found, and the obvious conclusion is that
+// setup failed.
+//
+// A missing file is not an error: an empty store is the correct reading of a
+// state file nobody has written yet.
+//
+// ponytail: re-reads on every call rather than stat-ing for changes. A state
+// file is kilobytes and a CLI invocation makes a handful of reads; add mtime
+// caching if a long-lived process ever holds one of these.
+func (s *FileStateStore) refreshForRead() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.load(); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to re-read state: %w", err)
+	}
+	return nil
+}
+
 // Get implements StateStore.
 func (s *FileStateStore) Get(ctx context.Context, id string) (*MechanismRef, error) {
+	if err := s.refreshForRead(); err != nil {
+		return nil, err
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -370,6 +398,9 @@ func (s *FileStateStore) Get(ctx context.Context, id string) (*MechanismRef, err
 
 // List implements StateStore.
 func (s *FileStateStore) List(ctx context.Context, filter ListFilter) ([]MechanismRef, error) {
+	if err := s.refreshForRead(); err != nil {
+		return nil, err
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -406,6 +437,9 @@ func (s *FileStateStore) Delete(ctx context.Context, id string) error {
 
 // Exists implements StateStore.
 func (s *FileStateStore) Exists(ctx context.Context, id string) (bool, error) {
+	if err := s.refreshForRead(); err != nil {
+		return false, err
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 

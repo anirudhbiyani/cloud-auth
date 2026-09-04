@@ -181,6 +181,42 @@ func (v *OIDCIssuerReachableValidator) Validate(ctx context.Context, ref Mechani
 	return check
 }
 
+// TrustCondition is one condition a trust policy places on a claim, with the
+// operator that evaluates it.
+//
+// The operator is not decoration. A "*" under StringEquals is matched
+// literally, so it admits nothing and the trust silently never works; the same
+// "*" under StringLike admits everything. Collapsing the two — which this
+// package did, by matching on the claim suffix across any operator — makes
+// those two policies indistinguishable, and they are opposites.
+type TrustCondition struct {
+	// Operator is the provider's condition operator, verbatim:
+	// "StringEquals", "StringLike", "ForAllValues:StringEquals", and so on.
+	Operator string
+	// Claim is the normalized claim name: "sub", "aud", or "oaud".
+	Claim string
+	// Value is the pattern or literal the operator compares against.
+	Value string
+}
+
+// IsPattern reports whether Value contains wildcard characters.
+func (c TrustCondition) IsPattern() bool {
+	return strings.ContainsAny(c.Value, "*?")
+}
+
+// HonoursWildcards reports whether Operator actually expands a wildcard.
+//
+// Only the *Like family does. Everything else compares literally, so a wildcard
+// under it is just an unusual character in a string that will never appear in a
+// token.
+func (c TrustCondition) HonoursWildcards() bool {
+	op := c.Operator
+	if i := strings.LastIndex(op, ":"); i >= 0 {
+		op = op[i+1:] // strip a ForAllValues:/ForAnyValue: qualifier
+	}
+	return strings.HasSuffix(op, "Like") || strings.HasSuffix(op, "LikeIfExists")
+}
+
 // TrustPolicy is the live, provider-neutral trust configuration of a mechanism:
 // who is trusted to assume it, for which audience, and scoped to which subjects.
 type TrustPolicy struct {
@@ -191,8 +227,35 @@ type TrustPolicy struct {
 	// Subjects are the accepted `sub` values or patterns. IAM StringLike
 	// wildcards ("repo:org/repo:*") are preserved verbatim.
 	Subjects []string
+	// Conditions retains every condition with its operator. Audiences and
+	// Subjects are the flattened views of it, kept because the existing
+	// validators compare membership and do not care how a value is matched.
+	Conditions []TrustCondition
 	// Raw is the provider's original policy document, for evidence.
 	Raw string
+}
+
+// SubjectConditions returns the conditions constraining the `sub` claim.
+func (p *TrustPolicy) SubjectConditions() []TrustCondition {
+	return p.conditionsFor("sub")
+}
+
+// AudienceConditions returns the conditions constraining `aud` or `oaud`.
+func (p *TrustPolicy) AudienceConditions() []TrustCondition {
+	return append(p.conditionsFor("aud"), p.conditionsFor("oaud")...)
+}
+
+func (p *TrustPolicy) conditionsFor(claim string) []TrustCondition {
+	if p == nil {
+		return nil
+	}
+	var out []TrustCondition
+	for _, c := range p.Conditions {
+		if c.Claim == claim {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // TrustPolicySource supplies the live trust policy for a mechanism.

@@ -17,6 +17,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/config"
 	"github.com/anirudhbiyani/cloud-auth/core"
 	"github.com/anirudhbiyani/cloud-auth/internal/audit"
+	"github.com/anirudhbiyani/cloud-auth/internal/jwt"
 	"github.com/anirudhbiyani/cloud-auth/source"
 )
 
@@ -25,7 +26,7 @@ import (
 // It returns an error rather than swallowing one: --to used to discard the parse
 // failure, so a typo became the empty cloud and surfaced as "--to is required".
 func targetFlags(fs *flag.FlagSet) func() (core.Target, error) {
-	to := fs.String("to", "", "target cloud: aws|gcp|azure")
+	to := fs.String("to", "", "target: aws|gcp|azure|anthropic")
 	role := fs.String("role", "", "AWS role ARN")
 	sessionName := fs.String("session-name", "", "AWS sts:RoleSessionName (default: the proof's subject)")
 	pool := fs.String("pool", "", "GCP workload identity pool provider resource name")
@@ -34,6 +35,12 @@ func targetFlags(fs *flag.FlagSet) func() (core.Target, error) {
 	clientID := fs.String("client-id", "", "Azure app/UAMI client id")
 	scope := fs.String("scope", "", "Azure resource scope (required for azure)")
 	audience := fs.String("audience", "", "token audience (defaults per cloud)")
+	// Anthropic: the federation rule holds the match conditions, so the request
+	// names the rule and the identity rather than what the token must contain.
+	federationRule := fs.String("federation-rule", "", "Anthropic federation rule id (fdrl_...)")
+	organizationID := fs.String("organization", "", "Anthropic organization id")
+	serviceAccount := fs.String("service-account-id", "", "Anthropic service account id (svac_...)")
+	workspaceID := fs.String("workspace", "", "Anthropic workspace id (wrkspc_...)")
 
 	return func() (core.Target, error) {
 		if strings.TrimSpace(*to) == "" {
@@ -44,6 +51,15 @@ func targetFlags(fs *flag.FlagSet) func() (core.Target, error) {
 		cloud, err := core.ParseCloud(*to)
 		if err != nil {
 			return nil, err
+		}
+		if cloud == core.Anthropic {
+			return core.AnthropicTarget{
+				FederationRuleID: *federationRule,
+				OrganizationID:   *organizationID,
+				ServiceAccountID: *serviceAccount,
+				WorkspaceID:      *workspaceID,
+				TokenAudience:    *audience,
+			}, nil
 		}
 		switch cloud {
 		case core.AWS:
@@ -125,6 +141,10 @@ func auditRole(t core.Target) string {
 		return v.WorkloadIdentityPool
 	case core.AzureTarget:
 		return v.ClientID
+	case core.AnthropicTarget:
+		// The service account is the identity the minted token acts as, which
+		// is what an audit record needs — the rule id says how it was reached.
+		return v.ServiceAccountID
 	default:
 		return ""
 	}
@@ -143,12 +163,20 @@ func cmdDoctor(ctx context.Context, args []string) error {
 	getTarget := targetFlags(fs)
 	configPath := fs.String("config", "", "config file to resolve a named target (optional)")
 	targetName := fs.String("target", "", "named target from --config to preflight")
+	explain := fs.Bool("explain", false,
+		"read the target's live trust and diff it against the presented assertion "+
+			"(needs target-side read credentials)")
+	format := fs.String("format", "text", "output format: text|json")
 	fs.Parse(args)
 
 	prov, rt, detectErr := source.Default().Detect(ctx)
 
-	// Always print what was detected (degrade gracefully off-cloud).
-	printRuntime(os.Stdout, rt, detectErr)
+	// Print what was detected, degrading gracefully off-cloud — but NOT in json
+	// mode, where stdout carries one document and a human preamble in front of
+	// it is exactly the bug `list --output json` had.
+	if *format != "json" {
+		printRuntime(os.Stdout, rt, detectErr)
+	}
 
 	flagTarget, err := getTarget()
 	if err != nil {
@@ -162,12 +190,20 @@ func cmdDoctor(ctx context.Context, args []string) error {
 	// succeeded while producing an identity the config forbids.
 	if detectErr == nil {
 		if mErr := sel.Match(rt); mErr != nil {
-			fmt.Fprintf(os.Stdout, "\n✗ %v\n", mErr)
+			if *format != "json" {
+				fmt.Fprintf(os.Stdout, "\n✗ %v\n", mErr)
+			}
 			return mErr
 		}
 	}
 	if target.Cloud() == "" {
-		return nil // detection-only
+		// Detection-only. In json mode that is still a report — a consumer
+		// asked for a document and must get one.
+		if *format == "json" {
+			return writeDoctorJSON(os.Stdout,
+				preflight{runtime: rt, detectErr: detectErr}, nil, nil, nil, nil)
+		}
+		return nil
 	}
 	if target.Audience() == "" {
 		return fmt.Errorf("doctor: --audience is required to preflight a target")
@@ -185,8 +221,68 @@ func cmdDoctor(ctx context.Context, args []string) error {
 		p.token, p.mintErr = prov.Mint(ctx, target.Audience())
 	}
 
-	writeDiagnoses(os.Stdout, p, diagnose(p))
+	diagnoses := diagnose(p)
+
+	// --explain performs the one piece of I/O diagnose() must never do, and
+	// does it HERE so diagnose() stays pure: the trust policy is fetched by the
+	// caller and compared as data.
+	var (
+		trust    *core.TrustPolicy
+		findings []core.Finding
+		trustErr error
+	)
+	if *explain {
+		trust, trustErr = trustForTarget(ctx, target)
+		if trustErr == nil {
+			input := core.ExplainInput{
+				Trust: trust, Token: p.token, Target: target,
+				SourceCloud: runtimeCloud(rt),
+				TargetRole:  targetRoleARN(target),
+			}
+			// Extracted here rather than in core, which is a leaf package and
+			// cannot import internal/jwt to read a token itself.
+			if p.token != nil {
+				input.IdPAuthorizedRoles, _ = jwt.StringOrSliceClaim(
+					p.token.Reveal(), core.IdPAuthorizedRoleClaim)
+			}
+			findings = core.Explain(input)
+		}
+	}
+
+	if *format == "json" {
+		return writeDoctorJSON(os.Stdout, p, diagnoses, trust, findings, trustErr)
+	}
+
+	writeDiagnoses(os.Stdout, p, diagnoses)
+	if *explain {
+		writeExplanation(os.Stdout, trust, findings, trustErr)
+	}
+
+	// A critical finding means this exchange will not work. Exiting 0 on that
+	// would make --explain useless in a pipeline, which is half its point.
+	for _, f := range findings {
+		if f.Severity == core.FindingCritical {
+			return errValidationFailed(fmt.Errorf(
+				"%d trust finding(s), the most severe critical: %s", len(findings), f.Summary))
+		}
+	}
 	return nil
+}
+
+// targetRoleARN returns the role an AWS exchange will assume, or empty.
+func targetRoleARN(target core.Target) string {
+	if t, ok := target.(core.AWSTarget); ok {
+		return t.RoleARN
+	}
+	return ""
+}
+
+// runtimeCloud returns the detected cloud, or empty.
+func runtimeCloud(rt *core.Runtime) core.Cloud {
+	if rt == nil {
+		return ""
+	}
+	return rt.Cloud
 }
 
 // printRuntime writes the detected-runtime summary, degrading gracefully when

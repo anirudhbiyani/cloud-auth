@@ -88,11 +88,17 @@ client (`--dry-run` works, a real run does not) · — not applicable.
 | **Kubernetes** | — | — | — | — | Token source only (`--type k8s-federation`, AWS target) |
 
 > **How far each ✅ has been verified.** AWS is exercised against live AWS in the
-> integration harness. The GCP and Azure clients are covered by unit tests that
-> speak the documented wire protocols against a fake server — GCP's
+> integration harness. The GCP, Azure and Vault clients are covered by unit tests
+> that speak the documented wire protocols against a fake server — GCP's
 > long-running-operation envelope, error envelope and IAM policy etag; Azure's
-> Graph and ARM envelopes, `@odata.nextLink` paging and the Entra `AADSTS` codes
-> — and have not yet been run against their live clouds.
+> Graph and ARM envelopes, `@odata.nextLink` paging and the Entra `AADSTS` codes;
+> Vault's `/v1` paths and error envelope.
+>
+> Live `setup` → `validate` → `delete` cases now exist for all three in
+> [`test/integration`](test/integration/README.md), behind `-tags integration`.
+> They **skip** unless the environment names a real project, so they do not turn
+> a contributor without a GCP account into a wall of red — which also means a
+> green CI run is not evidence they passed. Run them deliberately.
 >
 > Credentials: GCP uses Application Default Credentials
 > (`GOOGLE_APPLICATION_CREDENTIALS`, `gcloud auth application-default login`, or
@@ -127,20 +133,27 @@ what is using it:
 ### 🔀 Runtime Federation Matrix
 
 Which source runtimes can obtain credentials at which targets, and the proof
-each one presents. This is the `exchange`/`exec` path, not the control plane:
+each one presents. This is the `exchange`/`exec` path, not the control plane.
+
+**GitHub Actions is probed first.** Its detection is two environment-variable
+reads, while the cloud probes reach for a metadata endpoint — and a hosted
+runner *is* a virtual machine in somebody's cloud, so probing IMDS first would
+spend a timeout on every exchange before reaching the answer that was in the
+environment all along.
 
 **Legend:** ✅ works · ❌ the target STS will not accept this proof · 🚫 **refused
 by design** — cloud-auth returns `ErrNonFederatableSource` rather than attempt it.
 
-| Source runtime | Proof it mints | → AWS | → GCP | → Azure |
-|---|---|:---:|:---:|:---:|
-| **AWS** — `eks-irsa` | OIDC (projected SA token) | ✅ | ✅ | ✅ |
-| **AWS** — `ec2`, `ecs`, `lambda` | OIDC via `sts:GetWebIdentityToken` | ✅ | ✅ | ✅ |
-| **AWS** — `ec2`, `ecs`, `lambda` | SigV4 `GetCallerIdentity` | ✅ | ✅ | ❌ |
-| **AWS** — `eks-pod-identity` | *none* | 🚫 | 🚫 | 🚫 |
-| **GCP** — `gce`, `gke`, `cloud-run`, `cloud-functions` | OIDC (metadata identity token) | ✅ | ✅ | ✅ |
-| **Azure** — `aks-workload-identity` | OIDC (projected SA token) | ✅ | ✅ | ✅ |
-| **Azure** — `vm`, `app-service`, `container-apps` | *none* | 🚫 | 🚫 | 🚫 |
+| Source runtime | Proof it mints | → AWS | → GCP | → Azure | → Anthropic |
+|---|---|:---:|:---:|:---:|:---:|
+| **GitHub Actions** — `actions` | OIDC (runner token endpoint) | ✅ | ✅ | ✅ | ✅ |
+| **AWS** — `eks-irsa` | OIDC (projected SA token) | ✅ | ✅ | ✅ | ✅ |
+| **AWS** — `ec2`, `ecs`, `lambda` | OIDC via `sts:GetWebIdentityToken` | ✅ | ✅ | ✅ | ✅ |
+| **AWS** — `ec2`, `ecs`, `lambda` | SigV4 `GetCallerIdentity` | ✅ | ✅ | ❌ | ❌ |
+| **AWS** — `eks-pod-identity` | *none* | 🚫 | 🚫 | 🚫 | 🚫 |
+| **GCP** — `gce`, `gke`, `cloud-run`, `cloud-functions` | OIDC (metadata identity token) | ✅ | ✅ | ✅ | ✅ |
+| **Azure** — `aks-workload-identity` | OIDC (projected SA token) | ✅ | ✅ | ✅ | ✅ |
+| **Azure** — `vm`, `app-service`, `container-apps` | *none* | 🚫 | 🚫 | 🚫 | 🚫 |
 
 **Why two runtimes are refused rather than attempted.**
 
@@ -267,6 +280,7 @@ cloud-auth setup --type k8s-federation \
 | `list` | List all managed mechanisms |
 | `describe` | Show details of a specific mechanism |
 | `providers` | List available providers and their capabilities |
+| `audit` | Inventory every federated trust, scored and liveness-checked |
 | `version` | Show version information |
 
 **Runtime** — obtain short-lived credentials at workload run time, with zero
@@ -275,12 +289,130 @@ exchanges it at the target cloud's STS:
 
 | Command | Description |
 |---------|-------------|
-| `doctor` | Detect the runtime and preflight a target; explains exactly why an exchange would be refused |
+| `doctor` | Detect the runtime and preflight a target; explains exactly why an exchange would be refused. `--explain` adds a claim-by-claim diff against the target's live trust; `--format json` for CI |
 | `exchange` | Obtain short-lived target credentials (`--format env\|json\|credential-process`) |
 | `exec` | Mint + exchange, then run a command with the credentials injected (`... -- <cmd>`) |
 | `init` | Print the target-side trust scaffold (Terraform/OpenTofu + CLI). Print-only; never applies changes |
 | `credential-process` | Emit the AWS `credential_process` JSON contract for zero-code SDK integration |
 | `config-validate` | Lint a declarative federation config file |
+
+### Anthropic Claude Platform
+
+The Claude Platform's [Workload Identity Federation](https://platform.claude.com/docs/en/manage-claude/workload-identity-federation)
+exchanges an OIDC proof for a short-lived `sk-ant-oat01-...` token bound to a
+service account, replacing a static `sk-ant-...` API key — so it is a federation
+target in exactly the sense the three clouds are.
+
+```bash
+cloud-auth exec --to anthropic   --federation-rule fdrl_...   --organization 00000000-0000-0000-0000-000000000000   --service-account-id svac_...   --workspace wrkspc_...   --audience https://api.anthropic.com   -- your-program
+```
+
+Two things differ from the clouds, and both change how it behaves:
+
+**The trust conditions live on a rule, not on the resource.** AWS and Azure carry
+the issuer, subject and audience on the target-side resource, and the request
+names only what to assume. Anthropic evaluates a *federation rule* identified by
+id, and rules are **looked up by id and never searched** — a proof that would
+satisfy a different rule is refused rather than quietly matched against it. The
+refusal message says so, because the obvious assumption otherwise is that some
+other rule would have matched.
+
+**Identity tokens are single-use.** A JWT carrying a `jti` may be exchanged
+once; re-presenting it fails as `jti_reused`. cloud-auth mints a fresh proof on
+every exchange, so this is satisfied by construction — and a broker test pins
+that, because an optimisation which cached the source proof would break Anthropic
+while leaving AWS, GCP and Azure working, which is not a regression anyone would
+attribute to a cache.
+
+> `--audience` has **no default here**, unlike the clouds. A federation rule may
+> match on an exact audience, and which value that is belongs to whoever wrote
+> the rule — guessing would pin the proof to the wrong party, which is a
+> disclosure whether or not the exchange then succeeds.
+>
+> Also worth knowing: `ANTHROPIC_API_KEY` sits *above* federation in the SDKs'
+> credential precedence, so a leftover key silently shadows it.
+
+### `doctor --explain`: which claim actually diverged
+
+One AWS `AccessDenied` covers roughly fifteen distinct root causes. GCP's most
+common failure — *"The attribute condition was not met"* — is not on Google's own
+troubleshooting page. Microsoft's documentation states outright that a wrong
+Azure subject produces a credential that is created successfully and then fails
+without error.
+
+`--explain` reads the target's live trust and diffs it against the assertion this
+workload actually presents:
+
+```console
+$ cloud-auth doctor --to aws --role arn:aws:iam::123456789012:role/deploy     --audience sts.amazonaws.com --explain
+
+Live trust configuration:
+  issuer:     https://token.actions.githubusercontent.com
+  sub:        StringEquals "repo:myorg/myrepo:ref:refs/heads/main"
+
+1 finding(s):
+
+  ✗ the trust policy uses GitHub's legacy subject format, but this token
+    presents the immutable format (the org and repo carry numeric ids)
+      claim:      sub
+      presented:  "repo:myorg@123456/myrepo@456789:ref:refs/heads/main"
+      configured: "repo:myorg/myrepo:ref:refs/heads/main"
+      fix:        update the policy's sub condition to
+                  "repo:myorg@123456/myrepo@456789:ref:refs/heads/main" — GitHub
+                  enforced immutable subject claims on 15 July 2026 …
+```
+
+It is **opt-in** because it needs target-side *read* credentials that plain
+`doctor` deliberately does not: `doctor` works from the workload's own identity,
+and requiring IAM read access would make the common case ask for permissions it
+has no use for.
+
+| Detector | What it catches |
+|---|---|
+| `github-immutable-subject` | Policy and token disagree on GitHub's legacy vs immutable `sub` format. Enforced since 15 July 2026 for new repos **and any repo renamed or transferred** — nothing in the workflow changes, the deploy just starts failing |
+| `github-environment-overrides-ref` | `sub` is a positional concatenation: adding `environment:` **replaces** the `ref:` segment rather than joining it |
+| `wildcard-under-exact-operator` | A `*` under `StringEquals` is matched literally, so the trust is not too wide — it is silently dead, and the `AccessDenied` looks identical to a wrong subject |
+| `case-only-mismatch` | Entra matches issuer, subject and audience case-sensitively |
+| `gcp-subject-too-long` | `google.subject` is capped at 127 bytes, and immutable subjects are longer by construction |
+| `github-fork-pull-request` | A trailing `:*` also matches `repo:…:pull_request`, which a **fork's** pull request reaches |
+| `issuer-not-registered` / `issuer-mismatch` | "No provider registered" and "registered, issuer differs" are the same `AccessDenied` and need opposite fixes |
+| `idp-authorized-role-missing` / `-mismatch` | The policy requires `sts:RoleAuthorizedByIdp` and the token's issuer did not authorize this role. STS evaluates that **before** the trust policy, so every other claim can match perfectly and the exchange is still refused |
+
+#### `sts:RoleAuthorizedByIdp`
+
+AWS shipped this in July 2026. An identity provider embeds
+`https://aws.amazon.com/roles` in the OIDC token naming which roles that token
+may assume, and **STS enforces it as an allow-list before the role trust policy
+is evaluated**. That inverts the usual direction: normally only the account
+decides who may assume a role; this lets the issuer constrain it too, so a
+stolen token is useless against roles its issuer never named.
+
+```bash
+cloud-auth setup --type aws-oidc --require-idp-authorized-role   --role-name deploy --account-id 123456789012   --oidc-url https://token.actions.githubusercontent.com   --subject "repo:myorg/myrepo:ref:refs/heads/main" --source github
+```
+
+`doctor --explain` validates the other half — that a presented token actually
+carries a matching role claim — and names it specifically when it does not.
+
+> **Off by default, and it should stay that way.** Enabling it for an issuer that
+> does not emit the claim locks every workload out of the role, and there is no
+> partial credit: the condition either matches or the exchange is refused before
+> the trust policy is read.
+>
+> **cloud-auth cannot emit the claim**, only require and validate it.
+> `sts:GetWebIdentityToken` takes four inputs — audience, algorithm, duration
+> and tags — and tags become namespaced `request_tags` claims, not this one. So
+> on the AWS→AWS outbound-federation path cloud-auth is the validator, not the
+> emitter; emitting is the identity provider's job.
+
+A critical finding exits non-zero. `--format json` emits one document with the
+checks, the live conditions and the findings, and a `complete` field that is
+`false` when the trust could not be read — a failed read is never rendered as a
+clean bill of health.
+
+**Support:** AWS and GCP. Azure trust is addressed by the application's *object*
+id while a runtime target carries its *client* id, so `--explain` says so rather
+than guessing; use `cloud-auth validate --ref <mechanism>` there.
 
 ### AWS proof selection
 
@@ -451,11 +583,9 @@ Validation checks, and their **current** implementation status:
 > and each would otherwise "match" whatever you compared it to.
 
 > **"Unscoped" is a narrow test, not a breadth score.** It answers *does this
-> pin nothing at all*. A subject that pins some characters is not flagged, so
-> `repo:myorg/*` (every repo in the org, including ones created tomorrow) and
-> `repo:myorg/myrepo:*` (every branch, tag, and `pull_request` from a fork) both
-> pass it today. Grading subject breadth is tracked separately; until it lands,
-> pin the subject yourself — the examples in this README do.
+> pin nothing at all*, and it stays that way — the two questions are different
+> and both answers are useful. How much a subject admits is scored separately,
+> below.
 
 > **Trust-policy and permission checks compare against the intent recorded at
 > setup.** Mechanisms created before cloud-auth persisted that intent have
@@ -469,6 +599,123 @@ Validation checks, and their **current** implementation status:
 > with `report.IsComplete()` — and use `report.SkippedChecks()` to see the gaps.
 > Every skipped check carries `Remediation` text telling you what to confirm by
 > hand.
+
+### `cloud-auth audit`: which external identities can assume anything
+
+Nobody can answer that today. AWS IAM Access Analyzer surfaces federated
+principals but does not distinguish `repo:org/specific-repo:ref:refs/heads/main`
+from `repo:org/*`. Prowler and ScoutSuite do partial single-cloud trust checks.
+Cloudsplaining covers permissions policies, not trust policies. Every one of them
+is single-cloud.
+
+```console
+$ cloud-auth audit --github-owner myorg
+SEV    RESOURCE                       SUBJECT                          BREADTH   NAMESPACE
+------------------------------------------------------------------------------------------
+✗      role/legacy-deploy             repo:deletedorg/app:ref:refs/…   exact     unregistered
+✗      role/org-wide                  repo:myorg/*                     high      unknown
+⚠      role/branch-deploy             repo:myorg/api:*                 medium    live-and-ours
+
+3 trust relationship(s): 2 critical, 1 warning
+
+✗ role/legacy-deploy
+    subject:   repo:deletedorg/app:ref:refs/heads/main
+    namespace: unregistered — this namespace does not exist on GitHub: anyone
+               can register it and mint a token whose sub matches this trust
+               exactly
+```
+
+**The namespace check is the part nothing else does.** GitHub, GitLab and
+Terraform Cloud each run **one** OIDC issuer across every tenant, and each
+permits namespace reuse. Delete an org, someone re-registers the name, mints a
+token whose `sub` is character-for-character identical, and assumes a role still
+sitting in your account trusting it. Published 2026 telemetry found **14% of
+GitHub namespaces referenced in AWS trust policies were unregistered and
+claimable**, and 24% for Azure — each dead namespace trusted by roughly twelve
+distinct identities. It is one API call.
+
+| State | Meaning |
+|---|---|
+| `live-and-ours` | The namespace exists and is one of yours |
+| `live-but-not-ours` | **Critical.** It exists and belongs to somebody else, who can mint a token this trust accepts |
+| `unregistered` | **Critical.** It does not exist — anyone can claim it, right now |
+| `unknown` | Could not be determined. Never reported as fine |
+
+It enumerates the **account**, not cloud-auth's state file. The population this
+serves is roles that predate this tool — AWS's shared-IdP guardrail explicitly
+does not apply to roles created before June 2025 — and a state file lists what
+cloud-auth created, which is the one set already known to be fine.
+
+`--github-owner` names the organisations you control; without it, "the namespace
+exists" says nothing about *who* controls it, so ownership is reported as
+`unknown` rather than guessed. `GITHUB_TOKEN` is used when set — unauthenticated
+GitHub API requests are capped at 60 per hour.
+
+`--format json` for CI, and `--fail-on critical|warning` to gate a pipeline. A
+gate over an inventory that could not read a cloud **fails**: the unread cloud is
+exactly where an unseen finding would be.
+
+**Scope: AWS, GCP and Azure.** A cloud that cannot be reached fails on its own
+and the others still report — the table leads with what was missed, because an
+inventory short one cloud is not an inventory of your estate.
+
+| Cloud | Unit inventoried | Notes |
+|---|---|---|
+| AWS | IAM role × subject condition | One row per condition: each is separately scoreable and separately claimable |
+| GCP | Workload identity pool provider | The provider holds the attribute condition; the pool is a boundary with none. Operator is recorded as `CEL`, not a made-up `StringEquals` |
+| Azure | Application × federated credential | Operator is `StringEquals` by construction — Azure matches subjects literally, always |
+
+GCP needs `GOOGLE_CLOUD_PROJECT`: a pool is project-scoped and GCP has no
+tenant-wide listing, so there is no project to infer.
+
+> **Not covered.** Azure user-assigned managed identities can also carry
+> federated credentials, but ARM has no tenant-wide list of them — they are
+> addressed per resource group — so that needs a subscription scan `audit` does
+> not do. Vault is not inventoried either. Both are stated rather than passed
+> over, because an inventory that quietly covers half your estate is worse than
+> one that says which half.
+>
+> Records are read live from the credentials you run it with, so this is one
+> operator's view. Point `--state` at a shared object for a team-wide picture.
+
+### Subject breadth
+
+`repo:myorg/myrepo:*` pins real characters, so it is *scoped*. It also admits
+every branch, every tag, and `pull_request` — which a pull request from a **fork**
+reaches. Both statements are true, and conflating them is why that subject
+passed every gate without a word.
+
+Subjects are now graded on how much they admit:
+
+| Breadth | Example | Admits |
+|---|---|---|
+| `critical` | *(no `sub` condition)*, `*`, `repo:*` | Any tenant of the issuer — and GitHub, GitLab and Terraform Cloud each run **one** issuer across every tenant on the platform |
+| `high` | `repo:myorg/*`, `system:serviceaccount:*:*` | Every repository in the org, or every ServiceAccount in the cluster — **including ones created later** |
+| `medium` | `repo:myorg/myrepo:*` | Every branch, tag and event of one workload, including `pull_request` from a fork |
+| `info` | `repo:myorg/myrepo:ref:refs/heads/*` | More than one workload, through an interior wildcard |
+| `exact` | `repo:myorg/myrepo:ref:refs/heads/main` | One workload |
+
+**`setup`** scores the subject *before* the API call and prints the score to
+stderr. `critical` is refused outright and needs `--allow-unscoped-subject` with
+`--unscoped-justification`, so the decision is recorded in the spec for the next
+reader rather than made silently.
+
+**`validate`** reports breadth as its own check at the scored severity. Only
+`high` and above invalidate the report — a `medium` subject is worth telling you
+about, and failing every deployment that uses one would train people to ignore
+the check.
+
+A wildcard in the subject also switches the IAM condition operator to
+`StringLike`, which is correct — `StringEquals` would compare the `*` literally
+and the trust would match nothing — but it used to happen silently, so one flag
+both widened the trust and quietly enabled the widening. `setup` now says so.
+
+> **Context worth knowing.** AWS's June 2025 shared-IdP guardrail blocks
+> *creation* of roles that do not evaluate the tenancy claim across 17 shared
+> identity providers. It requires only that `sub` be **evaluated**, not that it be
+> **narrow** — `repo:org/*` satisfies it — and it explicitly does not apply to
+> roles that already existed. The pre-guardrail backlog is the population this
+> scoring exists to serve.
 
 ### Runtime Configuration File
 
@@ -508,7 +755,8 @@ A JSON Schema for editor completion and CI linting lives at
 
 ### State Management
 
-cloud-auth tracks created resources in a local state file (`~/.cloud-auth/state.json`):
+cloud-auth tracks created resources in a state store — a local file by default
+(`~/.cloud-auth/state.json`), or a shared S3 object:
 
 ```bash
 # List all managed mechanisms
@@ -519,7 +767,35 @@ cloud-auth describe aws_role_trust_oidc-aws-abc123
 
 # Use a custom state file
 cloud-auth list --state /path/to/state.json
+
+# Or a shared object, so a team sees one inventory
+cloud-auth list --state s3://my-bucket/cloud-auth/state.json
 ```
+
+#### Shared state
+
+`FileStateStore` is careful — flock, reload-before-write, fsync of the file
+*and* its directory, atomic rename — and every one of those protections stops at
+the machine boundary. Two laptops cannot flock each other, and `cloud-auth
+audit` is only a team's inventory if the state is shared.
+
+The S3 backend uses **conditional writes** rather than a lock: `If-None-Match`
+to create, `If-Match` to update, and a re-read-and-retry when the tag no longer
+matches. That is a compare-and-swap, which is stronger than a lock in the way
+that matters — a lock has to be released, and a process that dies holding one
+leaves the state unusable until somebody decides the lock is stale, which is a
+decision nobody can make correctly from outside. A failed compare-and-swap just
+retries.
+
+Retries use exponential backoff with full jitter. Without it, concurrent writers
+collide in lockstep and keep colliding, so contention never decays — the
+conformance suite reproduced exactly that with four writers before the backoff
+existed.
+
+> Both stores run the **same** conformance suite (`internal/statetest`), rather
+> than parallel suites that would drift. The file store's own tests additionally
+> cover file-specific properties — temp files, permission bits, fsync — that have
+> no remote equivalent.
 
 ### Library Usage
 
@@ -634,11 +910,14 @@ CLOUD_AUTH_SOURCE_DETECT   # auto, a cloud, or a cloud and sub-runtime
 CLOUD_AUTH_REFRESH_BUFFER  # credential refresh lead time, e.g. 5m
 ```
 
-`source.detect` accepts `auto`, one of `aws` / `gcp` / `azure`, or a cloud plus
-a known sub-runtime:
+`source.detect` accepts `auto`, one of `github` / `aws` / `gcp` / `azure`, or a
+source plus a known sub-runtime. Note that the **source** set is not the
+**target** set: a workload can be a GitHub Actions job and obtain AWS
+credentials, but nothing obtains "GitHub credentials".
 
 | Cloud | Sub-runtimes |
 |---|---|
+| `github` | `actions` |
 | `aws` | `ec2`, `ecs`, `lambda`, `eks-irsa`, `eks-pod-identity` |
 | `gcp` | `gce`, `gke`, `cloud-run`, `cloud-functions` |
 | `azure` | `vm`, `aks-workload-identity`, `app-service`, `container-apps` |

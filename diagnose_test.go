@@ -198,3 +198,93 @@ func TestWriteDiagnosesAdvisoryOnlyWhenMintOK(t *testing.T) {
 		t.Errorf("advisory must not appear when mint failed, got:\n%s", b.String())
 	}
 }
+
+// bridgeGuidance was dead code: it was reached only from the mint-error path,
+// and no source returns ErrNoFirstClassPath — sources return
+// ErrNonFederatableSource, the exchangers return ErrNoFirstClassPath, and
+// doctor never calls an exchanger. So doctor happily reported a SigV4 proof
+// "minted successfully" and said nothing about the target refusing it.
+func TestDoctorWarnsWhenTheTargetWillNotAcceptTheProofKind(t *testing.T) {
+	sigv4 := &core.SourceToken{
+		Kind: core.AWSSigV4, Value: "signed-request",
+		Issuer: "https://sts.amazonaws.com", Subject: "arn:aws:iam::1:role/instance",
+		Audience: "sts.amazonaws.com", Expiry: time.Now().Add(time.Hour),
+	}
+
+	for _, tc := range []struct {
+		name     string
+		target   core.Target
+		wantWarn bool
+		msgHas   string
+	}{
+		{
+			name:     "SigV4 at AWS is refused",
+			target:   core.AWSTarget{RoleARN: "arn:aws:iam::123456789012:role/deploy"},
+			wantWarn: true, msgHas: "sts:GetWebIdentityToken",
+		},
+		{
+			name: "SigV4 at Azure is refused",
+			target: core.AzureTarget{
+				Tenant:   "11111111-1111-1111-1111-111111111111",
+				ClientID: "22222222-2222-2222-2222-222222222222",
+				Scope:    "https://management.azure.com/.default",
+			},
+			wantWarn: true, msgHas: "EKS IRSA",
+		},
+		{
+			// GCP's STS verifies a SigV4 proof by calling GetCallerIdentity.
+			// Warning here would be a false positive on the one pair that works.
+			name: "SigV4 at GCP is fine",
+			target: core.GCPTarget{
+				WorkloadIdentityPool: "//iam.googleapis.com/projects/1/locations/global/workloadIdentityPools/p/providers/x",
+			},
+			wantWarn: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tok := *sigv4
+			tok.Audience = tc.target.Audience()
+			p := preflight{
+				runtime: &core.Runtime{Cloud: core.AWS, SubRuntime: "ec2", Federatable: true},
+				target:  tc.target, token: &tok,
+				now: time.Now(), skew: defaultClockSkew,
+			}
+
+			var found bool
+			var message string
+			for _, d := range diagnose(p) {
+				if strings.Contains(d.message, "will not accept") {
+					found, message = true, d.message
+					break
+				}
+			}
+			if found != tc.wantWarn {
+				t.Fatalf("warned = %v, want %v", found, tc.wantWarn)
+			}
+			if tc.msgHas != "" && !strings.Contains(message, tc.msgHas) {
+				t.Errorf("the guidance does not name %q: %s", tc.msgHas, message)
+			}
+		})
+	}
+}
+
+// An OIDC proof is what every target wants; warning about it would be noise on
+// the common path.
+func TestNoProofKindWarningForOIDC(t *testing.T) {
+	target := core.AWSTarget{RoleARN: "arn:aws:iam::123456789012:role/deploy"}
+	p := preflight{
+		runtime: &core.Runtime{Cloud: core.AWS, SubRuntime: "eks-irsa", Federatable: true},
+		target:  target,
+		token: &core.SourceToken{
+			Kind: core.OIDC, Audience: target.Audience(),
+			Issuer: "https://oidc.eks/x", Subject: "system:serviceaccount:ns:sa",
+			Expiry: time.Now().Add(time.Hour),
+		},
+		now: time.Now(), skew: defaultClockSkew,
+	}
+	for _, d := range diagnose(p) {
+		if strings.Contains(d.message, "will not accept") {
+			t.Errorf("warned about an OIDC proof: %s", d.message)
+		}
+	}
+}

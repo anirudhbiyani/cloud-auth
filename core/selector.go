@@ -44,9 +44,9 @@ func (s Selector) String() string {
 //
 // Accepted forms:
 //
-//	auto                      no restriction (the default)
-//	aws | gcp | azure         require that cloud
-//	aws-ec2, gcp-gke, …       require that cloud and sub-runtime
+//	auto                        no restriction (the default)
+//	aws | gcp | azure | github  require that source
+//	aws-ec2, github-actions, …  require that source and sub-runtime
 //
 // Anything else is an error rather than a silent fallback to auto. A typo in a
 // field whose purpose is to constrain which identity may be used has to fail
@@ -69,10 +69,15 @@ func ParseSelector(s string) (Selector, error) {
 		}
 	}
 
-	cloud, err := ParseFederationTarget(cloudPart)
+	// A SOURCE cloud, not a federation target. The two sets differ: a workload
+	// can be a GitHub Actions job and obtain AWS credentials, but nothing
+	// obtains GitHub credentials — so validating this field against the target
+	// set made it impossible to pin the one runtime most workloads actually run
+	// in.
+	cloud, err := ParseSourceCloud(cloudPart)
 	if err != nil {
-		return Selector{}, fmt.Errorf("source.detect %q: %w (want auto, or a cloud such as "+
-			"aws/gcp/azure, optionally with a sub-runtime such as aws-ec2)", s, err)
+		return Selector{}, fmt.Errorf("source.detect %q: %w (want auto, or a source such as "+
+			"aws/gcp/azure/github, optionally with a sub-runtime such as aws-ec2)", s, err)
 	}
 
 	sel := Selector{Cloud: cloud, SubRuntime: subPart}
@@ -97,6 +102,9 @@ var knownSubRuntimes = map[Cloud]map[string]bool{
 	Azure: {
 		"vm": true, "aks-workload-identity": true,
 		"app-service": true, "container-apps": true,
+	},
+	GitHubOIDC: {
+		"actions": true,
 	},
 }
 

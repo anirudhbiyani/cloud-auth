@@ -59,6 +59,8 @@ func run(args []string) error {
 		return cmdDescribe(ctx, cmdArgs)
 	case "providers":
 		return cmdProviders(ctx, cmdArgs)
+	case "audit":
+		return cmdAudit(ctx, cmdArgs)
 	case "version":
 		return cmdVersion()
 	// Runtime (data-plane) commands — handlers live in runtime.go.
@@ -95,6 +97,7 @@ Control-plane commands (establish trust):
   list        List all managed mechanisms
   describe    Show details of a specific mechanism
   providers   List available providers and their capabilities
+  audit       Inventory every federated trust, scored and liveness-checked
 
 Runtime commands (obtain credentials, zero static secrets):
   doctor              Detect the runtime and preflight a target (--to/--role/... or --config/--target)
@@ -123,6 +126,11 @@ Setup Options (Flag-based):
     --subject <sub>         Subject claim pattern (e.g., repo:org/repo:*). REQUIRED:
                             a trust pinning only the audience is assumable by every
                             workload the issuer serves
+    --require-idp-authorized-role
+                            Require sts:RoleAuthorizedByIdp: the identity provider must
+                            name this role in its https://aws.amazon.com/roles claim.
+                            STS enforces it BEFORE the trust policy, so enabling it for
+                            an issuer that does not emit the claim locks everyone out.
     --allow-unscoped-subject      Create the trust with NO subject condition. Every
                             workload the issuer serves will be able to assume the role
     --unscoped-justification <s>  Why that is acceptable here (required with the above)
@@ -296,8 +304,10 @@ type setupOpts struct {
 	issuer   string
 
 	// Deliberate opt-out of subject scoping, plus the reason it is acceptable.
-	allowUnscopedSubject  bool
-	unscopedJustification string
+	allowUnscopedSubject bool
+	// requireIdPAuthorizedRole adds the sts:RoleAuthorizedByIdp condition.
+	requireIdPAuthorizedRole bool
+	unscopedJustification    string
 
 	// GCP pool scoping: who may federate, and who may then impersonate.
 	attributeCondition          string
@@ -371,6 +381,8 @@ func parseSetupOpts(args []string) (*setupOpts, error) {
 			i++
 		case "-v", "--verbose":
 			opts.verbose = true
+		case "--require-idp-authorized-role":
+			opts.requireIdPAuthorizedRole = true
 
 		// Mechanism type
 		case "--type":
@@ -665,11 +677,21 @@ func buildAWSSpec(opts *setupOpts, source core.Cloud) (*core.AWSRoleTrustOIDCSpe
 		Source:                source,
 		AllowUnscopedSubject:  opts.allowUnscopedSubject,
 		UnscopedJustification: opts.unscopedJustification,
+
+		RequireIdPAuthorizedRole: opts.requireIdPAuthorizedRole,
 	}
 
-	// Set subject condition based on wildcards
+	// A wildcard in the subject switches the IAM operator to one that HONOURS
+	// it. That is the right behaviour — StringEquals would compare the "*"
+	// literally and the trust would match nothing — but it happened silently,
+	// so a wildcard both widened the trust and quietly upgraded the operator
+	// that makes the widening real. Say so.
 	if strings.Contains(opts.subject, "*") {
 		spec.SubjectCondition = "StringLike"
+		fmt.Fprintf(os.Stderr,
+			"note: subject %q contains a wildcard, so the IAM condition operator is StringLike "+
+				"rather than StringEquals — the wildcard will be expanded, not matched literally\n",
+			opts.subject)
 	} else if opts.subject != "" {
 		spec.SubjectCondition = "StringEquals"
 	}
@@ -927,7 +949,7 @@ func cmdSetup(ctx context.Context, args []string) error {
 	}
 
 	// Create state store
-	stateStore, err := core.NewFileStateStore(opts.statePath)
+	stateStore, err := openStateStore(ctx, opts.statePath)
 	if err != nil {
 		return fmt.Errorf("failed to initialize state store: %w", err)
 	}
@@ -960,6 +982,17 @@ func cmdSetup(ctx context.Context, args []string) error {
 		e.Provider = string(spec.TargetProvider())
 		e.DryRun = opts.dryRun
 	})
+
+	// Score the subject BEFORE the API call, so a broad trust is something an
+	// operator declines rather than something they discover afterwards.
+	//
+	// The gate was previously only `validateSubjectScope`, which tests exact
+	// membership in {"*", "?*", "*:*", "**"} — so `--subject "repo:org/repo:*"`,
+	// the value this project's own README used to suggest, passed with no
+	// warning at all.
+	if err := warnSubjectBreadth(spec, opts); err != nil {
+		return aud.finish(err)
+	}
 
 	// Execute setup
 	outputs, err := manager.Setup(ctx, spec, setupOpts)
@@ -1071,7 +1104,7 @@ func cmdValidate(ctx context.Context, args []string) error {
 	}
 
 	// Create state store
-	stateStore, err := core.NewFileStateStore(opts.statePath)
+	stateStore, err := openStateStore(ctx, opts.statePath)
 	if err != nil {
 		return fmt.Errorf("failed to initialize state store: %w", err)
 	}
@@ -1213,7 +1246,7 @@ func cmdDelete(ctx context.Context, args []string) error {
 	}
 
 	// Create state store
-	stateStore, err := core.NewFileStateStore(opts.statePath)
+	stateStore, err := openStateStore(ctx, opts.statePath)
 	if err != nil {
 		return fmt.Errorf("failed to initialize state store: %w", err)
 	}
@@ -1336,7 +1369,7 @@ func cmdList(ctx context.Context, args []string) error {
 	}
 
 	// Create state store
-	stateStore, err := core.NewFileStateStore(opts.statePath)
+	stateStore, err := openStateStore(ctx, opts.statePath)
 	if err != nil {
 		return fmt.Errorf("failed to initialize state store: %w", err)
 	}
@@ -1414,7 +1447,7 @@ func cmdDescribe(ctx context.Context, args []string) error {
 	}
 
 	// Create state store
-	stateStore, err := core.NewFileStateStore(statePath)
+	stateStore, err := openStateStore(ctx, statePath)
 	if err != nil {
 		return fmt.Errorf("failed to initialize state store: %w", err)
 	}
@@ -1576,4 +1609,56 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen-3] + "..."
+}
+
+// subjectOf returns the subject a spec pins, where it has one.
+//
+// Only the specs that carry a single subject condition are scored. A GCP pool
+// provider constrains identities through a CEL attribute condition, which is a
+// different shape and needs its own analysis rather than a string score
+// pretending to be one.
+func subjectOf(spec core.MechanismSpec) (string, bool) {
+	switch s := spec.(type) {
+	case *core.AWSRoleTrustOIDCSpec:
+		return s.Subject, true
+	case *core.AzureFederatedCredentialSpec:
+		return s.Subject, true
+	default:
+		return "", false
+	}
+}
+
+// warnSubjectBreadth reports how much the spec's subject admits, and refuses
+// the widest without a recorded reason.
+//
+// Warnings go to stderr so `setup` output stays pipeable, and the refusal is an
+// error rather than a prompt: setup runs unattended in CI far more often than
+// it runs under a human.
+func warnSubjectBreadth(spec core.MechanismSpec, opts *setupOpts) error {
+	subject, scorable := subjectOf(spec)
+	if !scorable {
+		return nil
+	}
+
+	a := core.ScoreSubject(subject)
+	if a.Breadth == core.BreadthExact {
+		return nil
+	}
+
+	// A subject that pins nothing at all is already refused by the spec's own
+	// validation, with the --allow-unscoped-subject escape hatch and its
+	// required justification. Refusing again here would report one problem
+	// twice and describe the override inaccurately.
+	if a.NeedsJustification() && !opts.allowUnscopedSubject {
+		return fmt.Errorf("subject %q is %s breadth: it admits %s\n"+
+			"  %s\n"+
+			"  Pass --allow-unscoped-subject with --unscoped-justification to accept this "+
+			"deliberately, so the decision is recorded in the spec for the next reader.\n"+
+			"  Note: %s",
+			subject, a.Breadth, a.Admits, a.Advice, core.SharedIssuerNote)
+	}
+
+	fmt.Fprintf(os.Stderr, "warning: subject %q is %s breadth — it admits %s\n  %s\n",
+		subject, a.Breadth, a.Admits, a.Advice)
+	return nil
 }

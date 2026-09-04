@@ -75,8 +75,16 @@ func (e *AWSExchanger) Exchange(ctx context.Context, tok *core.SourceToken, targ
 		return nil, err
 	}
 	if tok.Kind != core.OIDC {
-		return nil, fmt.Errorf("aws: AssumeRoleWithWebIdentity accepts only OIDC tokens, got %s "+
-			"(a SigV4 proof cannot be exchanged at AWS)", tok.Kind)
+		// Wrapped, not a plain Errorf. Without the sentinel this is a pure
+		// configuration problem that core.CategoryOf files as an internal
+		// fault, and doctor's ErrNoFirstClassPath branch never fires — so it
+		// printed the generic "minting source proof failed" while
+		// bridgeGuidance already held exactly the right AWS paragraph.
+		return nil, fmt.Errorf("%w: AWS AssumeRoleWithWebIdentity accepts only OIDC tokens, but the "+
+			"source produced a %s proof. Enable outbound identity federation for the account "+
+			"(iam:EnableOutboundWebIdentityFederation) so EC2, ECS and Lambda can mint a real OIDC "+
+			"token via sts:GetWebIdentityToken; failing that, use an OIDC-native source such as EKS "+
+			"IRSA, or a self-hosted OIDC broker", core.ErrNoFirstClassPath, tok.Kind)
 	}
 	// AssumeRoleWithWebIdentity carries no audience parameter — the aud claim
 	// lives inside the token and IAM checks it against the role's trust policy.

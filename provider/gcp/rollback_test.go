@@ -12,6 +12,12 @@ import (
 // recordingWIF answers existence probes however the test wants and records
 // every destructive call.
 type recordingWIF struct {
+	// WorkloadIdentityClient is embedded so this fake keeps compiling when the
+	// interface gains a method it does not care about — this file is about
+	// rollback, not enumeration, and an unimplemented method it never calls
+	// should not make it a compile error.
+	WorkloadIdentityClient
+
 	poolGetErr     error
 	providerGetErr error
 	createProvErr  error

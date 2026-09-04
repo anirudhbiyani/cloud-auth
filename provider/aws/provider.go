@@ -162,6 +162,11 @@ type AssumedRoleUser struct {
 type IAMClient interface {
 	// Role operations
 	GetRole(ctx context.Context, roleName string) (*Role, error)
+	// ListRoles enumerates every role in the account, each carrying its
+	// assume-role policy. `audit` needs roles this tool did NOT create — the
+	// pre-existing backlog is the whole population it serves — so enumerating
+	// from cloud-auth's own state would miss exactly the interesting ones.
+	ListRoles(ctx context.Context) ([]*Role, error)
 	CreateRole(ctx context.Context, input *CreateRoleInput) (*Role, error)
 	UpdateAssumeRolePolicy(ctx context.Context, roleName string, policy string) error
 	DeleteRole(ctx context.Context, roleName string) error
@@ -596,6 +601,13 @@ func (p *Provider) Validate(ctx context.Context, ref core.MechanismRef, opts cor
 			validators = append(validators, core.NewTrustPolicyMatchValidator(
 				expIssuer, expAudience, expSubject,
 				core.WithTrustPolicySource(p)))
+
+			// Breadth is scored unconditionally, unlike the match check above:
+			// it needs no recorded intent, only the live policy. A mechanism
+			// created before cloud-auth persisted its intent still has subjects
+			// worth grading, and that is exactly the pre-existing population
+			// most likely to carry an over-broad one.
+			validators = append(validators, core.NewSubjectBreadthValidator(p))
 		}
 
 		// Confirm the policies the spec asked for are still attached.
@@ -914,6 +926,19 @@ func buildTrustPolicy(oidcProviderARN string, spec *core.AWSRoleTrustOIDCSpec) (
 				"assumable by every workload %s issues a token for. Set Subject, or set "+
 				"AllowUnscopedSubject with UnscopedJustification",
 			spec.RoleName, prefix)).WithProvider(core.AWS)
+	}
+
+	// sts:RoleAuthorizedByIdp, when asked for. STS evaluates this BEFORE the
+	// trust policy, against the "https://aws.amazon.com/roles" claim the issuer
+	// embedded — so the issuer gets a say in which roles its own tokens may
+	// assume, and a stolen token is useless against roles it never named.
+	//
+	// A Bool condition, not a String one: the key answers "did the IdP
+	// authorize this role", and the comparison against the claim is STS's.
+	if spec.RequireIdPAuthorizedRole {
+		condition["Bool"] = map[string]string{
+			core.IdPAuthorizedRoleConditionKey: "true",
+		}
 	}
 
 	return map[string]interface{}{
