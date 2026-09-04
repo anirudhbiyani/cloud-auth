@@ -327,3 +327,93 @@ func TestManagedIdentityTokenIsDeliberatelyNotImplemented(t *testing.T) {
 		t.Errorf("the refusal offers nowhere to go: %v", err)
 	}
 }
+
+// The inventory client methods. The InventorySource was tested against a fake
+// ARM client, so these — the code that actually speaks to ARM — had no coverage
+// at all, including the paging I wrote for them.
+func TestListManagedIdentitiesFollowsPaging(t *testing.T) {
+	f := newFakeAzure(t)
+	base := "/subscriptions/" + testSub +
+		"/providers/Microsoft.ManagedIdentity/userAssignedIdentities"
+
+	f.handle(base, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("page") == "2" {
+			f.json(w, http.StatusOK, map[string]any{"value": []map[string]any{{
+				"id":   identityPath(""),
+				"name": "second",
+				"properties": map[string]any{
+					"principalId": "p2", "clientId": "c2", "tenantId": "t",
+				},
+			}}})
+			return
+		}
+		f.json(w, http.StatusOK, map[string]any{
+			"value": []map[string]any{{
+				"id":   identityPath(""),
+				"name": "first",
+				"properties": map[string]any{
+					"principalId": "p1", "clientId": "c1", "tenantId": "t",
+				},
+			}},
+			// ARM pages with an absolute nextLink. Stopping at page one answers
+			// "these are your identities" with a prefix of them, and the
+			// inventory decides what exists from the result.
+			"nextLink": f.server.URL + base + "?page=2",
+		})
+	})
+
+	got, err := f.client(t).ListManagedIdentities(context.Background(), testSub)
+	if err != nil {
+		t.Fatalf("ListManagedIdentities: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d identities, want 2 — paging was not followed", len(got))
+	}
+	// The resource group is not a field on the response; it is parsed out of
+	// the id, and every subsequent call is addressed by it.
+	if got[0].ResourceGroup != testRG {
+		t.Errorf("ResourceGroup = %q, want it parsed from the ARM id", got[0].ResourceGroup)
+	}
+	if got[0].PrincipalID != "p1" || got[0].ClientID != "c1" {
+		t.Errorf("identity = %+v — these are nested under properties", got[0])
+	}
+}
+
+func TestListManagedIdentitiesRequiresASubscription(t *testing.T) {
+	_, err := f0(t).ListManagedIdentities(context.Background(), "")
+	if err == nil {
+		t.Fatal("want an error with no subscription")
+	}
+	if !strings.Contains(err.Error(), "subscription id is required") {
+		t.Errorf("error = %v", err)
+	}
+}
+
+func TestListManagedIdentityFederatedCredentials(t *testing.T) {
+	f := newFakeAzure(t)
+	f.handle(identityPath("/federatedIdentityCredentials"),
+		func(w http.ResponseWriter, _ *http.Request) {
+			f.json(w, http.StatusOK, map[string]any{"value": []map[string]any{{
+				"id": "cred-1", "name": "aks",
+				"properties": map[string]any{
+					"issuer":    "https://oidc.prod-aks.azure.com/tenant/",
+					"subject":   "system:serviceaccount:payments:ledger",
+					"audiences": []string{core.DefaultAzureAudience},
+				},
+			}}})
+		})
+
+	got, err := f.client(t).ListManagedIdentityFederatedCredentials(
+		context.Background(), testSub, testRG, testMI)
+	if err != nil {
+		t.Fatalf("ListManagedIdentityFederatedCredentials: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d credentials", len(got))
+	}
+	// ARM nests these under properties; a flat read returns a credential with
+	// no issuer, which the inventory would then score as trusting nothing.
+	if got[0].Issuer == "" || got[0].Subject == "" {
+		t.Errorf("credential = %+v — ARM nests these under properties", got[0])
+	}
+}
