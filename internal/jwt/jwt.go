@@ -76,6 +76,13 @@ func audiences(raw json.RawMessage) []string {
 	if len(raw) == 0 {
 		return nil
 	}
+	// null is absence, checked before the string attempt for the same reason
+	// StringOrSliceClaim does: encoding/json treats null as a no-op and returns
+	// no error, so a null aud would silently become []string{""} — a token
+	// carrying one audience, the empty string, rather than none.
+	if string(raw) == "null" {
+		return nil
+	}
 	var s string
 	if err := json.Unmarshal(raw, &s); err == nil {
 		return []string{s}
@@ -114,6 +121,22 @@ func StringOrSliceClaim(token, name string) ([]string, error) {
 	}
 	raw, ok := all[name]
 	if !ok {
+		return nil, nil
+	}
+
+	// JSON null is absence, and it has to be handled BEFORE the string attempt.
+	// encoding/json treats null as a no-op for any destination type and returns
+	// no error, so unmarshaling it into a string silently yields "" — and this
+	// function would return []string{""}: one authorized role, which happens to
+	// be the empty string.
+	//
+	// That is not a cosmetic difference. The caller distinguishes "no claim" —
+	// reported as "the identity provider authorized no roles" — from "the claim
+	// names other roles", which prints the values it did name. A null claim
+	// would take the second path and show an empty string as an authorized
+	// role, sending the operator to look for a misconfiguration that is not
+	// there.
+	if string(raw) == "null" {
 		return nil, nil
 	}
 

@@ -86,3 +86,36 @@ func TestIdPAuthorizedRole(t *testing.T) {
 		}), "idp-authorized-role-mismatch")
 	})
 }
+
+// A null roles claim must reach this detector as ABSENCE, not as one authorized
+// role that happens to be the empty string.
+//
+// internal/jwt returned []string{""} for a null claim, because encoding/json
+// treats null as a no-op and unmarshaling it into a string silently succeeds.
+// That took this detector down its "the claim names OTHER roles" branch and
+// printed "" as an authorized role, instead of saying the token carries no
+// claim — sending an operator to look for a misconfiguration that is not there.
+func TestNullRolesClaimReadsAsAbsent(t *testing.T) {
+	const subject = "repo:myorg/myrepo:ref:refs/heads/main"
+	const role = "arn:aws:iam::123456789012:role/deploy"
+
+	// What jwt.StringOrSliceClaim now returns for a null claim.
+	findings := Explain(ExplainInput{
+		Trust: trustRequiringIdPAuthorization(subject), Token: token(subject),
+		TargetRole: role, IdPAuthorizedRoles: nil,
+	})
+	missing := findingFor(t, findings, "idp-authorized-role-missing")
+	if missing.Presented != "(absent)" {
+		t.Errorf("Presented = %q, want (absent)", missing.Presented)
+	}
+	noFindingFrom(t, findings, "idp-authorized-role-mismatch")
+
+	// The shape the bug produced, asserted so the difference is visible: one
+	// empty-string role takes the other branch entirely.
+	wrong := Explain(ExplainInput{
+		Trust: trustRequiringIdPAuthorization(subject), Token: token(subject),
+		TargetRole: role, IdPAuthorizedRoles: []string{""},
+	})
+	noFindingFrom(t, wrong, "idp-authorized-role-missing")
+	findingFor(t, wrong, "idp-authorized-role-mismatch")
+}
