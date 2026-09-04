@@ -12,6 +12,8 @@ import (
 
 	"github.com/anirudhbiyani/cloud-auth/core"
 	awsprovider "github.com/anirudhbiyani/cloud-auth/provider/aws"
+	azureprovider "github.com/anirudhbiyani/cloud-auth/provider/azure"
+	gcpprovider "github.com/anirudhbiyani/cloud-auth/provider/gcp"
 	"github.com/anirudhbiyani/cloud-auth/source"
 )
 
@@ -53,12 +55,16 @@ func cmdAudit(ctx context.Context, args []string) error {
 	}
 
 	log := newLogger(opts.verbose)
-	log.Info("enumerating federated trust", "clouds", "aws")
+	log.Info("enumerating federated trust", "clouds", "aws, gcp, azure")
 
-	// AWS only, for now, and the README says so. Adding a cloud here is adding
-	// an InventorySource; the normalization and scoring are already
-	// cloud-neutral.
-	sources := []core.InventorySource{awsprovider.New()}
+	// Every wired provider that can enumerate. A source that cannot reach its
+	// cloud fails on its own and the others still report — which is why the
+	// list is unconditional rather than gated on detected credentials.
+	sources := []core.InventorySource{
+		awsprovider.New(),
+		gcpprovider.New(),
+		azureprovider.New(),
+	}
 
 	resolvers := []core.NamespaceResolver{
 		source.NewGitHubNamespaceResolver(source.WithOurGitHubOwners(opts.githubOwners...)),

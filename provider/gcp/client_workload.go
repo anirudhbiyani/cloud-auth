@@ -233,3 +233,65 @@ func checkAttributeMapping(mapping map[string]string) error {
 	}
 	return nil
 }
+
+// ListWorkloadIdentityPools enumerates the pools under a parent.
+//
+// Returns what the API returns, INCLUDING soft-deleted pools. GCP keeps a
+// deleted pool listed with state DELETED for 30 days, and a client that
+// silently dropped them would hide the reason a create fails with
+// ALREADY_EXISTS on a name nothing appears to be using. Deciding which pools
+// are a live trust relationship belongs to the consumer; see inventory.go.
+func (c *restClient) ListWorkloadIdentityPools(ctx context.Context, parent string) ([]*WorkloadIdentityPool, error) {
+	var out []*WorkloadIdentityPool
+	pageToken := ""
+
+	for {
+		endpoint := fmt.Sprintf("%s/%s/workloadIdentityPools", c.iamURL, parent)
+		if pageToken != "" {
+			endpoint += "?pageToken=" + url.QueryEscape(pageToken)
+		}
+
+		var page struct {
+			WorkloadIdentityPools []wifPool `json:"workloadIdentityPools"`
+			NextPageToken         string    `json:"nextPageToken"`
+		}
+		if err := c.do(ctx, http.MethodGet, endpoint, nil, &page, parent); err != nil {
+			return nil, err
+		}
+		for i := range page.WorkloadIdentityPools {
+			out = append(out, page.WorkloadIdentityPools[i].toDomain())
+		}
+		if page.NextPageToken == "" {
+			return out, nil
+		}
+		pageToken = page.NextPageToken
+	}
+}
+
+// ListWorkloadIdentityPoolProviders enumerates the providers in one pool.
+func (c *restClient) ListWorkloadIdentityPoolProviders(ctx context.Context, parent string) ([]*WorkloadIdentityPoolProvider, error) {
+	var out []*WorkloadIdentityPoolProvider
+	pageToken := ""
+
+	for {
+		endpoint := fmt.Sprintf("%s/%s/providers", c.iamURL, parent)
+		if pageToken != "" {
+			endpoint += "?pageToken=" + url.QueryEscape(pageToken)
+		}
+
+		var page struct {
+			WorkloadIdentityPoolProviders []wifProvider `json:"workloadIdentityPoolProviders"`
+			NextPageToken                 string        `json:"nextPageToken"`
+		}
+		if err := c.do(ctx, http.MethodGet, endpoint, nil, &page, parent); err != nil {
+			return nil, err
+		}
+		for i := range page.WorkloadIdentityPoolProviders {
+			out = append(out, page.WorkloadIdentityPoolProviders[i].toDomain())
+		}
+		if page.NextPageToken == "" {
+			return out, nil
+		}
+		pageToken = page.NextPageToken
+	}
+}

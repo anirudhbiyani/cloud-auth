@@ -655,11 +655,28 @@ GitHub API requests are capped at 60 per hour.
 gate over an inventory that could not read a cloud **fails**: the unread cloud is
 exactly where an unseen finding would be.
 
-> **Scope today: AWS.** Adding a cloud is adding an `InventorySource`; the
-> normalization, scoring and liveness are already cloud-neutral. Records are
-> read live from the account, so this is one operator's view of one set of
-> credentials — a team-wide inventory wants the shared state backend that is
-> still outstanding.
+**Scope: AWS, GCP and Azure.** A cloud that cannot be reached fails on its own
+and the others still report — the table leads with what was missed, because an
+inventory short one cloud is not an inventory of your estate.
+
+| Cloud | Unit inventoried | Notes |
+|---|---|---|
+| AWS | IAM role × subject condition | One row per condition: each is separately scoreable and separately claimable |
+| GCP | Workload identity pool provider | The provider holds the attribute condition; the pool is a boundary with none. Operator is recorded as `CEL`, not a made-up `StringEquals` |
+| Azure | Application × federated credential | Operator is `StringEquals` by construction — Azure matches subjects literally, always |
+
+GCP needs `GOOGLE_CLOUD_PROJECT`: a pool is project-scoped and GCP has no
+tenant-wide listing, so there is no project to infer.
+
+> **Not covered.** Azure user-assigned managed identities can also carry
+> federated credentials, but ARM has no tenant-wide list of them — they are
+> addressed per resource group — so that needs a subscription scan `audit` does
+> not do. Vault is not inventoried either. Both are stated rather than passed
+> over, because an inventory that quietly covers half your estate is worse than
+> one that says which half.
+>
+> Records are read live from the credentials you run it with, so this is one
+> operator's view. Point `--state` at a shared object for a team-wide picture.
 
 ### Subject breadth
 
