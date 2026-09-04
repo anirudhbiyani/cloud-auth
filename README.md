@@ -1013,7 +1013,7 @@ cloud-auth/
 ├── config/                    # Runtime: declarative federation config + JSON Schema
 ├── internal/                  # imds, jwt, k8stoken, cache, audit
 ├── test/                      # Cloud integration harness (OpenTofu) + build-tagged tests
-├── docs/                      # BASELINE.md; internal/ holds planning history
+├── docs/                      # BASELINE.md, DECISIONS.md; internal/ is planning history
 └── examples/                  # Example spec files
 ```
 
