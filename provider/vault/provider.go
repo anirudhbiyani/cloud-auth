@@ -52,6 +52,15 @@ type VaultClient interface {
 	ReadAuthMethod(ctx context.Context, path string) (*AuthMethod, error)
 	TuneAuthMethod(ctx context.Context, path string, config *AuthMethodConfig) error
 
+	// Enumeration, for `cloud-auth audit`.
+	//
+	// ListAuthMethods returns the mounted auth methods keyed by path, so the
+	// inventory can find the jwt and oidc mounts without being told where they
+	// are — a Vault operator may mount jwt at "github", "ci", or anywhere.
+	ListAuthMethods(ctx context.Context) (map[string]*AuthMethod, error)
+	// ListRoleNames lists the role names on one auth mount.
+	ListRoleNames(ctx context.Context, path string) ([]string, error)
+
 	// JWT/OIDC Auth operations
 	WriteJWTRole(ctx context.Context, path, roleName string, role *JWTRole) error
 	ReadJWTRole(ctx context.Context, path, roleName string) (*JWTRole, error)

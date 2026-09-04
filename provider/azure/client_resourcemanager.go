@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/google/uuid"
 )
@@ -262,4 +263,90 @@ func trimLeadingSlash(scope string) string {
 		scope = scope[1:]
 	}
 	return scope
+}
+
+// ListManagedIdentities enumerates the user-assigned identities in a
+// subscription.
+//
+// Subscription-scoped, because ARM has no tenant-wide list of them: a tenant
+// with twenty subscriptions needs twenty calls, and there is no API that
+// collapses them.
+func (c *restClient) ListManagedIdentities(ctx context.Context, subscriptionID string) ([]*ManagedIdentity, error) {
+	if subscriptionID == "" {
+		return nil, fmt.Errorf("azure: a subscription id is required to list managed identities")
+	}
+
+	endpoint := fmt.Sprintf(
+		"%s/subscriptions/%s/providers/Microsoft.ManagedIdentity/userAssignedIdentities?api-version=%s",
+		c.armURL, url.PathEscape(subscriptionID), armIdentityAPIVersion)
+
+	var out []*ManagedIdentity
+	for endpoint != "" {
+		var page struct {
+			Value []wireIdentity `json:"value"`
+			// ARM pages with nextLink, an absolute URL. Stopping at the first
+			// page would answer "these are your identities" with a prefix of
+			// them, and this inventory decides what exists from the result.
+			NextLink string `json:"nextLink"`
+		}
+		if err := c.do(ctx, http.MethodGet, endpoint, armScope, nil, &page, subscriptionID); err != nil {
+			return nil, err
+		}
+		for i := range page.Value {
+			id := page.Value[i]
+			out = append(out, id.toDomain(resourceGroupFromID(id.ID)))
+		}
+		endpoint = page.NextLink
+	}
+	return out, nil
+}
+
+// ListManagedIdentityFederatedCredentials lists one identity's credentials.
+func (c *restClient) ListManagedIdentityFederatedCredentials(ctx context.Context, subscriptionID, resourceGroup, identityName string) ([]*FederatedIdentityCredential, error) {
+	endpoint := fmt.Sprintf("%s%s/federatedIdentityCredentials?api-version=%s",
+		c.armURL, identityResourceID(subscriptionID, resourceGroup, identityName),
+		armIdentityAPIVersion)
+
+	var page struct {
+		Value []struct {
+			ID         string `json:"id"`
+			Name       string `json:"name"`
+			Properties struct {
+				Issuer    string   `json:"issuer"`
+				Subject   string   `json:"subject"`
+				Audiences []string `json:"audiences"`
+			} `json:"properties"`
+		} `json:"value"`
+	}
+	if err := c.do(ctx, http.MethodGet, endpoint, armScope, nil, &page, identityName); err != nil {
+		return nil, err
+	}
+
+	out := make([]*FederatedIdentityCredential, 0, len(page.Value))
+	for _, c := range page.Value {
+		out = append(out, &FederatedIdentityCredential{
+			ID: c.ID, Name: c.Name,
+			Issuer: c.Properties.Issuer, Subject: c.Properties.Subject,
+			Audiences: c.Properties.Audiences,
+		})
+	}
+	return out, nil
+}
+
+// resourceGroupFromID pulls the resource group out of an ARM resource id.
+//
+// The identity's own fields do not carry it, and every subsequent call —
+// listing its credentials, deleting it — is addressed by resource group. Parsing
+// the id is the only way to get it from a subscription-wide listing.
+func resourceGroupFromID(id string) string {
+	const marker = "/resourceGroups/"
+	i := strings.Index(id, marker)
+	if i < 0 {
+		return ""
+	}
+	rest := id[i+len(marker):]
+	if j := strings.Index(rest, "/"); j >= 0 {
+		return rest[:j]
+	}
+	return rest
 }

@@ -14,6 +14,7 @@ import (
 	awsprovider "github.com/anirudhbiyani/cloud-auth/provider/aws"
 	azureprovider "github.com/anirudhbiyani/cloud-auth/provider/azure"
 	gcpprovider "github.com/anirudhbiyani/cloud-auth/provider/gcp"
+	vaultprovider "github.com/anirudhbiyani/cloud-auth/provider/vault"
 	"github.com/anirudhbiyani/cloud-auth/source"
 )
 
@@ -55,7 +56,7 @@ func cmdAudit(ctx context.Context, args []string) error {
 	}
 
 	log := newLogger(opts.verbose)
-	log.Info("enumerating federated trust", "clouds", "aws, gcp, azure")
+	log.Info("enumerating federated trust", "clouds", "aws, gcp, azure, vault")
 
 	// Every wired provider that can enumerate. A source that cannot reach its
 	// cloud fails on its own and the others still report — which is why the
@@ -64,6 +65,7 @@ func cmdAudit(ctx context.Context, args []string) error {
 		awsprovider.New(),
 		gcpprovider.New(),
 		azureprovider.New(),
+		vaultprovider.New(),
 	}
 
 	resolvers := []core.NamespaceResolver{

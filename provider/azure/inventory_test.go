@@ -34,6 +34,12 @@ func (l *listingGraph) ListFederatedIdentityCredentials(_ context.Context, appID
 }
 
 func TestAzureListTrustRecords(t *testing.T) {
+	// This test is about the APPLICATION half. Naming a subscription whose ARM
+	// client reports no identities isolates it: leaving the subscription unset
+	// would add the managed-identity gap row, which is correct behaviour and
+	// not what is under test here.
+	t.Setenv(inventorySubscriptionEnv, "sub")
+
 	graph := &listingGraph{
 		apps: []*Application{
 			{ID: "app-1", AppID: "aaaa", DisplayName: "deploy"},
@@ -52,7 +58,9 @@ func TestAzureListTrustRecords(t *testing.T) {
 		},
 	}
 
-	records, err := New(WithGraphClient(graph)).ListTrustRecords(context.Background())
+	records, err := New(
+		WithGraphClient(graph), WithARMClient(&listingARM{}),
+	).ListTrustRecords(context.Background())
 	if err != nil {
 		t.Fatalf("ListTrustRecords: %v", err)
 	}
@@ -90,6 +98,8 @@ func TestAzureListTrustRecords(t *testing.T) {
 // caller cannot read would otherwise hide every other finding — and it is
 // recorded as a gap rather than skipped.
 func TestAzureUnreadableApplicationIsRecordedAsUnknown(t *testing.T) {
+	t.Setenv(inventorySubscriptionEnv, "sub")
+
 	graph := &listingGraph{
 		apps: []*Application{
 			{ID: "app-1", DisplayName: "readable"},
@@ -101,7 +111,9 @@ func TestAzureUnreadableApplicationIsRecordedAsUnknown(t *testing.T) {
 		credErr: map[string]error{"app-2": errors.New("Authorization_RequestDenied")},
 	}
 
-	records, err := New(WithGraphClient(graph)).ListTrustRecords(context.Background())
+	records, err := New(
+		WithGraphClient(graph), WithARMClient(&listingARM{}),
+	).ListTrustRecords(context.Background())
 	if err != nil {
 		t.Fatalf("one unreadable application aborted the tenant: %v", err)
 	}
@@ -125,8 +137,11 @@ func TestAzureUnreadableApplicationIsRecordedAsUnknown(t *testing.T) {
 // means nothing about the tenant was seen, and returning an empty inventory
 // would read as "no federated trust".
 func TestAzureListApplicationsFailureIsAnError(t *testing.T) {
+	t.Setenv(inventorySubscriptionEnv, "sub")
 	graph := &listingGraph{appsErr: errors.New("Graph unavailable")}
-	if _, err := New(WithGraphClient(graph)).ListTrustRecords(context.Background()); err == nil {
+	if _, err := New(
+		WithGraphClient(graph), WithARMClient(&listingARM{}),
+	).ListTrustRecords(context.Background()); err == nil {
 		t.Fatal("a total listing failure was reported as an empty inventory")
 	}
 }
@@ -134,5 +149,128 @@ func TestAzureListApplicationsFailureIsAnError(t *testing.T) {
 func TestAzureInventoryCloud(t *testing.T) {
 	if got := New().InventoryCloud(); got != core.Azure {
 		t.Errorf("InventoryCloud() = %q", got)
+	}
+}
+
+// The managed-identity half was the stated gap in `audit`, and it is the half
+// an AKS workload actually uses. ARM has no tenant-wide list of user-assigned
+// identities, so it needs a subscription named.
+
+type listingARM struct {
+	ARMClient
+	identities    []*ManagedIdentity
+	creds         map[string][]*FederatedIdentityCredential
+	identitiesErr error
+	credErr       map[string]error
+}
+
+func (l *listingARM) ListManagedIdentities(context.Context, string) ([]*ManagedIdentity, error) {
+	return l.identities, l.identitiesErr
+}
+
+func (l *listingARM) ListManagedIdentityFederatedCredentials(_ context.Context, _, _, name string) ([]*FederatedIdentityCredential, error) {
+	if err := l.credErr[name]; err != nil {
+		return nil, err
+	}
+	return l.creds[name], nil
+}
+
+func TestAzureManagedIdentityRecords(t *testing.T) {
+	t.Setenv(inventorySubscriptionEnv, "22222222-2222-2222-2222-222222222222")
+
+	arm := &listingARM{
+		identities: []*ManagedIdentity{{
+			ID: "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.ManagedIdentity/" +
+				"userAssignedIdentities/aks-ledger",
+			Name: "aks-ledger", ResourceGroup: "rg",
+		}},
+		creds: map[string][]*FederatedIdentityCredential{
+			"aks-ledger": {{
+				Name: "payments", Issuer: "https://oidc.prod-aks.azure.com/tenant/",
+				Subject:   "system:serviceaccount:payments:ledger",
+				Audiences: []string{core.DefaultAzureAudience},
+			}},
+		},
+	}
+
+	records, err := New(
+		WithGraphClient(&listingGraph{}),
+		WithARMClient(arm),
+	).ListTrustRecords(context.Background())
+	if err != nil {
+		t.Fatalf("ListTrustRecords: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("got %d records, want 1:\n%+v", len(records), records)
+	}
+
+	r := records[0]
+	if r.SubjectCondition != "system:serviceaccount:payments:ledger" {
+		t.Errorf("SubjectCondition = %q", r.SubjectCondition)
+	}
+	if r.Name != "aks-ledger/payments" {
+		t.Errorf("Name = %q, want identity/credential", r.Name)
+	}
+	if !strings.Contains(r.Resource, "userAssignedIdentities/aks-ledger") {
+		t.Errorf("Resource = %q, want the ARM id", r.Resource)
+	}
+}
+
+// No subscription produces a GAP RECORD, not silence. A reader otherwise cannot
+// tell "no managed identities federate" from "managed identities were never
+// looked at" — and only one of those is reassuring.
+func TestAzureNoSubscriptionIsRecordedAsAGap(t *testing.T) {
+	t.Setenv(inventorySubscriptionEnv, "")
+
+	records, err := New(WithGraphClient(&listingGraph{})).ListTrustRecords(context.Background())
+	if err != nil {
+		t.Fatalf("ListTrustRecords: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("got %d records, want 1 gap record", len(records))
+	}
+	if records[0].Liveness.State != core.NamespaceUnknown {
+		t.Errorf("state = %q, want unknown", records[0].Liveness.State)
+	}
+	if !strings.Contains(records[0].Liveness.Detail, inventorySubscriptionEnv) {
+		t.Errorf("the gap does not say which variable to set: %q", records[0].Liveness.Detail)
+	}
+}
+
+// Every subsequent ARM call is addressed by resource group, which is parsed out
+// of the id. An unexpected id shape is a gap, not a reason to guess.
+func TestAzureIdentityWithNoResourceGroupIsAGap(t *testing.T) {
+	t.Setenv(inventorySubscriptionEnv, "sub")
+
+	arm := &listingARM{identities: []*ManagedIdentity{
+		{ID: "/malformed/id", Name: "orphan", ResourceGroup: ""},
+	}}
+	records, err := New(
+		WithGraphClient(&listingGraph{}), WithARMClient(arm),
+	).ListTrustRecords(context.Background())
+	if err != nil {
+		t.Fatalf("ListTrustRecords: %v", err)
+	}
+	if len(records) != 1 || records[0].Liveness.State != core.NamespaceUnknown {
+		t.Fatalf("records = %+v", records)
+	}
+	if !strings.Contains(records[0].Liveness.Detail, "resource group") {
+		t.Errorf("the gap does not name the problem: %q", records[0].Liveness.Detail)
+	}
+}
+
+// The resource group is only available by parsing the ARM id: a
+// subscription-wide listing does not carry it as a field.
+func TestResourceGroupFromID(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"/subscriptions/s/resourceGroups/my-rg/providers/Microsoft.ManagedIdentity/" +
+			"userAssignedIdentities/x", "my-rg"},
+		{"/subscriptions/s/resourceGroups/my-rg", "my-rg"},
+		{"/malformed", ""},
+		{"", ""},
+	} {
+		if got := resourceGroupFromID(tc.in); got != tc.want {
+			t.Errorf("resourceGroupFromID(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }

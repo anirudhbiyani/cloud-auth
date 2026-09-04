@@ -655,25 +655,30 @@ GitHub API requests are capped at 60 per hour.
 gate over an inventory that could not read a cloud **fails**: the unread cloud is
 exactly where an unseen finding would be.
 
-**Scope: AWS, GCP and Azure.** A cloud that cannot be reached fails on its own
-and the others still report — the table leads with what was missed, because an
-inventory short one cloud is not an inventory of your estate.
+**Scope: every wired provider.** One that cannot be reached fails on its own and
+the others still report — the table leads with what was missed, because an
+inventory short one provider is not an inventory of your estate.
 
-| Cloud | Unit inventoried | Notes |
+| Provider | Unit inventoried | Notes |
 |---|---|---|
 | AWS | IAM role × subject condition | One row per condition: each is separately scoreable and separately claimable |
 | GCP | Workload identity pool provider | The provider holds the attribute condition; the pool is a boundary with none. Operator is recorded as `CEL`, not a made-up `StringEquals` |
 | Azure | Application × federated credential | Operator is `StringEquals` by construction — Azure matches subjects literally, always |
+| Azure | Managed identity × federated credential | The half an AKS workload uses. Needs `AZURE_SUBSCRIPTION_ID` |
+| Vault | JWT/OIDC auth mount × role | Mounts are **discovered**, not assumed at `jwt` — the conventional path is a convention. Operator is `bound_subject`; Vault has no pattern matching |
 
-GCP needs `GOOGLE_CLOUD_PROJECT`: a pool is project-scoped and GCP has no
-tenant-wide listing, so there is no project to infer.
+Two variables are needed because neither API has a tenant-wide listing:
+`GOOGLE_CLOUD_PROJECT` (a pool is project-scoped) and `AZURE_SUBSCRIPTION_ID`
+(user-assigned identities are subscription-scoped). **An unset one produces a
+gap row rather than silence** — otherwise a reader cannot tell "nothing
+federates there" from "that was never looked at", and only one of those is
+reassuring.
 
-> **Not covered.** Azure user-assigned managed identities can also carry
-> federated credentials, but ARM has no tenant-wide list of them — they are
-> addressed per resource group — so that needs a subscription scan `audit` does
-> not do. Vault is not inventoried either. Both are stated rather than passed
-> over, because an inventory that quietly covers half your estate is worse than
-> one that says which half.
+> **Not covered:** Vault's `aws`, `gcp` and `azure` auth methods. Those federate
+> by verifying a cloud's own signed metadata rather than a JWT against a JWKS — a
+> different mechanism with different conditions, which this record shape does not
+> describe. Claiming to inventory them and then reporting an empty subject would
+> be worse than saying so here.
 >
 > Records are read live from the credentials you run it with, so this is one
 > operator's view. Point `--state` at a shared object for a team-wide picture.

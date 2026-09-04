@@ -3,6 +3,8 @@ package azure
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
@@ -18,14 +20,21 @@ import (
 // InventoryCloud implements core.InventorySource.
 func (p *Provider) InventoryCloud() core.Cloud { return core.Azure }
 
-// ListTrustRecords enumerates every federated identity credential on every
-// application in the tenant.
+// inventorySubscriptionEnv names the subscription whose user-assigned managed
+// identities to enumerate.
 //
-// Applications only. A user-assigned managed identity can also carry federated
-// credentials, but ARM has no tenant-wide list of them — they are addressed per
-// resource group — so enumerating those needs a subscription scan this does not
-// do. That gap is reported rather than passed over silently: an inventory that
-// quietly covers half the tenant is worse than one that says which half.
+// ARM has no tenant-wide list of them, so a subscription has to be named. This
+// reads the same variable the Azure CLI and SDKs use rather than inventing one.
+// Unset means applications only, reported as a gap rather than passed over.
+const inventorySubscriptionEnv = "AZURE_SUBSCRIPTION_ID"
+
+// ListTrustRecords enumerates every federated identity credential in the
+// tenant: those on application objects, and those on user-assigned managed
+// identities in AZURE_SUBSCRIPTION_ID.
+//
+// Applications come from Graph, which lists them tenant-wide. Managed
+// identities come from ARM, which does not — they are subscription-scoped — so
+// that half needs a subscription named, and its absence is recorded as a gap.
 func (p *Provider) ListTrustRecords(ctx context.Context) ([]core.TrustRecord, error) {
 	if err := p.requireClients(ctx, true, false); err != nil {
 		return nil, err
@@ -76,7 +85,91 @@ func (p *Provider) ListTrustRecords(ctx context.Context) ([]core.TrustRecord, er
 			})
 		}
 	}
+
+	records = append(records, p.managedIdentityRecords(ctx)...)
 	return records, nil
+}
+
+// managedIdentityRecords enumerates federated credentials on user-assigned
+// managed identities.
+//
+// This is the half an AKS workload uses, and it was the stated gap in `audit`.
+// It needs a subscription because ARM has no tenant-wide listing, and an unset
+// one produces a GAP RECORD rather than silence — an inventory that quietly
+// covers only application objects is worse than one that says so, because the
+// reader has no way to tell the difference between "no managed identities
+// federate" and "managed identities were never looked at".
+func (p *Provider) managedIdentityRecords(ctx context.Context) []core.TrustRecord {
+	subscription := strings.TrimSpace(os.Getenv(inventorySubscriptionEnv))
+	if subscription == "" {
+		return []core.TrustRecord{{
+			Cloud: core.Azure, Resource: "(user-assigned managed identities)",
+			Name: "managed identities",
+			Liveness: core.LivenessResult{
+				State: core.NamespaceUnknown,
+				Detail: "not enumerated: set " + inventorySubscriptionEnv + " — ARM has no " +
+					"tenant-wide list of user-assigned identities, so a subscription must be named",
+			},
+		}}
+	}
+
+	if err := p.requireClients(ctx, false, true); err != nil {
+		return []core.TrustRecord{gapRecord("(user-assigned managed identities)",
+			fmt.Sprintf("no ARM client: %v", err))}
+	}
+
+	identities, err := p.armClient.ListManagedIdentities(ctx, subscription)
+	if err != nil {
+		return []core.TrustRecord{gapRecord("(user-assigned managed identities)",
+			fmt.Sprintf("could not list identities in subscription %s: %v", subscription, err))}
+	}
+
+	var records []core.TrustRecord
+	for _, id := range identities {
+		if id == nil || id.Name == "" {
+			continue
+		}
+		if id.ResourceGroup == "" {
+			// Every subsequent call is addressed by resource group, and it is
+			// parsed out of the ARM id. An id shaped unexpectedly is a gap, not
+			// a reason to guess.
+			records = append(records, gapRecord(id.ID,
+				"could not determine this identity's resource group from its ARM id"))
+			continue
+		}
+
+		creds, err := p.armClient.ListManagedIdentityFederatedCredentials(
+			ctx, subscription, id.ResourceGroup, id.Name)
+		if err != nil {
+			records = append(records, gapRecord(id.ID,
+				fmt.Sprintf("could not read this identity's federated credentials: %v", err)))
+			continue
+		}
+
+		for _, cred := range creds {
+			if cred == nil {
+				continue
+			}
+			records = append(records, core.TrustRecord{
+				Cloud:            core.Azure,
+				Resource:         id.ID + "/federatedIdentityCredentials/" + cred.Name,
+				Name:             id.Name + "/" + cred.Name,
+				Issuer:           cred.Issuer,
+				SubjectCondition: cred.Subject,
+				Operator:         "StringEquals",
+				Audiences:        cred.Audiences,
+			})
+		}
+	}
+	return records
+}
+
+// gapRecord is a row that records missing information rather than trust.
+func gapRecord(resource, detail string) core.TrustRecord {
+	return core.TrustRecord{
+		Cloud: core.Azure, Resource: resource, Name: resource,
+		Liveness: core.LivenessResult{State: core.NamespaceUnknown, Detail: detail},
+	}
 }
 
 // appCredentialName is what a human recognises in the table.
