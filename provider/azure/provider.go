@@ -188,6 +188,14 @@ type ARMClient interface {
 	DeleteRoleAssignment(ctx context.Context, scope, roleAssignmentID string) error
 	ListRoleAssignments(ctx context.Context, scope, principalID string) ([]*RoleAssignment, error)
 
+	// Enumeration, for `cloud-auth audit`.
+	//
+	// ARM has no tenant-wide list of user-assigned identities — they are
+	// subscription-scoped — so a subscription has to be named.
+	ListManagedIdentities(ctx context.Context, subscriptionID string) ([]*ManagedIdentity, error)
+	// ListManagedIdentityFederatedCredentials lists one identity's credentials.
+	ListManagedIdentityFederatedCredentials(ctx context.Context, subscriptionID, resourceGroup, identityName string) ([]*FederatedIdentityCredential, error)
+
 	// Federated Credential for Managed Identity
 	GetManagedIdentityFederatedCredential(ctx context.Context, subscriptionID, resourceGroup, identityName, credentialName string) (*FederatedIdentityCredential, error)
 	CreateManagedIdentityFederatedCredential(ctx context.Context, subscriptionID, resourceGroup, identityName string, cred *FederatedIdentityCredential) (*FederatedIdentityCredential, error)

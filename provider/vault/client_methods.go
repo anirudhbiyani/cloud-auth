@@ -2,6 +2,8 @@ package vault
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -483,4 +485,69 @@ func encodeQuery(query map[string]string) string {
 	// Sorted so a request is reproducible and diffable in a test.
 	sortStrings(parts)
 	return "?" + strings.Join(parts, "&")
+}
+
+// --- Enumeration ---
+
+// ListAuthMethods returns the mounted auth methods keyed by path.
+//
+// sys/auth returns the mount table as a map whose KEYS are the paths, with a
+// trailing slash on each. The trailing slash is stripped here so a caller can
+// join the path without producing a doubled separator — the same normalization
+// trimPath does everywhere else.
+func (c *restClient) ListAuthMethods(ctx context.Context) (map[string]*AuthMethod, error) {
+	var resp secret
+	if err := c.do(ctx, http.MethodGet, "sys/auth", nil, &resp); err != nil {
+		return nil, err
+	}
+
+	// sys/auth answers with the mount table at the TOP level on older Vault and
+	// under "data" on newer. Try data first, then fall back.
+	raw := resp.Data
+	if len(raw) == 0 {
+		return map[string]*AuthMethod{}, nil
+	}
+
+	var table map[string]struct {
+		Type        string `json:"type"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(raw, &table); err != nil {
+		return nil, fmt.Errorf("vault: decoding the auth mount table: %w", err)
+	}
+
+	out := make(map[string]*AuthMethod, len(table))
+	for path, mount := range table {
+		trimmed := trimPath(path)
+		out[trimmed] = &AuthMethod{
+			Type: mount.Type, Path: trimmed, Description: mount.Description,
+		}
+	}
+	return out, nil
+}
+
+// ListRoleNames lists the role names on one auth mount.
+//
+// Vault lists with the LIST verb, which most HTTP clients cannot send; the
+// documented equivalent is GET with ?list=true. A mount with no roles answers
+// 404, which is not an error — it is an empty list, and treating it as a failure
+// would abort an inventory over the first unused mount it met.
+func (c *restClient) ListRoleNames(ctx context.Context, path string) ([]string, error) {
+	var resp secret
+	endpoint := fmt.Sprintf("auth/%s/role?list=true", trimPath(path))
+	if err := c.do(ctx, http.MethodGet, endpoint, nil, &resp); err != nil {
+		var apiErr *apiError
+		if errors.As(err, &apiErr) && apiErr.NotFound() {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var data struct {
+		Keys []string `json:"keys"`
+	}
+	if err := resp.decodeData(&data); err != nil {
+		return nil, nil
+	}
+	return data.Keys, nil
 }
