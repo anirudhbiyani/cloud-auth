@@ -109,9 +109,9 @@ type NamespaceResolver interface {
 // dead namespace trusted by roughly twelve distinct identities. The check is one
 // API call that no mainstream scanner makes.
 var sharedIssuers = map[string]bool{
-	"token.actions.githubusercontent.com": true,
-	"gitlab.com":                          true,
-	"app.terraform.io":                    true,
+	githubIssuer:       true,
+	"gitlab.com":       true,
+	"app.terraform.io": true,
 }
 
 // IsSharedIssuer reports whether an issuer is one global issuer serving every
@@ -227,7 +227,7 @@ func issuerMatches(a, b string) bool {
 // has scheduled: the trust works until somebody renames a repo, and the change
 // that breaks it looks nothing like an authentication change.
 func IsRenameFragile(issuer, subject string) bool {
-	if !issuerMatches(issuer, "token.actions.githubusercontent.com") {
+	if !issuerMatches(issuer, githubIssuer) {
 		return false
 	}
 	if !strings.HasPrefix(subject, "repo:") {

@@ -129,10 +129,10 @@ func TestOnlyCriticalNeedsJustification(t *testing.T) {
 // Breadth ordering is compared with >= in the gates, so it has to be a real
 // ordering — the same mistake Severity made with a string type.
 func TestBreadthOrdering(t *testing.T) {
-	if !(BreadthExact < BreadthInfo &&
-		BreadthInfo < BreadthMedium &&
-		BreadthMedium < BreadthHigh &&
-		BreadthHigh < BreadthCritical) {
+	if BreadthExact >= BreadthInfo ||
+		BreadthInfo >= BreadthMedium ||
+		BreadthMedium >= BreadthHigh ||
+		BreadthHigh >= BreadthCritical {
 		t.Fatal("breadth constants are not strictly increasing")
 	}
 	for _, b := range []Breadth{BreadthExact, BreadthInfo, BreadthMedium, BreadthHigh, BreadthCritical} {
