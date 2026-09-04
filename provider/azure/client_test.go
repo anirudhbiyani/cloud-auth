@@ -568,3 +568,105 @@ func TestRequireClientsReportsCredentialFailure(t *testing.T) {
 		t.Errorf("category = %v", core.CategoryOf(err))
 	}
 }
+
+// The Graph write and delete paths. Each is a one-line route over do(), and the
+// thing worth asserting is the route: a wrong verb or path fails against a real
+// tenant in a way no unit test of the body would catch.
+func TestGraphWriteAndDeleteRoutes(t *testing.T) {
+	f := newFakeAzure(t)
+	const appID = "00000000-0000-0000-0000-000000000000"
+
+	var got []string
+	f.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.Method+" "+r.URL.Path)
+		f.json(w, http.StatusOK, map[string]any{
+			"id": "x", "appId": "app", "displayName": "d",
+			"issuer": "https://issuer", "subject": "sub",
+		})
+	})
+
+	c := f.client(t)
+	ctx := context.Background()
+
+	if err := c.UpdateApplication(ctx, appID, &Application{DisplayName: "renamed"}); err != nil {
+		t.Fatalf("UpdateApplication: %v", err)
+	}
+	if _, err := c.CreateServicePrincipal(ctx, "app-id"); err != nil {
+		t.Fatalf("CreateServicePrincipal: %v", err)
+	}
+	if _, err := c.GetServicePrincipal(ctx, "sp-1"); err != nil {
+		t.Fatalf("GetServicePrincipal: %v", err)
+	}
+	if _, err := c.GetFederatedIdentityCredential(ctx, appID, "cred-1"); err != nil {
+		t.Fatalf("GetFederatedIdentityCredential: %v", err)
+	}
+	if err := c.DeleteFederatedIdentityCredential(ctx, appID, "cred-1"); err != nil {
+		t.Fatalf("DeleteFederatedIdentityCredential: %v", err)
+	}
+	if err := c.DeleteServicePrincipal(ctx, "sp-1"); err != nil {
+		t.Fatalf("DeleteServicePrincipal: %v", err)
+	}
+	if err := c.DeleteApplication(ctx, appID); err != nil {
+		t.Fatalf("DeleteApplication: %v", err)
+	}
+
+	want := []string{
+		// PATCH, not PUT: Graph replaces the whole object on PUT, so an update
+		// that sent PUT would silently clear every field it did not set.
+		"PATCH /v1.0/applications/" + appID,
+		"POST /v1.0/servicePrincipals",
+		"GET /v1.0/servicePrincipals/sp-1",
+		"GET /v1.0/applications/" + appID + "/federatedIdentityCredentials/cred-1",
+		"DELETE /v1.0/applications/" + appID + "/federatedIdentityCredentials/cred-1",
+		"DELETE /v1.0/servicePrincipals/sp-1",
+		"DELETE /v1.0/applications/" + appID,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d requests, want %d:\n%v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("request %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// CreateServicePrincipal requires an application id: creating one without it
+// would produce a principal attached to nothing.
+func TestCreateServicePrincipalRequiresAnAppID(t *testing.T) {
+	f := newFakeAzure(t)
+	if _, err := f.client(t).CreateServicePrincipal(context.Background(), ""); err == nil {
+		t.Fatal("want an error with no application id")
+	}
+	if f.calls.Load() != 0 {
+		t.Error("the request was sent anyway")
+	}
+}
+
+// CreateApplication requires a display name for the same reason.
+func TestCreateApplicationRequiresADisplayName(t *testing.T) {
+	f := newFakeAzure(t)
+	if _, err := f.client(t).CreateApplication(context.Background(), &Application{}); err == nil {
+		t.Fatal("want an error with no display name")
+	}
+	if _, err := f.client(t).CreateApplication(context.Background(), nil); err == nil {
+		t.Fatal("want an error for a nil application")
+	}
+	if f.calls.Load() != 0 {
+		t.Error("the request was sent anyway")
+	}
+}
+
+// redactedPath keeps scheme, host and path for diagnostics and drops the query,
+// which on these APIs carries operator-supplied resource ids.
+func TestRedactedPath(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"https://graph.microsoft.com/v1.0/applications?$filter=secret", "https://graph.microsoft.com/v1.0/applications"},
+		{"https://management.azure.com/subs/x?api-version=1", "https://management.azure.com/subs/x"},
+		{"://nope", "(unparseable url)"},
+	} {
+		if got := redactedPath(tc.in); got != tc.want {
+			t.Errorf("redactedPath(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

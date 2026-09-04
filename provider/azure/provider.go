@@ -840,6 +840,12 @@ func (p *Provider) Delete(ctx context.Context, ref core.MechanismRef, opts core.
 //	})
 //	// Use token.Token with AWS provider's Token() method
 func (p *Provider) GenerateAWSRoleAssumptionToken(ctx context.Context, input *AWSRoleAssumptionInput) (*CrossCloudTokenOutput, error) {
+	// Checked before the client, because the field validation below
+	// dereferences it: a nil input is a caller bug, but panicking takes the
+	// process down instead of returning the error the caller can act on.
+	if input == nil {
+		return nil, core.ErrValidation("input is required").WithProvider(core.Azure)
+	}
 	if p.tokenClient == nil {
 		return nil, core.ErrValidation("Azure token client not configured").
 			WithProvider(core.Azure).
@@ -919,6 +925,12 @@ func (p *Provider) GenerateAWSRoleAssumptionToken(ctx context.Context, input *AW
 //	})
 //	// Use token.Token with GCP provider's Token() method
 func (p *Provider) GenerateGCPWorkloadIdentityToken(ctx context.Context, input *GCPWorkloadIdentityInput) (*CrossCloudTokenOutput, error) {
+	// Checked before the client, because the field validation below
+	// dereferences it: a nil input is a caller bug, but panicking takes the
+	// process down instead of returning the error the caller can act on.
+	if input == nil {
+		return nil, core.ErrValidation("input is required").WithProvider(core.Azure)
+	}
 	if p.tokenClient == nil {
 		return nil, core.ErrValidation("Azure token client not configured").
 			WithProvider(core.Azure).
@@ -1028,6 +1040,19 @@ func (v *appExistsValidator) Validate(ctx context.Context, ref core.MechanismRef
 		check.Remediation = "Create the application or run setup again"
 		return check
 	}
+	// A nil result with a NIL error is a real answer shape — a 200 with an
+	// empty body, or a client returning a zero value — and dereferencing it
+	// panics inside a validator, which is the one place that must not: a
+	// validate run over several mechanisms would take the whole command down
+	// rather than report one bad check. provider/gcp guards this; this did not.
+	if app == nil {
+		check.Status = core.CheckStatusSkipped
+		check.Message = "the application was NOT verified: the Graph client returned no " +
+			"application and no error"
+		check.Remediation = "Re-run validate; if this persists the Graph response is not the " +
+			"shape this client expects."
+		return check
+	}
 
 	check.Status = core.CheckStatusPassed
 	check.Evidence["display_name"] = app.DisplayName
@@ -1060,6 +1085,14 @@ func (v *federatedCredentialExistsValidator) Validate(ctx context.Context, ref c
 		check.Status = core.CheckStatusFailed
 		check.Evidence["error"] = err.Error()
 		check.Remediation = "Create the federated credential or run setup again"
+		return check
+	}
+	if cred == nil {
+		check.Status = core.CheckStatusSkipped
+		check.Message = "the federated credential was NOT verified: the Graph client returned " +
+			"no credential and no error"
+		check.Remediation = "Re-run validate; if this persists the Graph response is not the " +
+			"shape this client expects."
 		return check
 	}
 
@@ -1096,6 +1129,14 @@ func (v *managedIdentityExistsValidator) Validate(ctx context.Context, ref core.
 		check.Status = core.CheckStatusFailed
 		check.Evidence["error"] = err.Error()
 		check.Remediation = "Create the managed identity or run setup again"
+		return check
+	}
+	if mi == nil {
+		check.Status = core.CheckStatusSkipped
+		check.Message = "the managed identity was NOT verified: the ARM client returned no " +
+			"identity and no error"
+		check.Remediation = "Re-run validate; if this persists the ARM response is not the " +
+			"shape this client expects."
 		return check
 	}
 
