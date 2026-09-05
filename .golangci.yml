@@ -17,9 +17,10 @@ linters:
       - linters: [errcheck]
         source: '^\s*fmt\.(Fprint|Fprintf|Fprintln|Print|Printf|Println)\('
 
-      # flag.FlagSet is constructed with flag.ExitOnError throughout, so Parse
-      # does not return on a bad flag — it exits. Checking a value that cannot
-      # arrive reads as though it can.
+      # doctor, exchange, config-validate, init and exec build their FlagSet with
+      # flag.ExitOnError, so Parse does not return on a bad flag — it exits.
+      # The pattern matches only a bare call: setup/validate/delete/list use
+      # ContinueOnError and DO check the error, and are not excluded here.
       - linters: [errcheck]
         source: '^\s*fs\.Parse\('
 
