@@ -1025,13 +1025,8 @@ func (v *appExistsValidator) Name() string        { return "Application Exists" 
 func (v *appExistsValidator) Description() string { return "Checks if the Azure AD application exists" }
 
 func (v *appExistsValidator) Validate(ctx context.Context, ref core.MechanismRef) core.ValidationCheck {
-	check := core.ValidationCheck{
-		ID:          v.ID(),
-		Name:        v.Name(),
-		Description: v.Description(),
-		Severity:    core.SeverityCritical,
-		Evidence:    map[string]interface{}{"app_id": v.appID},
-	}
+	check := core.NewCheck(v, core.SeverityCritical)
+	check.Evidence["app_id"] = v.appID
 
 	app, err := v.client.GetApplication(ctx, v.appID)
 	if err != nil {
@@ -1072,13 +1067,8 @@ func (v *federatedCredentialExistsValidator) Description() string {
 }
 
 func (v *federatedCredentialExistsValidator) Validate(ctx context.Context, ref core.MechanismRef) core.ValidationCheck {
-	check := core.ValidationCheck{
-		ID:          v.ID(),
-		Name:        v.Name(),
-		Description: v.Description(),
-		Severity:    core.SeverityCritical,
-		Evidence:    map[string]interface{}{"credential_id": v.credID},
-	}
+	check := core.NewCheck(v, core.SeverityCritical)
+	check.Evidence["credential_id"] = v.credID
 
 	cred, err := v.client.GetFederatedIdentityCredential(ctx, v.appID, v.credID)
 	if err != nil {
@@ -1116,13 +1106,8 @@ func (v *managedIdentityExistsValidator) Description() string {
 }
 
 func (v *managedIdentityExistsValidator) Validate(ctx context.Context, ref core.MechanismRef) core.ValidationCheck {
-	check := core.ValidationCheck{
-		ID:          v.ID(),
-		Name:        v.Name(),
-		Description: v.Description(),
-		Severity:    core.SeverityCritical,
-		Evidence:    map[string]interface{}{"identity_name": v.identityName},
-	}
+	check := core.NewCheck(v, core.SeverityCritical)
+	check.Evidence["identity_name"] = v.identityName
 
 	mi, err := v.client.GetManagedIdentity(ctx, v.subscriptionID, v.resourceGroup, v.identityName)
 	if err != nil {

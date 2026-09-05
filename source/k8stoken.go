@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anirudhbiyani/cloud-auth/core"
 	"github.com/anirudhbiyani/cloud-auth/internal/jwt"
 	"github.com/anirudhbiyani/cloud-auth/internal/k8stoken"
 )
@@ -21,6 +22,29 @@ import (
 // httptest-friendly.
 type k8sTokenMinter interface {
 	Mint(ctx context.Context, audience string) (string, error)
+}
+
+// oidcToken is the SourceToken every OIDC minter returns: the raw JWT, plus the
+// identity the token's own claims assert.
+//
+// audience is passed separately rather than read from the claims because it is
+// what the CALLER asked for, which is not always what the token carries — a
+// projected service-account token's aud is fixed by the pod's volume, and that
+// mismatch is the whole reason mintDynamicAudienceToken exists below.
+//
+// Callers that could not parse the token pass a zero Claims, which yields empty
+// issuer and subject and a zero expiry; that is the same result the inline
+// literals produced, and it is deliberate at the two call sites that ignore the
+// parse error.
+func oidcToken(value string, claims jwt.Claims, audience string) *core.SourceToken {
+	return &core.SourceToken{
+		Kind:     core.OIDC,
+		Value:    value,
+		Issuer:   claims.Issuer,
+		Subject:  claims.Subject,
+		Audience: audience,
+		Expiry:   claims.Expiry,
+	}
 }
 
 // mintDynamicAudienceToken attempts to mint a fresh projected service-account

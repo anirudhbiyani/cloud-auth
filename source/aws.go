@@ -175,14 +175,7 @@ func (a *AWS) mintIRSA(ctx context.Context, audience string) (*core.SourceToken,
 	}
 	// Fast path: the on-disk projected token already carries the requested aud.
 	if claims.HasAudience(audience) {
-		return &core.SourceToken{
-			Kind:     core.OIDC,
-			Value:    string(raw),
-			Issuer:   claims.Issuer,
-			Subject:  claims.Subject,
-			Audience: audience,
-			Expiry:   claims.Expiry,
-		}, nil
+		return oidcToken(string(raw), claims, audience), nil
 	}
 	// The projected SA token's aud is fixed by the pod's projected volume. When
 	// running in-cluster, mint a fresh token carrying the requested audience via
@@ -192,14 +185,7 @@ func (a *AWS) mintIRSA(ctx context.Context, audience string) (*core.SourceToken,
 			return nil, fmt.Errorf("aws: %w", err)
 		}
 		minted, _ := jwt.ParseUnverified(token)
-		return &core.SourceToken{
-			Kind:     core.OIDC,
-			Value:    token,
-			Issuer:   minted.Issuer,
-			Subject:  minted.Subject,
-			Audience: audience,
-			Expiry:   minted.Expiry,
-		}, nil
+		return oidcToken(token, minted, audience), nil
 	}
 	// Not in-cluster (or TokenRequest unavailable): fail closed with guidance.
 	return nil, fmt.Errorf(
