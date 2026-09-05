@@ -10,18 +10,8 @@ import (
 )
 
 // Characterisation tests for the four option parsers.
-//
-// These were written to pin the behaviour that exists, not the behaviour that
-// ought to exist, so that the parsers can be re-implemented without guessing.
-// parseValidateOpts and parseDeleteOpts had no coverage at all; parseSetupOpts
-// had 35.7%, which is what made a rewrite of it a rewrite of untested code.
-//
-// Where current behaviour is arguably wrong, the test records it as-is and says
-// so in a comment rather than asserting the preferred behaviour.
 
-// Every long flag setup accepts, with the field it must land in. Kept exhaustive
-// on purpose: a flag dropped in a rewrite is silently ignored input, and silent
-// is the failure mode that reaches production.
+// Every long flag setup accepts, with the field it must land in.
 func TestParseSetupOptsBindsEveryStringFlag(t *testing.T) {
 	for flag, field := range map[string]string{
 		"--file": "specFile", "--state": "statePath", "--type": "mechType",
@@ -103,9 +93,7 @@ func TestParseSetupOptsDefaults(t *testing.T) {
 	if opts.statePath != core.DefaultStateStorePath() {
 		t.Errorf("statePath = %q, want the default store path", opts.statePath)
 	}
-	// No audience default: this parser is shared by every mechanism type and
-	// sts.amazonaws.com is only ever right for AWS. Per-type defaults belong to
-	// the build*Spec functions.
+	// No audience default: this parser is shared by every mechanism type and sts.amazonaws.com is only ever right for AWS.
 	if opts.audience != "" {
 		t.Errorf("audience = %q, want empty — defaulting it here mis-scopes GCP", opts.audience)
 	}
@@ -133,12 +121,7 @@ func TestParseSetupOptsInputModeRules(t *testing.T) {
 	}
 }
 
-// The equals form. The hand-rolled parsers compared each argument to the flag
-// name exactly, so `--type=aws-oidc` was rejected as an unknown option while
-// `exec` and `doctor` — already on flag.FlagSet — accepted `--to=aws`. The same
-// binary answered differently depending on the subcommand. Both forms now work
-// everywhere, and a bare word is still refused, since these subcommands take
-// options only.
+// The equals form.
 func TestParseSetupOptsAcceptsBothFlagForms(t *testing.T) {
 	for _, args := range [][]string{
 		{"--type=aws-oidc"},

@@ -17,9 +17,7 @@ func (s stubValidator) Validate(context.Context, MechanismRef) ValidationCheck {
 	return ValidationCheck{ID: s.id, Status: CheckStatusPassed}
 }
 
-// This used to be "fatal error: concurrent map read and map write" — a runtime
-// abort that recover() cannot catch, in a package whose registry is documented
-// as the extension point providers register into from init().
+// This used to be "fatal error: concurrent map read and map write" — a runtime abort that recover() cannot catch, in a package whose registry is documented as the extension point providers register into from init().
 func TestValidatorRegistryIsSafeForConcurrentUse(t *testing.T) {
 	r := NewValidatorRegistry()
 
@@ -74,8 +72,7 @@ func TestValidatorRegistryRejectsUnusableValidators(t *testing.T) {
 	}
 }
 
-// A returned slice must not alias the registry's backing array, or a caller's
-// append races a concurrent Register.
+// A returned slice must not alias the registry's backing array, or a caller's append races a concurrent Register.
 func TestGetForTypeReturnsAnIndependentSlice(t *testing.T) {
 	r := NewValidatorRegistry()
 	for i := 0; i < 3; i++ {

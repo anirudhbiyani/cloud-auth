@@ -65,15 +65,13 @@ func TestGCPTrustPolicyFromOIDCProvider(t *testing.T) {
 	if len(tp.Audiences) != 1 {
 		t.Errorf("audiences = %v", tp.Audiences)
 	}
-	// The subject scoping lives in a CEL attribute condition; the literal must be
-	// surfaced so the core validator can compare against it.
+	// The subject scoping lives in a CEL attribute condition; the literal must be surfaced so the core validator can compare against it.
 	if len(tp.Subjects) != 1 || tp.Subjects[0] != "system:serviceaccount:ns:verifier" {
 		t.Errorf("subjects = %v, want the literal from the attribute condition", tp.Subjects)
 	}
 }
 
-// The single most dangerous GCP WIF misconfiguration: a provider with no
-// attribute condition admits EVERY identity from that issuer.
+// The single most dangerous GCP WIF misconfiguration: a provider with no attribute condition admits EVERY identity from that issuer.
 func TestGCPMissingAttributeConditionIsUnscoped(t *testing.T) {
 	p := &Provider{wifClient: &stubWIF{provider: &WorkloadIdentityPoolProvider{
 		Name: providerName,
@@ -99,9 +97,7 @@ func TestGCPMissingAttributeConditionIsUnscoped(t *testing.T) {
 	}
 }
 
-// An empty AllowedAudiences does NOT mean "no audience accepted" — GCP falls
-// back to the provider's own resource name. Reporting none would make the
-// audience check fail against a perfectly correct provider.
+// An empty AllowedAudiences does NOT mean "no audience accepted" — GCP falls back to the provider's own resource name.
 func TestGCPDefaultAudienceWhenUnset(t *testing.T) {
 	p := &Provider{wifClient: &stubWIF{provider: &WorkloadIdentityPoolProvider{
 		Name:               providerName,
@@ -134,8 +130,7 @@ func TestGCPAWSTypeProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TrustPolicy: %v", err)
 	}
-	// For an aws-type provider the trusted party is an AWS account, not an
-	// OIDC issuer; surface it in a form an operator recognizes.
+	// For an aws-type provider the trusted party is an AWS account, not an OIDC issuer; surface it in a form an operator recognizes.
 	if !strings.Contains(tp.Issuer, "123456789012") {
 		t.Errorf("issuer = %q, want it to name the trusted AWS account", tp.Issuer)
 	}

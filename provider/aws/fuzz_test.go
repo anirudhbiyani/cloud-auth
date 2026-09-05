@@ -9,9 +9,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// TrustPolicy parses a document IAM returns, which may be percent-encoded and
-// whose Principal, Action and condition values are each string-or-array. It must
-// never panic, and it must never invent an audience or subject.
+// TrustPolicy parses a document IAM returns, which may be percent-encoded and whose Principal, Action and condition values are each string-or-array.
 func FuzzTrustPolicyDoc(f *testing.F) {
 	f.Add(`{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"arn:aws:iam::1:oidc-provider/x"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"x:aud":"a","x:sub":"s"}}}]}`)
 	f.Add(`{"Statement":[{"Principal":{"Federated":["a","b"]},"Condition":{"StringLike":{"x:sub":["p","q"]}}}]}`)
@@ -29,13 +27,7 @@ func FuzzTrustPolicyDoc(f *testing.F) {
 		if tp == nil {
 			t.Fatal("nil trust policy with nil error")
 		}
-		// Anything reported must actually appear in the document, or the drift
-		// check compares against values nobody wrote.
-		//
-		// Only checked for valid UTF-8 input: encoding/json replaces an invalid
-		// byte with U+FFFD, so a decoded value is legitimately not byte-identical
-		// to the document it came from. The fuzzer found that distinction, which
-		// is a limit of this assertion rather than a defect in the parser.
+		// Anything reported must actually appear in the document, or the drift check compares against values nobody wrote.
 		if utf8.ValidString(doc) {
 			decoded, derr := urlDecodeIfNeeded(doc)
 			if derr != nil {
@@ -73,8 +65,7 @@ func dup(xs []string) bool {
 	return false
 }
 
-// FuzzIssuerFromFederatedPrincipal covers the ARN and bare-host parsing that
-// decides which issuer a trust policy is compared against.
+// FuzzIssuerFromFederatedPrincipal covers the ARN and bare-host parsing that decides which issuer a trust policy is compared against.
 func FuzzIssuerFromFederatedPrincipal(f *testing.F) {
 	f.Add("arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com")
 	f.Add("accounts.google.com")
@@ -101,8 +92,7 @@ func FuzzIssuerFromFederatedPrincipal(f *testing.F) {
 
 // helpers ---------------------------------------------------------------------
 
-// fuzzRole returns a role whose assume-role policy is whatever the fuzzer
-// produced.
+// fuzzRole returns a role whose assume-role policy is whatever the fuzzer produced.
 type fuzzRole struct {
 	IAMClient
 	doc string

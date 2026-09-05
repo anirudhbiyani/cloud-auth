@@ -19,8 +19,6 @@ import (
 )
 
 // stsJWT builds an unsigned JWT shaped like what sts:GetWebIdentityToken returns.
-// aud is passed through as-is so a test can hand back the multi-audience form the
-// mint path is required to refuse.
 func stsJWT(aud any) string {
 	enc := func(v any) string { b, _ := json.Marshal(v); return base64.RawURLEncoding.EncodeToString(b) }
 	return enc(map[string]any{"alg": "RS256", "typ": "JWT"}) + "." +
@@ -50,8 +48,7 @@ func (f *fakeSTS) GetWebIdentityToken(_ context.Context, in *sts.GetWebIdentityT
 	return &sts.GetWebIdentityTokenOutput{WebIdentityToken: aws.String(f.token), Expiration: f.exp}, nil
 }
 
-// ec2Env is an EC2-shaped environment: none of the sub-runtime hints are set, so
-// subRuntime resolves to "ec2" and Mint takes the principal-proof path.
+// ec2Env is an EC2-shaped environment: none of the sub-runtime hints are set, so subRuntime resolves to "ec2" and Mint takes the principal-proof path.
 func ec2Env() AWSOption { return WithAWSEnv(envFunc(map[string]string{})) }
 
 func TestOutboundMintProducesOIDCProofFromRealClaims(t *testing.T) {
@@ -72,15 +69,13 @@ func TestOutboundMintProducesOIDCProofFromRealClaims(t *testing.T) {
 	if want := "arn:aws:iam::123456789012:role/DataProcessingRole"; tok.Subject != want {
 		t.Errorf("Subject = %q, want %q; the target authorizes on sub, so a guess is not good enough", tok.Subject, want)
 	}
-	// STS reports the expiry directly; that must win over the exp claim, which
-	// here is deliberately a different (far future) value.
+	// STS reports the expiry directly; that must win over the exp claim, which here is deliberately a different (far future) value.
 	if !tok.Expiry.Equal(exp) {
 		t.Errorf("Expiry = %v, want the STS-reported %v", tok.Expiry, exp)
 	}
 }
 
-// The request shape is a trust boundary, not a detail: one audience, RS256, an
-// explicit duration, and no tags.
+// The request shape is a trust boundary, not a detail: one audience, RS256, an explicit duration, and no tags.
 func TestOutboundMintRequestIsPinned(t *testing.T) {
 	f := &fakeSTS{token: stsJWT("sts.googleapis.com")}
 	a := NewAWS(ec2Env(), WithAWSWebIdentityTokenAPI(f))
@@ -104,8 +99,7 @@ func TestOutboundMintRequestIsPinned(t *testing.T) {
 	}
 }
 
-// If STS ever hands back a token bound to more parties than we asked for, the
-// proof must not leave the process.
+// If STS ever hands back a token bound to more parties than we asked for, the proof must not leave the process.
 func TestOutboundMintRefusesMultiAudienceToken(t *testing.T) {
 	f := &fakeSTS{token: stsJWT([]string{"api://AzureADTokenExchange", "https://attacker.example"})}
 	a := NewAWS(ec2Env(), WithAWSWebIdentityTokenAPI(f))
@@ -137,8 +131,7 @@ func TestOutboundMintRejectsEmptyToken(t *testing.T) {
 	}
 }
 
-// Auto falls back to SigV4 when the account has not enabled the feature, and
-// remembers, so the probe costs one call per process rather than one per mint.
+// Auto falls back to SigV4 when the account has not enabled the feature, and remembers, so the probe costs one call per process rather than one per mint.
 func TestOutboundAutoFallsBackToSigV4AndRemembers(t *testing.T) {
 	f := &fakeSTS{err: &ststypes.OutboundWebIdentityFederationDisabledException{}}
 	a := NewAWS(ec2Env(),
@@ -162,8 +155,6 @@ func TestOutboundAutoFallsBackToSigV4AndRemembers(t *testing.T) {
 }
 
 // Any other STS failure is surfaced, not papered over with a different proof.
-// AccessDenied on sts:GetWebIdentityToken means the feature is on and this
-// principal is not allowed to use it — a policy the operator needs to see.
 func TestOutboundAutoDoesNotFallBackOnAccessDenied(t *testing.T) {
 	sentinel := errors.New("AccessDenied: not authorized to perform sts:GetWebIdentityToken")
 	f := &fakeSTS{err: sentinel}
@@ -186,8 +177,7 @@ func TestOutboundProofOIDCDoesNotFallBack(t *testing.T) {
 	}
 }
 
-// Pinning sigv4 must not consult STS at all: that is the escape hatch for a GCP
-// pool that has only an aws provider configured.
+// Pinning sigv4 must not consult STS at all: that is the escape hatch for a GCP pool that has only an aws provider configured.
 func TestOutboundProofSigV4SkipsSTSEntirely(t *testing.T) {
 	f := &fakeSTS{token: stsJWT("sts.googleapis.com")}
 	a := NewAWS(ec2Env(),
@@ -209,9 +199,7 @@ func TestOutboundProofSigV4SkipsSTSEntirely(t *testing.T) {
 	}
 }
 
-// EKS IRSA already has a projected OIDC token; the outbound path must not
-// intercept it. Otherwise a cluster with a working IRSA setup would silently
-// start presenting a different issuer and subject to its targets.
+// EKS IRSA already has a projected OIDC token; the outbound path must not intercept it.
 func TestOutboundDoesNotHijackIRSA(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/token"
@@ -266,8 +254,7 @@ func TestParseAWSProof(t *testing.T) {
 	}
 }
 
-// An unrecognised proof kind set directly on the struct must fail closed too,
-// rather than fall through to a default.
+// An unrecognised proof kind set directly on the struct must fail closed too, rather than fall through to a default.
 func TestOutboundUnknownProofKindFails(t *testing.T) {
 	a := NewAWS(ec2Env(), WithAWSProof(AWSProof("sigv-4")))
 	if _, err := a.Mint(context.Background(), "aud"); err == nil {

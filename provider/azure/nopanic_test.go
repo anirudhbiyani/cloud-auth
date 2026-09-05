@@ -9,24 +9,9 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// A library must not panic on a supported call, and must not report a vacuous
-// pass. This is deliberately a structural test rather than one per method: the
-// bug it guards is "somebody added an entry point and forgot the client guard",
-// and only a test that walks every entry point catches that.
-//
-// The file used to claim in this comment that it reached the provider "through
-// core.Setup / Validate / Delete on the global registry — which is the
-// documented API", while every call went to New() directly. The registry path
-// was never exercised. It is now covered by its own test below, separately,
-// because the two are different properties: one is "no entry point panics", the
-// other is "init() actually put this provider where callers look for it".
+// A library must not panic on a supported call, and must not report a vacuous pass.
 
 // unreachable returns a provider whose client resolution has already failed.
-//
-// Pinning that is what keeps this file meaningful. Since the provider gained a
-// real client it resolves credentials lazily, so a bare New() on a developer
-// machine that has logged in would configure itself and these assertions would
-// quietly stop testing anything.
 func unreachable() *Provider {
 	p := New()
 	p.resolveFailed = errors.New("test: credentials deliberately unavailable")
@@ -34,9 +19,7 @@ func unreachable() *Provider {
 }
 
 func TestNoExportedMethodPanicsWithoutClients(t *testing.T) {
-	// A short deadline: some of these reach for real credentials, and a host
-	// without them can spend a long time in a resolver. Either a configuration
-	// error or a deadline is an acceptable outcome; a panic is not.
+	// A short deadline: some of these reach for real credentials, and a host without them can spend a long time in a resolver.
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
@@ -74,15 +57,7 @@ func TestNoExportedMethodPanicsWithoutClients(t *testing.T) {
 	}
 }
 
-// Validate is separated out because its contract is the opposite of the others':
-// an error is NOT required. A report describing failed or skipped checks is the
-// correct outcome for a provider that cannot reach its cloud.
-//
-// What it must never do is report a VACUOUS pass — "nothing failed" because
-// nothing ran. That distinction used to be expressed by returning a sentinel
-// named errUnverified, which carried a success message through the error channel
-// to satisfy an outer "must return an error" check. It worked and it read
-// backwards; here the assertion simply says what it means.
+// Validate is separated out because its contract is the opposite of the others': an error is NOT required.
 func TestValidateNeverReportsAVacuousPass(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
@@ -106,10 +81,7 @@ func TestValidateNeverReportsAVacuousPass(t *testing.T) {
 	}
 }
 
-// The claim the old comment made, now actually tested: init() registers this
-// provider into the default registry, which is how core.Setup and friends reach
-// it. If the init() were dropped, every direct-instance test above would still
-// pass and the documented API would be broken.
+// The claim the old comment made, now actually tested: init() registers this provider into the default registry, which is how core.Setup and friends reach it.
 func TestProviderIsReachableThroughTheDefaultRegistry(t *testing.T) {
 	p, err := core.GetLifecycleProviderFromRegistry(core.Azure)
 	if err != nil {
@@ -127,10 +99,6 @@ func TestProviderIsReachableThroughTheDefaultRegistry(t *testing.T) {
 }
 
 // testRef is a mechanism reference carrying THIS cloud's resource ids.
-//
-// It used to be one map copied between packages, so the AWS file carried GCP
-// pool paths and an Azure tenant id. Harmless, but it made the fixture read as
-// though those ids meant something here.
 func testRef() core.MechanismRef {
 	return core.MechanismRef{
 		ID:       "test-ref",
@@ -146,8 +114,7 @@ func testRef() core.MechanismRef {
 	}
 }
 
-// unsupportedSpec is deliberately a spec no provider handles: Setup must reject
-// it cleanly rather than reaching a client.
+// unsupportedSpec is deliberately a spec no provider handles: Setup must reject it cleanly rather than reaching a client.
 type unsupportedSpec struct{}
 
 func (unsupportedSpec) Type() core.MechanismType   { return core.MechanismType("unsupported") }

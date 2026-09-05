@@ -5,10 +5,7 @@ import (
 	"testing"
 )
 
-// These six validators existed, were exported, and were called from nowhere —
-// so account_id was never checked to be twelve digits, tenant_id was never a
-// UUID, and an http:// issuer was accepted into a trust policy. This test locks
-// them to the specs that now use them.
+// These six validators existed, were exported, and were called from nowhere — so account_id was never checked to be twelve digits, tenant_id was never a UUID, and an http:// issuer was accepted into a trust policy.
 func TestSpecsRejectMalformedIdentifiers(t *testing.T) {
 	awsSpec := func(mut func(*AWSRoleTrustOIDCSpec)) error {
 		s := &AWSRoleTrustOIDCSpec{

@@ -9,14 +9,9 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// The managed-identity setup path — the one an AKS workload uses — had no test
-// at all. What matters here is not that it creates things, but what it does
-// when a step half-way through fails: an identity left behind with no federated
-// credential is an orphan nobody will clean up, and an identity marked as ours
-// when it was not is one this tool will later delete out from under somebody.
+// The managed-identity setup path — the one an AKS workload uses — had no test at all.
 
-// recordingARM records every mutation so a test can assert what was and was not
-// done, including on the rollback paths.
+// recordingARM records every mutation so a test can assert what was and was not done, including on the rollback paths.
 type recordingARM struct {
 	ARMClient
 
@@ -107,14 +102,12 @@ func TestSetupManagedIdentityCreatesAndRecordsIntent(t *testing.T) {
 		t.Fatalf("created identities %v, credentials %v", arm.created, arm.createdCreds)
 	}
 
-	// Ownership gates deletion. Marking a pre-existing identity as ours is how
-	// this tool would later delete something it did not create.
+	// Ownership gates deletion.
 	if !outputs.Ref.Owned {
 		t.Error("Owned = false for an identity this run created")
 	}
 
-	// The intent has to be recorded, or the trust-policy validator has nothing
-	// to compare the live credential against and reports skipped forever.
+	// The intent has to be recorded, or the trust-policy validator has nothing to compare the live credential against and reports skipped forever.
 	for key, want := range map[string]string{
 		"expected_issuer":   "https://oidc.prod-aks.azure.com/tenant/",
 		"expected_subject":  "system:serviceaccount:payments:ledger",
@@ -130,9 +123,7 @@ func TestSetupManagedIdentityCreatesAndRecordsIntent(t *testing.T) {
 	}
 }
 
-// The rollback that matters: an identity created by this run, whose federated
-// credential then fails, must be removed. Leaving it is an orphan nobody will
-// clean up, and it can authenticate as soon as somebody adds a credential.
+// The rollback that matters: an identity created by this run, whose federated credential then fails, must be removed.
 func TestSetupManagedIdentityRollsBackAnIdentityItCreated(t *testing.T) {
 	arm := &recordingARM{createCredErr: errors.New("Authorization_RequestDenied")}
 
@@ -151,9 +142,7 @@ func TestSetupManagedIdentityRollsBackAnIdentityItCreated(t *testing.T) {
 	}
 }
 
-// The other half, and the one that would be destructive if wrong: a
-// PRE-EXISTING identity must never be deleted by a failed run. It belongs to
-// somebody else, and other workloads may already federate through it.
+// The other half, and the one that would be destructive if wrong: a PRE-EXISTING identity must never be deleted by a failed run.
 func TestSetupManagedIdentityNeverDeletesAPreexistingIdentity(t *testing.T) {
 	arm := &recordingARM{
 		existing: &ManagedIdentity{
@@ -179,8 +168,7 @@ func TestSetupManagedIdentityNeverDeletesAPreexistingIdentity(t *testing.T) {
 	}
 }
 
-// An identity that does not exist and was not asked to be created is a
-// not-found, not a silent creation.
+// An identity that does not exist and was not asked to be created is a not-found, not a silent creation.
 func TestSetupManagedIdentityRefusesWhenAbsentAndNotAskedToCreate(t *testing.T) {
 	arm := &recordingARM{}
 	_, err := New(WithGraphClient(&listingGraph{}), WithARMClient(arm)).
@@ -198,10 +186,7 @@ func TestSetupManagedIdentityRefusesWhenAbsentAndNotAskedToCreate(t *testing.T) 
 	}
 }
 
-// A failed role assignment must NOT fail the setup — the trust is established
-// and working — but it must be surfaced, because the identity can now
-// authenticate without the permissions the spec asked for. Silence there is the
-// dangerous outcome: it looks like success.
+// A failed role assignment must NOT fail the setup — the trust is established and working — but it must be surfaced, because the identity can now authenticate without the permissions the spec asked for.
 func TestRoleAssignmentFailuresAreWarnedNotFatal(t *testing.T) {
 	arm := &recordingARM{roleAssignErr: errors.New("Authorization_RequestDenied")}
 
@@ -234,15 +219,13 @@ func TestRoleAssignmentWarnings(t *testing.T) {
 	if len(warnings) != 3 {
 		t.Fatalf("got %d lines, want a header plus one per failure: %v", len(warnings), warnings)
 	}
-	// The header has to say what the state actually is, not just that something
-	// failed: the identity exists and can authenticate, without the permissions.
+	// The header has to say what the state actually is, not just that something failed: the identity exists and can authenticate, without the permissions.
 	if !strings.Contains(warnings[0], "can authenticate without having the permissions") {
 		t.Errorf("the warning does not say what the resulting state is: %q", warnings[0])
 	}
 }
 
-// A dry run must not create anything, and must still produce a plan naming
-// every resource it would touch.
+// A dry run must not create anything, and must still produce a plan naming every resource it would touch.
 func TestSetupManagedIdentityDryRunCreatesNothing(t *testing.T) {
 	arm := &recordingARM{}
 	outputs, err := New(WithGraphClient(&listingGraph{}), WithARMClient(arm)).
@@ -280,9 +263,7 @@ func TestRecordExpectedTrust(t *testing.T) {
 	})
 
 	t.Run("empty fields are not recorded as empty strings", func(t *testing.T) {
-		// An empty recorded value is not the same as an unrecorded one: the
-		// validator treats a missing expectation as "nothing to compare" and
-		// skips, while an empty one would compare against "" and fail.
+		// An empty recorded value is not the same as an unrecorded one: the validator treats a missing expectation as "nothing to compare" and skips, while an empty one would compare against "" and fail.
 		ids := map[string]string{}
 		recordExpectedTrust(ids, &core.AzureFederatedCredentialSpec{})
 		if len(ids) != 0 {

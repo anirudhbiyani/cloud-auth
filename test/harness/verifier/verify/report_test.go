@@ -86,12 +86,10 @@ func TestScrubberKeepsIdentityMetadata(t *testing.T) {
 	}
 }
 
-// This is the security guarantee the harness contract demands: a credential
-// value must never reach the report, whatever path it takes to get there.
+// This is the security guarantee the harness contract demands: a credential value must never reach the report, whatever path it takes to get there.
 func TestReportNeverContainsCredentialValues(t *testing.T) {
 	creds := awsCreds()
-	// The error itself leaks the assertion and the secret — a hostile-but-plausible
-	// STS error body. Neither may survive into the report.
+	// The error itself leaks the assertion and the secret — a hostile-but-plausible STS error body.
 	leakyErr := fmt.Errorf("STS rejected assertion %s and key %s: %w",
 		"eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJsZWFrIn0.c2lnbmF0dXJlLXZhbHVlLWhlcmUtMDAw",
 		creds.SecretAccessKey, core.ErrTrustMissing)

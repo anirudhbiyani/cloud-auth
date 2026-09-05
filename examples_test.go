@@ -6,9 +6,7 @@ import (
 	"testing"
 )
 
-// Every shipped example must load and validate. An example that no longer passes
-// validation is worse than no example: it is a documented recipe for a
-// configuration the tool refuses, and it is the first thing a new user copies.
+// Every shipped example must load and validate.
 func TestShippedExamplesValidate(t *testing.T) {
 	paths, err := filepath.Glob(filepath.Join("examples", "*.json"))
 	if err != nil {

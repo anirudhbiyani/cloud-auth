@@ -17,9 +17,7 @@ func gcpBase() *GCPWorkloadIdentityPoolSpec {
 	}
 }
 
-// Two independent gates: the pool provider decides who may federate, the IAM
-// binding decides who may then impersonate. Neither has a safe default, so a
-// spec that sets neither must not be accepted.
+// Two independent gates: the pool provider decides who may federate, the IAM binding decides who may then impersonate.
 func TestGCPSpecRequiresBothGates(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -91,8 +89,7 @@ func TestGCPSpecRequiresBothGates(t *testing.T) {
 	}
 }
 
-// The IAM member string is what actually grants impersonation. The whole-pool
-// form is the one Google's own documentation warns against.
+// The IAM member string is what actually grants impersonation.
 func TestImpersonationPrincipalIsScoped(t *testing.T) {
 	const pool = "projects/123456789012/locations/global/workloadIdentityPools/gh-pool"
 	const base = "principalSet://iam.googleapis.com/" + pool
@@ -117,9 +114,7 @@ func TestImpersonationPrincipalIsScoped(t *testing.T) {
 	}
 }
 
-// Regression: the shared flag parser defaulted audience to sts.amazonaws.com for
-// every mechanism type, so a GCP pool provider was created accepting the one
-// audience every GitHub Actions run can request.
+// Regression: the shared flag parser defaulted audience to sts.amazonaws.com for every mechanism type, so a GCP pool provider was created accepting the one audience every GitHub Actions run can request.
 func TestGCPSpecDoesNotInheritTheAWSAudience(t *testing.T) {
 	s := gcpBase()
 	for _, aud := range s.AllowedAudiences {

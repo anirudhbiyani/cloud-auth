@@ -7,16 +7,9 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/provider/vault"
 )
 
-// The examples that used to live in these methods' doc comments, as real
-// Example functions so the compiler checks them.
-//
-// Example functions with no "Output:" comment are compiled but not run, which
-// is what we want here: every one of these would talk to a live Vault.
-// Compiling them is the point — a documented example that does not build is
-// worse than no example, because it is the first thing a new user copies.
+// The examples that used to live in these methods' doc comments, as real Example functions so the compiler checks them.
 
-// Vault's AWS secrets engine issues short-lived AWS credentials against a role
-// the engine already holds.
+// Vault's AWS secrets engine issues short-lived AWS credentials against a role the engine already holds.
 func ExampleProvider_GenerateAWSCredentials() {
 	p := vault.New()
 
@@ -30,8 +23,7 @@ func ExampleProvider_GenerateAWSCredentials() {
 	_ = creds
 }
 
-// The GCP engine. KeyType picks between an OAuth access token and a service
-// account key; prefer the token, which expires on its own.
+// The GCP engine.
 func ExampleProvider_GenerateGCPCredentials() {
 	p := vault.New()
 

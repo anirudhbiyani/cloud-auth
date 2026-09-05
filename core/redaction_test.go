@@ -30,9 +30,7 @@ func sampleCredentials() Credentials {
 	}
 }
 
-// Every formatting path must be covered. Covering only some is worse than
-// covering none: it teaches callers the type is safe, then one uncovered verb
-// surprises them.
+// Every formatting path must be covered.
 func TestCredentialsNeverRenderSecrets(t *testing.T) {
 	c := sampleCredentials()
 	secrets := []string{fakeAccessKey, fakeSecret, fakeSession, fakeBearer}
@@ -101,8 +99,7 @@ func TestSourceTokenNeverRendersItsProof(t *testing.T) {
 			t.Errorf("rendered the raw proof: %s", out)
 		}
 	}
-	// Issuer, subject and audience are not secrets, and they are the whole
-	// content of a federation diagnosis.
+	// Issuer, subject and audience are not secrets, and they are the whole content of a federation diagnosis.
 	for _, want := range []string{"token.actions.githubusercontent.com", "repo:myorg/myrepo", "sts.amazonaws.com"} {
 		if !strings.Contains(tok.String(), want) {
 			t.Errorf("String() dropped %q: %s", want, tok.String())
@@ -110,8 +107,7 @@ func TestSourceTokenNeverRendersItsProof(t *testing.T) {
 	}
 }
 
-// A short secret must be replaced wholesale: a four-character hint of an
-// eight-character value is most of the value.
+// A short secret must be replaced wholesale: a four-character hint of an eight-character value is most of the value.
 func TestRedactedTailDoesNotHintAtShortSecrets(t *testing.T) {
 	if got := redactedTail("short"); strings.Contains(got, "short") {
 		t.Errorf("redactedTail(%q) = %q, leaks the value", "short", got)

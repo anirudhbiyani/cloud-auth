@@ -21,11 +21,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// A fake Azure speaking the documented Graph, ARM and Entra wire shapes. The
-// constraints exercised here are the ones Microsoft's own documentation calls
-// out and that a client discovers the hard way otherwise: the 20-credential cap,
-// the creation throttle, wildcards that are matched literally, and the
-// propagation window after a credential is created.
+// A fake Azure speaking the documented Graph, ARM and Entra wire shapes.
 
 type staticCredential struct{ token string }
 
@@ -39,8 +35,7 @@ type fakeAzure struct {
 	server *httptest.Server
 	calls  atomic.Int32
 
-	// The pacing test drives concurrent requests, so the recorded body is
-	// written from several handler goroutines.
+	// The pacing test drives concurrent requests, so the recorded body is written from several handler goroutines.
 	mu      sync.Mutex
 	lastRaw []byte
 }
@@ -88,8 +83,7 @@ func (f *fakeAzure) body() []byte {
 	return f.lastRaw
 }
 
-// client returns a restClient pointed at the fake, with pacing and sleeps made
-// instantaneous so a throttle test does not cost four real seconds.
+// client returns a restClient pointed at the fake, with pacing and sleeps made instantaneous so a throttle test does not cost four real seconds.
 func (f *fakeAzure) client(t *testing.T) *restClient {
 	t.Helper()
 	base := f.server.URL
@@ -105,9 +99,7 @@ func (f *fakeAzure) client(t *testing.T) *restClient {
 	return c
 }
 
-// Azure caps federated identity credentials at 20 per application or
-// user-assigned managed identity. Its own refusal names the limit without naming
-// what is occupying the slots, so the check happens here first.
+// Azure caps federated identity credentials at 20 per application or user-assigned managed identity.
 func TestCreateFICRefusesTheTwentyFirst(t *testing.T) {
 	f := newFakeAzure(t)
 	const appID = "00000000-0000-0000-0000-000000000000"
@@ -135,15 +127,13 @@ func TestCreateFICRefusesTheTwentyFirst(t *testing.T) {
 	if !strings.Contains(err.Error(), "20 federated identity credentials") {
 		t.Errorf("error should name the count and limit: %v", err)
 	}
-	// The flexible-FIC preview is the obvious next question, and adopting it
-	// breaks IaC reads. Say so in the same breath.
+	// The flexible-FIC preview is the obvious next question, and adopting it breaks IaC reads.
 	if !strings.Contains(err.Error(), "flexible") {
 		t.Errorf("error should mention the flexible-FIC trade-off: %v", err)
 	}
 }
 
-// Nineteen is fine; the boundary must be off-by-one correct in the safe
-// direction.
+// Nineteen is fine; the boundary must be off-by-one correct in the safe direction.
 func TestCreateFICAllowsUpToTheCap(t *testing.T) {
 	f := newFakeAzure(t)
 	const appID = "00000000-0000-0000-0000-000000000000"
@@ -177,10 +167,7 @@ func TestCreateFICAllowsUpToTheCap(t *testing.T) {
 	}
 }
 
-// No FIC property accepts a wildcard. Azure matches the literal characters, so a
-// wildcard subject produces a credential that is created successfully and then
-// never matches a token — the failure mode Microsoft documents as failing
-// without error.
+// No FIC property accepts a wildcard.
 func TestValidateFICRejectsWildcards(t *testing.T) {
 	base := func() *FederatedIdentityCredential {
 		return &FederatedIdentityCredential{
@@ -220,10 +207,7 @@ func TestValidateFICRejectsWildcards(t *testing.T) {
 	}
 }
 
-// Azure throttles credential creation to about 0.25 req/sec per resource and
-// answers a concurrent create under the same identity with 409 — which is
-// indistinguishable from "already exists", so fanning out produces conflicts
-// that get conflated with success.
+// Azure throttles credential creation to about 0.25 req/sec per resource and answers a concurrent create under the same identity with 409 — which is indistinguishable from "already exists", so fanning out produces conflicts that get conflated with success.
 func TestCreateFICIsSerializedAndPaced(t *testing.T) {
 	f := newFakeAzure(t)
 	const appID = "00000000-0000-0000-0000-000000000000"
@@ -248,8 +232,7 @@ func TestCreateFICIsSerializedAndPaced(t *testing.T) {
 		})
 
 	c := f.client(t)
-	// sleep is called while ficMu is held, so appends here are already
-	// serialized by the very lock this test is checking.
+	// sleep is called while ficMu is held, so appends here are already serialized by the very lock this test is checking.
 	var waited []time.Duration
 	c.sleep = func(_ context.Context, d time.Duration) error {
 		waited = append(waited, d)
@@ -287,9 +270,7 @@ func TestCreateFICIsSerializedAndPaced(t *testing.T) {
 	}
 }
 
-// A newly created federated credential legitimately fails for a few minutes
-// while Entra replicates it. That is the ONE 4xx worth retrying here, and the
-// retry must not widen to any other rejection.
+// A newly created federated credential legitimately fails for a few minutes while Entra replicates it.
 func TestExchangeRetriesOnlyPropagationFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -349,8 +330,7 @@ func TestExchangeRetriesOnlyPropagationFailures(t *testing.T) {
 	}
 }
 
-// Entra hides the actionable identifier inside error_description; the code field
-// is "invalid_client" for a dozen distinct causes.
+// Entra hides the actionable identifier inside error_description; the code field is "invalid_client" for a dozen distinct causes.
 func TestParseAPIErrorExtractsTheAADSTSCode(t *testing.T) {
 	err := parseAPIError(http.StatusUnauthorized, []byte(
 		`{"error":"invalid_client","error_description":"AADSTS70021: No matching federated identity record found."}`), "")
@@ -380,8 +360,7 @@ func TestAPIErrorIsTypedNotFound(t *testing.T) {
 	}
 }
 
-// A denied read is not evidence of absence — the distinction the rollback logic
-// turns on.
+// A denied read is not evidence of absence — the distinction the rollback logic turns on.
 func TestForbiddenIsNotAbsence(t *testing.T) {
 	err := parseAPIError(http.StatusForbidden, []byte(
 		`{"error":{"code":"Authorization_RequestDenied","message":"Insufficient privileges."}}`), "app")
@@ -400,15 +379,13 @@ func TestTokenErrorRedactsTheEchoedAssertion(t *testing.T) {
 	if strings.Contains(err.Error(), "c2lnbmF0dXJlLXRoYXQtaXMtbG9uZy1hbmQtc2VjcmV0LTEyMzQ1Njc4OTAxMjM0NTY") {
 		t.Errorf("the assertion survived into the error: %v", err)
 	}
-	// ...but the error must stay diagnosable, or we have traded a leak for an
-	// unusable message.
+	// ...but the error must stay diagnosable, or we have traded a leak for an unusable message.
 	if !strings.Contains(err.Error(), "AADSTS700027") {
 		t.Errorf("error is no longer diagnosable: %v", err)
 	}
 }
 
-// Graph and ARM issue separate tokens for separate audiences. Presenting one to
-// the other fails as an authorization error that reads like a permissions bug.
+// Graph and ARM issue separate tokens for separate audiences.
 func TestGraphAndARMRequestDifferentScopes(t *testing.T) {
 	f := newFakeAzure(t)
 	var scopes []string
@@ -449,9 +426,7 @@ func (r recordingCredential) GetToken(_ context.Context, opts policy.TokenReques
 	return azcore.AccessToken{Token: "t", ExpiresOn: time.Now().Add(time.Hour)}, nil
 }
 
-// Re-running setup must not create a duplicate grant. The assignment name is a
-// client-generated GUID, so Azure answers the repeat with 409 — which is the
-// desired end state, not a failure.
+// Re-running setup must not create a duplicate grant.
 func TestCreateRoleAssignmentTreatsConflictAsSuccess(t *testing.T) {
 	f := newFakeAzure(t)
 	f.handle("/", func(w http.ResponseWriter, _ *http.Request) {
@@ -471,8 +446,7 @@ func TestCreateRoleAssignmentTreatsConflictAsSuccess(t *testing.T) {
 	}
 }
 
-// A brand-new service principal is rejected by ARM as "does not exist" until
-// directory replication catches up, unless principalType says what it is.
+// A brand-new service principal is rejected by ARM as "does not exist" until directory replication catches up, unless principalType says what it is.
 func TestCreateRoleAssignmentSetsPrincipalType(t *testing.T) {
 	f := newFakeAzure(t)
 	f.handle("/", func(w http.ResponseWriter, _ *http.Request) {
@@ -492,9 +466,7 @@ func TestCreateRoleAssignmentSetsPrincipalType(t *testing.T) {
 	}
 }
 
-// Graph pages with @odata.nextLink. Stopping at the first page answers "these
-// are your applications" with a prefix of them, and callers decide existence
-// from the result.
+// Graph pages with @odata.nextLink.
 func TestListApplicationsFollowsPaging(t *testing.T) {
 	f := newFakeAzure(t)
 	f.handle("/v1.0/applications", func(w http.ResponseWriter, r *http.Request) {
@@ -519,8 +491,7 @@ func TestListApplicationsFollowsPaging(t *testing.T) {
 	}
 }
 
-// A new application must not default to a multi-tenant sign-in audience, which
-// would make it assumable from directories the operator does not control.
+// A new application must not default to a multi-tenant sign-in audience, which would make it assumable from directories the operator does not control.
 func TestCreateApplicationDefaultsToSingleTenant(t *testing.T) {
 	f := newFakeAzure(t)
 	f.handle("/v1.0/applications", func(w http.ResponseWriter, _ *http.Request) {
@@ -536,8 +507,7 @@ func TestCreateApplicationDefaultsToSingleTenant(t *testing.T) {
 	}
 }
 
-// Scope has no safe default: a resource-wide one hands out more than was asked
-// for. core/target.go makes the same call for AzureTarget.Scope.
+// Scope has no safe default: a resource-wide one hands out more than was asked for.
 func TestExchangeTokenRequiresAScope(t *testing.T) {
 	f := newFakeAzure(t)
 	_, err := f.client(t).ExchangeToken(context.Background(), &ExchangeTokenInput{
@@ -551,8 +521,7 @@ func TestExchangeTokenRequiresAScope(t *testing.T) {
 	}
 }
 
-// Without credentials the provider must say so, and must not claim the feature
-// is unimplemented — which is what "client not configured" used to mean.
+// Without credentials the provider must say so, and must not claim the feature is unimplemented — which is what "client not configured" used to mean.
 func TestRequireClientsReportsCredentialFailure(t *testing.T) {
 	p := New()
 	p.resolveFailed = errors.New("azure: no credential in the chain provided a token")
@@ -569,9 +538,7 @@ func TestRequireClientsReportsCredentialFailure(t *testing.T) {
 	}
 }
 
-// The Graph write and delete paths. Each is a one-line route over do(), and the
-// thing worth asserting is the route: a wrong verb or path fails against a real
-// tenant in a way no unit test of the body would catch.
+// The Graph write and delete paths.
 func TestGraphWriteAndDeleteRoutes(t *testing.T) {
 	f := newFakeAzure(t)
 	const appID = "00000000-0000-0000-0000-000000000000"
@@ -611,8 +578,7 @@ func TestGraphWriteAndDeleteRoutes(t *testing.T) {
 	}
 
 	want := []string{
-		// PATCH, not PUT: Graph replaces the whole object on PUT, so an update
-		// that sent PUT would silently clear every field it did not set.
+		// PATCH, not PUT: Graph replaces the whole object on PUT, so an update that sent PUT would silently clear every field it did not set.
 		"PATCH /v1.0/applications/" + appID,
 		"POST /v1.0/servicePrincipals",
 		"GET /v1.0/servicePrincipals/sp-1",
@@ -631,8 +597,7 @@ func TestGraphWriteAndDeleteRoutes(t *testing.T) {
 	}
 }
 
-// CreateServicePrincipal requires an application id: creating one without it
-// would produce a principal attached to nothing.
+// CreateServicePrincipal requires an application id: creating one without it would produce a principal attached to nothing.
 func TestCreateServicePrincipalRequiresAnAppID(t *testing.T) {
 	f := newFakeAzure(t)
 	if _, err := f.client(t).CreateServicePrincipal(context.Background(), ""); err == nil {
@@ -657,8 +622,7 @@ func TestCreateApplicationRequiresADisplayName(t *testing.T) {
 	}
 }
 
-// redactedPath keeps scheme, host and path for diagnostics and drops the query,
-// which on these APIs carries operator-supplied resource ids.
+// redactedPath keeps scheme, host and path for diagnostics and drops the query, which on these APIs carries operator-supplied resource ids.
 func TestRedactedPath(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
 		{"https://graph.microsoft.com/v1.0/applications?$filter=secret", "https://graph.microsoft.com/v1.0/applications"},

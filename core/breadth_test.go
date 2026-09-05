@@ -6,10 +6,7 @@ import (
 	"testing"
 )
 
-// The behaviour this exists to fix: `--subject "repo:myorg/myrepo:*"` — the
-// value the README told people to type — passed every gate with no warning,
-// because isUnscoped correctly answers a narrower question and nothing answered
-// the broader one.
+// The behaviour this exists to fix: `--subject "repo:myorg/myrepo:*"` — the value the README told people to type — passed every gate with no warning, because isUnscoped correctly answers a narrower question and nothing answered the broader one.
 
 func TestScoreSubject(t *testing.T) {
 	for _, tc := range []struct {
@@ -67,8 +64,7 @@ func TestScoreSubject(t *testing.T) {
 	}
 }
 
-// The three patterns the PRD calls out by name as passing isUnscoped while
-// admitting far more than an operator expects. This is the whole point.
+// The three patterns the PRD calls out by name as passing isUnscoped while admitting far more than an operator expects.
 func TestPatternsThatIsUnscopedCorrectlyCallsScoped(t *testing.T) {
 	for _, tc := range []struct {
 		subject string
@@ -80,8 +76,7 @@ func TestPatternsThatIsUnscopedCorrectlyCallsScoped(t *testing.T) {
 		{"repo:myorg/*", BreadthHigh},
 	} {
 		t.Run(tc.subject, func(t *testing.T) {
-			// isUnscoped is right to say these pin real characters. The scorer
-			// is answering a different question, and both answers stand.
+			// isUnscoped is right to say these pin real characters.
 			if isUnscoped(tc.subject) {
 				t.Fatalf("isUnscoped(%q) = true; this test's premise is that it is false", tc.subject)
 			}
@@ -92,8 +87,7 @@ func TestPatternsThatIsUnscopedCorrectlyCallsScoped(t *testing.T) {
 	}
 }
 
-// The scorer must not disagree with isUnscoped where isUnscoped has an opinion:
-// anything it calls unscoped is, by definition, maximally broad.
+// The scorer must not disagree with isUnscoped where isUnscoped has an opinion: anything it calls unscoped is, by definition, maximally broad.
 func TestScorerAgreesWithIsUnscoped(t *testing.T) {
 	for _, s := range []string{"", "*", "**", "?*", "*:*", "*:*:*", "   ", "?:?"} {
 		if !isUnscoped(s) {
@@ -105,9 +99,7 @@ func TestScorerAgreesWithIsUnscoped(t *testing.T) {
 	}
 }
 
-// Only critical breadth demands a recorded reason. Making High require one too
-// would put a prompt in front of a legitimately common org-wide pattern and
-// train people to pass the override reflexively.
+// Only critical breadth demands a recorded reason.
 func TestOnlyCriticalNeedsJustification(t *testing.T) {
 	for _, tc := range []struct {
 		subject string
@@ -126,8 +118,7 @@ func TestOnlyCriticalNeedsJustification(t *testing.T) {
 	}
 }
 
-// Breadth ordering is compared with >= in the gates, so it has to be a real
-// ordering — the same mistake Severity made with a string type.
+// Breadth ordering is compared with >= in the gates, so it has to be a real ordering — the same mistake Severity made with a string type.
 func TestBreadthOrdering(t *testing.T) {
 	if BreadthExact >= BreadthInfo ||
 		BreadthInfo >= BreadthMedium ||
@@ -168,21 +159,14 @@ func FuzzScoreSubject(f *testing.F) {
 		if got.BreadthText == "" || got.Admits == "" {
 			t.Fatalf("ScoreSubject(%q) produced an incomplete assessment: %+v", subject, got)
 		}
-		// A subject with no wildcard that pins something is exact: there is
-		// nothing in it for a pattern operator to expand.
-		//
-		// The isUnscoped guard is not redundant. The fuzzer found ":::" — no
-		// wildcard, and it still pins nothing, because every segment is empty.
-		// "contains no wildcard" and "constrains something" are different
-		// properties and this invariant needs both.
+		// A subject with no wildcard that pins something is exact: there is nothing in it for a pattern operator to expand.
 		if !strings.ContainsAny(subject, "*?") && !isUnscoped(subject) {
 			if got.Breadth > BreadthExact {
 				t.Fatalf("ScoreSubject(%q) = %s, but it pins characters and has no wildcard",
 					subject, got.Breadth)
 			}
 		}
-		// Whatever isUnscoped calls unscoped is maximally broad, or the two
-		// have drifted apart.
+		// Whatever isUnscoped calls unscoped is maximally broad, or the two have drifted apart.
 		if isUnscoped(subject) && got.Breadth != BreadthCritical {
 			t.Fatalf("isUnscoped(%q) = true but ScoreSubject = %s", subject, got.Breadth)
 		}
@@ -199,10 +183,7 @@ func (f fakeTrust) TrustPolicy(context.Context, MechanismRef) (*TrustPolicy, err
 	return f.policy, f.err
 }
 
-// The grading has to reach the report, and — critically — a medium-breadth
-// subject must be REPORTED without invalidating it. Failing every deployment
-// that uses repo:org/repo:* on a matter of degree would train people to ignore
-// this check entirely.
+// The grading has to reach the report, and — critically — a medium-breadth subject must be REPORTED without invalidating it.
 func TestSubjectBreadthValidatorGrades(t *testing.T) {
 	for _, tc := range []struct {
 		name         string

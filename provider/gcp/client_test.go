@@ -18,10 +18,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// A fake GCP. The wire shapes here are the documented ones — the LRO envelope,
-// the error envelope, the IAM policy etag — because the point of these tests is
-// that this client speaks the real protocol, not that it round-trips its own
-// assumptions.
+// A fake GCP.
 
 type fakeGCP struct {
 	t       *testing.T
@@ -60,8 +57,7 @@ func (f *fakeGCP) json(w http.ResponseWriter, status int, body any) {
 	}
 }
 
-// client returns a restClient pointed at the fake, with a static token so no
-// real credential resolution happens.
+// client returns a restClient pointed at the fake, with a static token so no real credential resolution happens.
 func (f *fakeGCP) client(t *testing.T) *restClient {
 	t.Helper()
 	base := f.server.URL
@@ -77,10 +73,7 @@ func (f *fakeGCP) client(t *testing.T) *restClient {
 	return c
 }
 
-// A 404 must be recoverable as absence WITHOUT matching on strings. Setup's
-// create-or-update decision and the rollback both branch on this, and the
-// rollback used to be destructive when "could not tell" read as "does not
-// exist".
+// A 404 must be recoverable as absence WITHOUT matching on strings.
 func TestAPIErrorIsTypedNotFound(t *testing.T) {
 	f := newFakeGCP(t)
 	f.handle("/v1/projects/p/locations/global/workloadIdentityPools/missing", func(w http.ResponseWriter, _ *http.Request) {
@@ -126,16 +119,13 @@ func TestAPIErrorDistinguishesPermissionFromAbsence(t *testing.T) {
 	if err == nil {
 		t.Fatal("want an error")
 	}
-	// This is the distinction the destructive-rollback fix depends on: a denied
-	// read is NOT evidence the pool is absent.
+	// This is the distinction the destructive-rollback fix depends on: a denied read is NOT evidence the pool is absent.
 	if isNotFoundError(err) {
 		t.Errorf("a 403 read as absence: %v", err)
 	}
 }
 
-// Pool creation is a long-running operation. Returning as soon as the API
-// accepts the request would leave Setup binding IAM against a pool that is not
-// yet a valid principal set.
+// Pool creation is a long-running operation.
 func TestCreatePoolAwaitsTheOperation(t *testing.T) {
 	f := newFakeGCP(t)
 	const poolName = "projects/123/locations/global/workloadIdentityPools/ci"
@@ -183,8 +173,7 @@ func TestCreatePoolAwaitsTheOperation(t *testing.T) {
 	}
 }
 
-// A failed operation must surface as an error, not as a successfully created
-// resource with empty fields.
+// A failed operation must surface as an error, not as a successfully created resource with empty fields.
 func TestAwaitSurfacesOperationFailure(t *testing.T) {
 	f := newFakeGCP(t)
 	f.handle("/v1/projects/123/locations/global/workloadIdentityPools", func(w http.ResponseWriter, _ *http.Request) {
@@ -207,8 +196,7 @@ func TestAwaitSurfacesOperationFailure(t *testing.T) {
 	}
 }
 
-// The etag read by GetIAMPolicy must be sent back, or two concurrent grants
-// silently drop one — and on a service account, what gets dropped is access.
+// The etag read by GetIAMPolicy must be sent back, or two concurrent grants silently drop one — and on a service account, what gets dropped is access.
 func TestSetIAMPolicySendsTheEtagBack(t *testing.T) {
 	f := newFakeGCP(t)
 	const resource = "projects/p/serviceAccounts/sa@p.iam.gserviceaccount.com"
@@ -257,8 +245,7 @@ func TestSetIAMPolicySendsTheEtagBack(t *testing.T) {
 	}
 }
 
-// getIamPolicy must ASK for version 3, or the response omits conditions and the
-// read-modify-write strips somebody else's condition.
+// getIamPolicy must ASK for version 3, or the response omits conditions and the read-modify-write strips somebody else's condition.
 func TestGetIAMPolicyRequestsVersion3(t *testing.T) {
 	f := newFakeGCP(t)
 	const resource = "projects/p/serviceAccounts/sa@p.iam.gserviceaccount.com"
@@ -278,9 +265,7 @@ func TestGetIAMPolicyRequestsVersion3(t *testing.T) {
 	}
 }
 
-// The STS token endpoint takes no caller credential — the subject token IS the
-// proof. Attaching an ADC bearer would put a second, more privileged identity on
-// a request that does not need one.
+// The STS token endpoint takes no caller credential — the subject token IS the proof.
 func TestExchangeTokenSendsNoBearerHeader(t *testing.T) {
 	f := newFakeGCP(t)
 	var sawAuth string
@@ -311,8 +296,7 @@ func TestExchangeTokenSendsNoBearerHeader(t *testing.T) {
 	}
 }
 
-// STS error bodies echo the assertion back. Keeping the diagnosis while dropping
-// the credential is the same trade target/redaction_test.go makes.
+// STS error bodies echo the assertion back.
 func TestExchangeTokenRedactsTheEchoedAssertion(t *testing.T) {
 	f := newFakeGCP(t)
 	const assertion = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJyZXBvOm9yZy9yZXBvIn0.c2lnbmF0dXJlLXRoYXQtaXMtdmVyeS1sb25nLWFuZC1zZWNyZXQtMTIzNDU2Nzg5MA"
@@ -332,8 +316,7 @@ func TestExchangeTokenRedactsTheEchoedAssertion(t *testing.T) {
 	if strings.Contains(err.Error(), "c2lnbmF0dXJlLXRoYXQtaXMtdmVyeS1sb25nLWFuZC1zZWNyZXQtMTIzNDU2Nzg5MA") {
 		t.Errorf("the assertion survived into the error: %v", err)
 	}
-	// ...but the error must still be diagnosable, or we have traded a leak for
-	// an unusable message.
+	// ...but the error must still be diagnosable, or we have traded a leak for an unusable message.
 	if !strings.Contains(err.Error(), "invalid_grant") && !strings.Contains(err.Error(), "400") {
 		t.Errorf("error is no longer diagnosable: %v", err)
 	}
@@ -352,9 +335,7 @@ func TestGenerateIDTokenRequiresAnAudience(t *testing.T) {
 	}
 }
 
-// GCP's mapping limits, checked before the call. The API rejects an over-limit
-// mapping with a message naming the ceiling but not the offending entry — and by
-// then the pool exists, so the operator is rolling back a half-built setup.
+// GCP's mapping limits, checked before the call.
 func TestCheckAttributeMapping(t *testing.T) {
 	many := map[string]string{"google.subject": "assertion.sub"}
 	for i := range maxAttributeMappings {
@@ -402,8 +383,7 @@ func TestCheckAttributeMapping(t *testing.T) {
 	}
 }
 
-// An over-limit mapping must be refused before the provider is created, not
-// after.
+// An over-limit mapping must be refused before the provider is created, not after.
 func TestCreateProviderChecksMappingBeforeCalling(t *testing.T) {
 	f := newFakeGCP(t)
 	_, err := f.client(t).CreateWorkloadIdentityPoolProvider(context.Background(),
@@ -420,8 +400,7 @@ func TestCreateProviderChecksMappingBeforeCalling(t *testing.T) {
 	}
 }
 
-// Without credentials the provider must say so — and must not claim the feature
-// is unimplemented, which is what "client not configured" used to mean.
+// Without credentials the provider must say so — and must not claim the feature is unimplemented, which is what "client not configured" used to mean.
 func TestRequireClientsReportsCredentialFailure(t *testing.T) {
 	p := New()
 	p.resolveFailed = errors.New("google: could not find default credentials")

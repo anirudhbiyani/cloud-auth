@@ -10,8 +10,7 @@ import (
 	"time"
 )
 
-// A session token per read meant two round trips per metadata field, and Detect
-// alone made four — against a service that rate-limits.
+// A session token per read meant two round trips per metadata field, and Detect alone made four — against a service that rate-limits.
 func TestSessionTokenIsReused(t *testing.T) {
 	var tokens, gets int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

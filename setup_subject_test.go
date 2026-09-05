@@ -5,9 +5,7 @@ import (
 	"testing"
 )
 
-// The CLI must not be able to express an accidentally-unscoped trust, and must
-// be able to express a deliberate one. Both halves are the point: a gate with no
-// gate-opening flag just moves the problem to "operator gives up".
+// The CLI must not be able to express an accidentally-unscoped trust, and must be able to express a deliberate one.
 func TestSetupFlagsGovernSubjectScoping(t *testing.T) {
 	base := []string{
 		"--type", "aws-oidc",

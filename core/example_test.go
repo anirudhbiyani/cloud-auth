@@ -7,12 +7,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// The example in the package doc, as a real Example function so the compiler
-// checks it. Example functions with no "Output:" comment are compiled but not
-// run, which is what we want here: this one would talk to AWS.
-//
-// A documented example that does not compile is worse than no example — it is
-// the first thing a new user copies.
+// The example in the package doc, as a real Example function so the compiler checks it.
 func ExampleSetup() {
 	ctx := context.Background()
 
@@ -44,8 +39,7 @@ func ExampleSetup() {
 	}
 }
 
-// The redaction the package doc warns about, as an executable check rather than
-// a claim.
+// The redaction the package doc warns about, as an executable check rather than a claim.
 func ExampleCredentials_Reveal() {
 	creds := core.Credentials{
 		Cloud:           core.AWS,
@@ -56,14 +50,12 @@ func ExampleCredentials_Reveal() {
 	// Printing is safe: every formatting path redacts.
 	_ = creds.String()
 
-	// Reveal is the one way to the plaintext, and is named to be visible in
-	// review.
+	// Reveal is the one way to the plaintext, and is named to be visible in review.
 	plain := creds.Reveal()
 	_ = plain.SecretAccessKey
 }
 
-// Building a target: the cloud is implied by the type, so a field belonging to
-// another cloud cannot be written down.
+// Building a target: the cloud is implied by the type, so a field belonging to another cloud cannot be written down.
 func ExampleTarget() {
 	targets := []core.Target{
 		core.AWSTarget{RoleARN: "arn:aws:iam::123456789012:role/reader"},

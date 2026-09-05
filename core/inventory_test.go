@@ -7,10 +7,7 @@ import (
 	"testing"
 )
 
-// The check no mainstream scanner makes: shared issuers run ONE issuer across
-// every tenant and permit namespace reuse, so a deleted org can be re-registered
-// by anyone, who then mints a token with an identical sub and assumes a role
-// that is still sitting there.
+// The check no mainstream scanner makes: shared issuers run ONE issuer across every tenant and permit namespace reuse, so a deleted org can be re-registered by anyone, who then mints a token with an identical sub and assumes a role that is still sitting there.
 
 func TestNamespaceFromSubject(t *testing.T) {
 	for _, tc := range []struct {
@@ -25,8 +22,7 @@ func TestNamespaceFromSubject(t *testing.T) {
 		{"Terraform Cloud", "organization:myorg:project:prod:workspace:app:run_phase:apply", "myorg", true},
 		{"Kubernetes", "system:serviceaccount:payments:ledger", "payments", true},
 
-		// A wildcard namespace is unbounded, not unregistered. Reporting one as
-		// claimable would be wrong, and the breadth score already covers it.
+		// A wildcard namespace is unbounded, not unregistered.
 		{"wildcard org", "repo:*", "", false},
 		{"wildcard repo", "repo:myorg/*", "", false},
 		{"wildcard namespace", "system:serviceaccount:*:ledger", "", false},
@@ -55,8 +51,7 @@ func TestIsSharedIssuer(t *testing.T) {
 		{"token.actions.githubusercontent.com", true},
 		{"https://gitlab.com", true},
 		{"https://app.terraform.io", true},
-		// A cluster's own issuer serves one tenant: its namespaces cannot be
-		// re-registered by a stranger.
+		// A cluster's own issuer serves one tenant: its namespaces cannot be re-registered by a stranger.
 		{"https://oidc.eks.us-west-2.amazonaws.com/id/EXAMPLE", false},
 		{"https://gitlab.example.com", false},
 		{"", false},
@@ -131,8 +126,7 @@ func TestResolveLiveness(t *testing.T) {
 	}
 }
 
-// "We could not tell" and "it is safe" are different answers, and conflating
-// them is the same mistake as reporting a skipped check as passed.
+// "We could not tell" and "it is safe" are different answers, and conflating them is the same mistake as reporting a skipped check as passed.
 func TestResolverFailureIsUnknownNotClean(t *testing.T) {
 	got := ResolveLiveness(context.Background(),
 		"https://token.actions.githubusercontent.com",
@@ -150,8 +144,7 @@ func TestResolverFailureIsUnknownNotClean(t *testing.T) {
 	}
 }
 
-// The immutable-subject enforcement applies to any renamed OR transferred
-// repository, which makes a legacy subject a scheduled outage nobody scheduled.
+// The immutable-subject enforcement applies to any renamed OR transferred repository, which makes a legacy subject a scheduled outage nobody scheduled.
 func TestIsRenameFragile(t *testing.T) {
 	const gh = "https://token.actions.githubusercontent.com"
 	for _, tc := range []struct {
@@ -238,8 +231,7 @@ func TestBuildInventoryScoresAndResolves(t *testing.T) {
 	if wide.Breadth.Breadth != BreadthHigh {
 		t.Errorf("org-wide subject: breadth = %s, want high", wide.Breadth.Breadth)
 	}
-	// A wildcard namespace is unbounded, not claimable — those are different
-	// problems and only one of them is a land grab.
+	// A wildcard namespace is unbounded, not claimable — those are different problems and only one of them is a land grab.
 	if wide.Liveness.State != NamespaceUnknown {
 		t.Errorf("wildcard namespace: state = %q, want unknown", wide.Liveness.State)
 	}
@@ -262,8 +254,7 @@ func TestBuildInventoryContinuesPastAFailingSource(t *testing.T) {
 	if len(failures) != 1 {
 		t.Fatalf("got %d failures, want 1", len(failures))
 	}
-	// The failure has to name the cloud, or an incomplete inventory reads as a
-	// complete one with less in it.
+	// The failure has to name the cloud, or an incomplete inventory reads as a complete one with less in it.
 	if !strings.Contains(failures[0].Error(), "gcp") {
 		t.Errorf("the failure does not name the cloud: %v", failures[0])
 	}
@@ -290,9 +281,7 @@ func TestRecordSeverity(t *testing.T) {
 			Liveness:      LivenessResult{State: NamespaceLive}}, FindingWarning},
 		{"nothing wrong", TrustRecord{
 			Liveness: LivenessResult{State: NamespaceLive}}, FindingInfo},
-		// Unknown liveness is not critical on its own — it is the absence of an
-		// answer, and treating every unresolvable namespace as an emergency
-		// would bury the ones that are.
+		// Unknown liveness is not critical on its own — it is the absence of an answer, and treating every unresolvable namespace as an emergency would bury the ones that are.
 		{"unknown liveness", TrustRecord{
 			Liveness: LivenessResult{State: NamespaceUnknown}}, FindingInfo},
 	} {

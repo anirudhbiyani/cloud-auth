@@ -9,9 +9,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// fakeVault records the calls made against it. The recording is the point for
-// several checks below: Delete's contract is about what it attempts, not what it
-// returns.
+// fakeVault records the calls made against it.
 type fakeVault struct {
 	VaultClient
 
@@ -148,8 +146,7 @@ func TestVaultSpecValidation(t *testing.T) {
 	}
 }
 
-// The mechanism type is the string loadSpec dispatches on, so it is part of the
-// file format and must not drift.
+// The mechanism type is the string loadSpec dispatches on, so it is part of the file format and must not drift.
 func TestVaultMechanismTypeIsStable(t *testing.T) {
 	if got := (&VaultBrokerSpec{}).Type(); got != "vault_broker" {
 		t.Errorf("Type() = %q, want vault_broker: this string is the on-disk format", got)
@@ -159,8 +156,7 @@ func TestVaultMechanismTypeIsStable(t *testing.T) {
 	}
 }
 
-// The auth method is only enabled when it is absent. Enabling an existing one
-// would reset its configuration.
+// The auth method is only enabled when it is absent.
 func TestVaultSetupEnablesTheAuthMethodOnlyWhenAbsent(t *testing.T) {
 	absent := newFakeVault()
 	absent.readAuthErr = errors.New("404 not found")
@@ -241,7 +237,6 @@ func TestVaultSetupSurfacesAWriteFailure(t *testing.T) {
 }
 
 // Delete tries both role kinds because the ref does not record which was used.
-// That is deliberate, but it must not report success when nothing was removed.
 func TestVaultDeleteAttemptsBothRoleKinds(t *testing.T) {
 	f := newFakeVault()
 	ref := core.MechanismRef{
@@ -257,8 +252,7 @@ func TestVaultDeleteAttemptsBothRoleKinds(t *testing.T) {
 	}
 }
 
-// The auth method is shared infrastructure, so it is only disabled for a
-// mechanism cloud-auth created.
+// The auth method is shared infrastructure, so it is only disabled for a mechanism cloud-auth created.
 func TestVaultDeleteDisablesTheAuthMethodOnlyWhenOwned(t *testing.T) {
 	owned := newFakeVault()
 	ref := core.MechanismRef{
@@ -294,8 +288,7 @@ func TestVaultDeleteDryRunMakesNoCalls(t *testing.T) {
 	}
 }
 
-// Vault mints real AWS credentials, so the redaction rules apply to whatever it
-// hands back.
+// Vault mints real AWS credentials, so the redaction rules apply to whatever it hands back.
 func TestVaultGeneratedCredentialsCarryALifetime(t *testing.T) {
 	f := newFakeVault()
 	out, err := New(WithVaultClient(f)).GenerateAWSCredentials(context.Background(),
@@ -375,8 +368,7 @@ func contains(xs []string, want string) bool {
 	return false
 }
 
-// A dry run must work with no client at all: it describes a plan, and requiring
-// Vault credentials to be told what would happen defeats the purpose.
+// A dry run must work with no client at all: it describes a plan, and requiring Vault credentials to be told what would happen defeats the purpose.
 func TestVaultDryRunNeedsNoClient(t *testing.T) {
 	out, err := New().Setup(context.Background(), jwtSpec(), core.SetupOptions{DryRun: true})
 	if err != nil {

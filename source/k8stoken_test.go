@@ -22,8 +22,7 @@ func decodeJSON(r *http.Request, v any) error {
 	return json.Unmarshal(b, v)
 }
 
-// fakeTokenRequestServer returns an httptest server that mints a JWT (via
-// gcpJWT) whose aud is the requested audience.
+// fakeTokenRequestServer returns an httptest server that mints a JWT (via gcpJWT) whose aud is the requested audience.
 func fakeTokenRequestServer(t *testing.T, wantPath string) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -49,9 +48,7 @@ func fakeTokenRequestServer(t *testing.T, wantPath string) *httptest.Server {
 }
 
 func TestAWSMintIRSAFallsBackToTokenRequest(t *testing.T) {
-	// The projected token's aud is "sts.amazonaws.com" but the caller wants a
-	// GCP target audience. With a TokenRequest client available, Mint should
-	// mint a fresh token carrying the requested audience.
+	// The projected token's aud is "sts.amazonaws.com" but the caller wants a GCP target audience.
 	dir := t.TempDir()
 	tokFile := filepath.Join(dir, "token")
 	os.WriteFile(tokFile, []byte(gcpJWT("sts.amazonaws.com")), 0600)

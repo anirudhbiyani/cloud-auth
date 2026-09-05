@@ -12,9 +12,7 @@ func (s stubTrustPolicy) TrustPolicy(context.Context, MechanismRef) (*TrustPolic
 	return s.tp, nil
 }
 
-// Regression: this exact input used to report
-// "trust policy pins the expected issuer, audience and subject" — a false
-// assurance about the only condition that decides who may assume the role.
+// Regression: this exact input used to report "trust policy pins the expected issuer, audience and subject" — a false assurance about the only condition that decides who may assume the role.
 func TestTrustPolicyFailsWhenNoSubjectConditionExists(t *testing.T) {
 	live := &TrustPolicy{
 		Issuer:    "https://token.actions.githubusercontent.com",
@@ -34,9 +32,7 @@ func TestTrustPolicyFailsWhenNoSubjectConditionExists(t *testing.T) {
 	}
 }
 
-// Regression: an attacker (or a drifting IaC module) appends a second Allow
-// statement. The expected values are all still present, so every membership
-// test passes — which is exactly why the validator now compares as sets.
+// Regression: an attacker (or a drifting IaC module) appends a second Allow statement.
 func TestTrustPolicyFailsWhenWidenedByAnExtraStatement(t *testing.T) {
 	live := &TrustPolicy{
 		Issuer: "https://token.actions.githubusercontent.com",

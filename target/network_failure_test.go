@@ -11,9 +11,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// The failure modes a token endpoint actually exhibits in production, none of
-// which were covered. The invariant throughout: an error, never partial
-// credentials, and never a hang.
+// The failure modes a token endpoint actually exhibits in production, none of which were covered.
 func TestExchangeHandlesMalformedResponses(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -86,8 +84,7 @@ func TestExchangeHandlesMalformedResponses(t *testing.T) {
 			if creds != nil {
 				t.Errorf("credentials returned alongside an error: %v", creds)
 			}
-			// The error must be attributable to a category, or a caller cannot
-			// decide whether to retry.
+			// The error must be attributable to a category, or a caller cannot decide whether to retry.
 			if cat := core.CategoryOf(err); cat == "" {
 				t.Errorf("error carries no category: %v", err)
 			}
@@ -95,8 +92,7 @@ func TestExchangeHandlesMalformedResponses(t *testing.T) {
 	}
 }
 
-// DNS failure is distinct from a refused connection, and both are retryable
-// network trouble rather than a trust problem.
+// DNS failure is distinct from a refused connection, and both are retryable network trouble rather than a trust problem.
 func TestExchangeHandlesDNSFailure(t *testing.T) {
 	_, err := NewAWSExchanger(
 		WithAWSEndpoint("https://this-host-does-not-exist.invalid/"),
@@ -114,8 +110,7 @@ func TestExchangeHandlesDNSFailure(t *testing.T) {
 	}
 }
 
-// A TLS failure must not be reported as a trust misconfiguration: the operator
-// would go looking at IAM instead of at their certificate store.
+// A TLS failure must not be reported as a trust misconfiguration: the operator would go looking at IAM instead of at their certificate store.
 func TestExchangeHandlesTLSFailure(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
 	defer srv.Close()
@@ -159,8 +154,7 @@ func TestExchangeHandlesAnEnormousBody(t *testing.T) {
 	}
 }
 
-// Every exchanger must behave the same way, or a caller's error handling is
-// per-cloud guesswork.
+// Every exchanger must behave the same way, or a caller's error handling is per-cloud guesswork.
 func TestAllExchangersRejectAnEmptyBody(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
 	defer srv.Close()

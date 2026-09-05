@@ -8,8 +8,6 @@ import (
 )
 
 // k8s-federation reached "unsupported spec type" on Azure until this landed.
-// Azure matches the subject literally, so the subject is the whole game: get it
-// wrong and the credential is created successfully and never matches a token.
 
 func k8sSpec(mutate func(*core.K8sServiceAccountFederationSpec)) *core.K8sServiceAccountFederationSpec {
 	s := &core.K8sServiceAccountFederationSpec{
@@ -56,9 +54,7 @@ func TestK8sToFederatedCredentialSpec(t *testing.T) {
 	}
 }
 
-// The credential name must be stable and Azure-legal: re-running setup for one
-// ServiceAccount has to target the same credential rather than consuming
-// another of the twenty slots.
+// The credential name must be stable and Azure-legal: re-running setup for one ServiceAccount has to target the same credential rather than consuming another of the twenty slots.
 func TestK8sCredentialNameIsStableAndLegal(t *testing.T) {
 	a, _ := k8sToFederatedCredentialSpec(k8sSpec(nil))
 	b, _ := k8sToFederatedCredentialSpec(k8sSpec(nil))
@@ -84,16 +80,13 @@ func TestK8sCredentialNameIsStableAndLegal(t *testing.T) {
 	if strings.HasPrefix(name, "-") || strings.HasSuffix(name, "-") {
 		t.Errorf("credential name %q starts or ends with a hyphen", name)
 	}
-	// The subject keeps the ORIGINAL casing and characters: it is a Kubernetes
-	// claim, not an Azure resource name, and Azure compares it literally.
+	// The subject keeps the ORIGINAL casing and characters: it is a Kubernetes claim, not an Azure resource name, and Azure compares it literally.
 	if got.Subject != "system:serviceaccount:Team/Payments:Ledger_Service.01" {
 		t.Errorf("Subject was sanitized: %q — it must match the token's sub claim exactly", got.Subject)
 	}
 }
 
-// buildAzureSpec normalizes --identity-type for the azure-federated path, but
-// buildK8sSpec passes the raw flag through, so "managed-identity" arrived here
-// unrecognised while the same word worked on the other command.
+// buildAzureSpec normalizes --identity-type for the azure-federated path, but buildK8sSpec passes the raw flag through, so "managed-identity" arrived here unrecognised while the same word worked on the other command.
 func TestIdentityTypeSpellings(t *testing.T) {
 	for _, in := range []string{"app", "app_registration", "app-registration", "APP", ""} {
 		t.Run("accepted: "+in, func(t *testing.T) {
@@ -109,10 +102,7 @@ func TestIdentityTypeSpellings(t *testing.T) {
 		})
 	}
 
-	// Managed identity needs a resource group and an identity name, and
-	// K8sToAzureConfig has fields for neither — so it is refused here with
-	// somewhere to go, rather than failing one layer down on a field this spec
-	// type cannot set.
+	// Managed identity needs a resource group and an identity name, and K8sToAzureConfig has fields for neither — so it is refused here with somewhere to go, rather than failing one layer down on a field this spec type cannot set.
 	for _, in := range []string{"managed-identity", "managed_identity", "mi"} {
 		t.Run("refused: "+in, func(t *testing.T) {
 			_, err := k8sToFederatedCredentialSpec(k8sSpec(func(s *core.K8sServiceAccountFederationSpec) {
@@ -128,8 +118,7 @@ func TestIdentityTypeSpellings(t *testing.T) {
 	}
 }
 
-// With no application id, core requires a display name; failing an operator who
-// gave a namespace and a ServiceAccount would not be useful.
+// With no application id, core requires a display name; failing an operator who gave a namespace and a ServiceAccount would not be useful.
 func TestNoApplicationIDGetsADisplayName(t *testing.T) {
 	got, err := k8sToFederatedCredentialSpec(k8sSpec(func(s *core.K8sServiceAccountFederationSpec) {
 		s.AzureConfig.ApplicationID = ""

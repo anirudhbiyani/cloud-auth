@@ -9,10 +9,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// Vault was the one wired provider `audit` did not cover, which made "which
-// external identities can assume anything" a question with a Vault-shaped hole
-// in it. A JWT auth role is a federated trust relationship in exactly the sense
-// the clouds' are.
+// Vault was the one wired provider `audit` did not cover, which made "which external identities can assume anything" a question with a Vault-shaped hole in it.
 
 type listingVault struct {
 	VaultClient
@@ -52,13 +49,9 @@ func (l *listingVault) ReadJWTConfig(_ context.Context, path string) (*JWTAuthCo
 func TestVaultListTrustRecords(t *testing.T) {
 	v := &listingVault{
 		mounts: map[string]*AuthMethod{
-			// Mounted at a non-conventional path on purpose: the conventional
-			// "jwt" is a convention, not a rule, and an inventory that only
-			// looked there would miss most real installations.
+			// Mounted at a non-conventional path on purpose: the conventional "jwt" is a convention, not a rule, and an inventory that only looked there would miss most real installations.
 			"github": {Type: "jwt", Path: "github"},
-			// aws auth federates too, but by verifying signed cloud metadata
-			// rather than a JWT against a JWKS. Claiming to inventory it and
-			// then reporting an empty subject would be worse than the gap.
+			// aws auth federates too, but by verifying signed cloud metadata rather than a JWT against a JWKS.
 			"aws":   {Type: "aws", Path: "aws"},
 			"token": {Type: "token", Path: "token"},
 		},
@@ -103,14 +96,11 @@ func TestVaultListTrustRecords(t *testing.T) {
 	if deploy.SubjectCondition != "repo:myorg/myrepo:ref:refs/heads/main" {
 		t.Errorf("SubjectCondition = %q", deploy.SubjectCondition)
 	}
-	// Vault compares bound_subject exactly; there is no pattern operator, so
-	// recording one would invite the wildcard detector to reason about matching
-	// Vault does not do.
+	// Vault compares bound_subject exactly; there is no pattern operator, so recording one would invite the wildcard detector to reason about matching Vault does not do.
 	if deploy.Operator != "bound_subject" {
 		t.Errorf("Operator = %q", deploy.Operator)
 	}
-	// A legacy GitHub subject is rename-fragile through Vault exactly as
-	// through AWS — the issuer is the same global one.
+	// A legacy GitHub subject is rename-fragile through Vault exactly as through AWS — the issuer is the same global one.
 	if !core.IsRenameFragile(deploy.Issuer, deploy.SubjectCondition) {
 		t.Error("a legacy GitHub subject should be flagged rename-fragile")
 	}
@@ -121,8 +111,7 @@ func TestVaultListTrustRecords(t *testing.T) {
 	}
 }
 
-// A role with neither bound_subject nor a sub claim accepts ANY token the
-// issuer signs. That is the confused-deputy hole, and it must score as such.
+// A role with neither bound_subject nor a sub claim accepts ANY token the issuer signs.
 func TestVaultRoleWithNoSubjectScoresCritical(t *testing.T) {
 	v := &listingVault{
 		mounts:  map[string]*AuthMethod{"jwt": {Type: "jwt", Path: "jwt"}},
@@ -167,9 +156,7 @@ func TestVaultBoundClaimsList(t *testing.T) {
 	}
 }
 
-// One unreadable mount or role must not abort the inventory, and must be
-// recorded as a gap: a mount nobody can list is missing information, not an
-// absence of trust.
+// One unreadable mount or role must not abort the inventory, and must be recorded as a gap: a mount nobody can list is missing information, not an absence of trust.
 func TestVaultUnreadableMountIsRecordedAsUnknown(t *testing.T) {
 	v := &listingVault{
 		mounts: map[string]*AuthMethod{
@@ -204,8 +191,7 @@ func TestVaultUnreadableMountIsRecordedAsUnknown(t *testing.T) {
 	}
 }
 
-// Order is stable: the mount table is a map and Go randomizes iteration, so two
-// runs of the inventory would otherwise not diff cleanly.
+// Order is stable: the mount table is a map and Go randomizes iteration, so two runs of the inventory would otherwise not diff cleanly.
 func TestVaultRecordOrderIsStable(t *testing.T) {
 	mounts := map[string]*AuthMethod{}
 	roles := map[string][]string{}
@@ -238,9 +224,7 @@ func TestVaultRecordOrderIsStable(t *testing.T) {
 	}
 }
 
-// A failure listing mounts at all is a real error: unlike one bad mount, it
-// means nothing about the Vault was seen, and an empty inventory would read as
-// "no federated trust here".
+// A failure listing mounts at all is a real error: unlike one bad mount, it means nothing about the Vault was seen, and an empty inventory would read as "no federated trust here".
 func TestVaultListAuthMethodsFailureIsAnError(t *testing.T) {
 	v := &listingVault{mountsErr: errors.New("permission denied on sys/auth")}
 	if _, err := New(WithVaultClient(v)).ListTrustRecords(context.Background()); err == nil {

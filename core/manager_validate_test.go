@@ -25,9 +25,7 @@ func (f *fakeLifecycleProvider) Validate(context.Context, MechanismRef, Validate
 	return f.report, nil
 }
 
-// The manager previously consulted only a global validator registry that nothing
-// ever populated, so every `validate` returned "Valid: true" with ZERO checks —
-// a vacuous pass that hid the fact the provider's own checks never ran.
+// The manager previously consulted only a global validator registry that nothing ever populated, so every `validate` returned "Valid: true" with ZERO checks — a vacuous pass that hid the fact the provider's own checks never ran.
 func TestManagerValidateDelegatesToProvider(t *testing.T) {
 	fp := &fakeLifecycleProvider{report: &ValidationReport{
 		Checks: []ValidationCheck{

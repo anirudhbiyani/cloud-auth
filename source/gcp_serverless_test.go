@@ -49,8 +49,7 @@ func TestGCPCloudRunMintUsesMetadataIdentity(t *testing.T) {
 	}
 }
 
-// GKE hint (KUBERNETES_SERVICE_HOST) must still win over the serverless hints,
-// preserving the existing detection ordering.
+// GKE hint (KUBERNETES_SERVICE_HOST) must still win over the serverless hints, preserving the existing detection ordering.
 func TestGCPDetectGKEStillPreferredOverServerless(t *testing.T) {
 	srv := fakeGCPMetadata(t, true)
 	g := NewGCP(WithGCPMetadataURL(srv.URL), WithGCPHTTPClient(srv.Client()),

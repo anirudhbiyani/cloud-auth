@@ -9,8 +9,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// serveBody answers every request with a fixed status and body, so a fuzzer can
-// drive the response-parsing path.
+// serveBody answers every request with a fixed status and body, so a fuzzer can drive the response-parsing path.
 func serveBody(t *testing.T, body string) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -20,9 +19,7 @@ func serveBody(t *testing.T, body string) *httptest.Server {
 	return srv
 }
 
-// The invariant that matters, and the one whose absence caused the immortal-
-// credentials bug: either an error, or credentials with a usable expiry and a
-// non-empty secret. Never a third thing.
+// The invariant that matters, and the one whose absence caused the immortal- credentials bug: either an error, or credentials with a usable expiry and a non-empty secret.
 func FuzzSTSResponseXML(f *testing.F) {
 	f.Add(successXML)
 	f.Add(accessDeniedXML)

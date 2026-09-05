@@ -17,28 +17,11 @@ import (
 )
 
 // Live control-plane lifecycle: setup, validate, delete, against a real cloud.
-//
-// The pair matrix in this package covers the RUNTIME half — a workload
-// exchanging a proof for credentials. Nothing exercised the control plane
-// against a live API, so the GCP and Azure clients had only fake-server
-// coverage, and a fake agrees with whatever the code believes the protocol is.
-// That is exactly the class of mistake it cannot catch: client_arm.go silently
-// not compiling was found by a build matrix, not by its tests.
-//
-// Every case cleans up after itself, including on failure. A test that leaves a
-// federated role behind is worse than one that fails: it leaves a trust
-// relationship nobody is watching.
 
-// lifecycleTimeout bounds one setup/validate/delete cycle. Azure federated
-// credential creation is throttled to roughly 0.25/sec, and GCP pool creation
-// is a long-running operation, so this is not generous by accident.
+// lifecycleTimeout bounds one setup/validate/delete cycle.
 const lifecycleTimeout = 5 * time.Minute
 
 // requireEnv skips unless every named variable is set.
-//
-// Skipping rather than failing: these need a real project or tenant, and a
-// contributor without one should see the suite pass, not a wall of red they
-// cannot act on.
 func requireEnv(t *testing.T, names ...string) map[string]string {
 	t.Helper()
 	out := map[string]string{}
@@ -61,9 +44,6 @@ func requireEnv(t *testing.T, names ...string) map[string]string {
 func uniqueSuffix() string { return fmt.Sprintf("%d", time.Now().UnixNano()%1_000_000) }
 
 // runLifecycle drives setup → validate → delete and asserts the shape of each.
-//
-// The manager is built with a memory state store: this asserts what happens in
-// the CLOUD, and a state file would add a second thing that can be wrong.
 func runLifecycle(t *testing.T, spec core.MechanismSpec) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), lifecycleTimeout)
@@ -71,9 +51,7 @@ func runLifecycle(t *testing.T, spec core.MechanismSpec) {
 
 	manager := core.NewManager(core.WithStateStore(core.NewMemoryStateStore()))
 
-	// Dry run first. It must need no more permission than a read, and it must
-	// not create anything — checked by the delete at the end finding exactly
-	// one thing to remove.
+	// Dry run first.
 	if _, err := manager.Setup(ctx, spec, core.SetupOptions{DryRun: true}); err != nil {
 		t.Fatalf("dry-run setup: %v", err)
 	}
@@ -84,8 +62,7 @@ func runLifecycle(t *testing.T, spec core.MechanismSpec) {
 	}
 	t.Logf("created %s", outputs.Ref.ID)
 
-	// Cleanup is registered IMMEDIATELY, so a failure below still removes the
-	// trust relationship rather than leaving one nobody is watching.
+	// Cleanup is registered IMMEDIATELY, so a failure below still removes the trust relationship rather than leaving one nobody is watching.
 	t.Cleanup(func() {
 		cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), lifecycleTimeout)
 		defer cancelCleanup()
@@ -105,21 +82,18 @@ func runLifecycle(t *testing.T, spec core.MechanismSpec) {
 		t.Errorf("check %q failed against a mechanism this test just created: %s",
 			check.Name, check.Message)
 	}
-	// Skipped checks are not failures, but on a freshly created mechanism they
-	// mean something that should have been verifiable was not.
+	// Skipped checks are not failures, but on a freshly created mechanism they mean something that should have been verifiable was not.
 	for _, check := range report.SkippedChecks() {
 		t.Logf("check %q was skipped: %s", check.Name, check.Message)
 	}
 
-	// Idempotency: setup again must not fail, and must not create a second
-	// resource. An operator re-running a pipeline is the common case.
+	// Idempotency: setup again must not fail, and must not create a second resource.
 	if _, err := manager.Setup(ctx, spec, core.SetupOptions{}); err != nil {
 		t.Errorf("re-running setup on an existing mechanism failed: %v", err)
 	}
 }
 
-// TestAWSLifecycle is the reference case: AWS is the provider with live harness
-// coverage already, so a failure here means the harness, not the client.
+// TestAWSLifecycle is the reference case: AWS is the provider with live harness coverage already, so a failure here means the harness, not the client.
 func TestAWSLifecycle(t *testing.T) {
 	env := requireEnv(t, "CLOUD_AUTH_IT_AWS_ACCOUNT_ID", "CLOUD_AUTH_IT_OIDC_ISSUER")
 
@@ -134,10 +108,7 @@ func TestAWSLifecycle(t *testing.T) {
 	})
 }
 
-// TestGCPLifecycle exercises the workload identity pool client against a live
-// project: pool creation is a long-running operation, and the attribute
-// condition is what stops the provider accepting every identity its issuer
-// serves.
+// TestGCPLifecycle exercises the workload identity pool client against a live project: pool creation is a long-running operation, and the attribute condition is what stops the provider accepting every identity its issuer serves.
 func TestGCPLifecycle(t *testing.T) {
 	env := requireEnv(t,
 		"CLOUD_AUTH_IT_GCP_PROJECT_ID",
@@ -164,9 +135,7 @@ func TestGCPLifecycle(t *testing.T) {
 	})
 }
 
-// TestAzureLifecycle exercises Graph against a live tenant. This is the one
-// where the constraints bite: the 20-credential cap, the creation throttle, and
-// the propagation window are all real here and all invisible to a fake.
+// TestAzureLifecycle exercises Graph against a live tenant.
 func TestAzureLifecycle(t *testing.T) {
 	env := requireEnv(t,
 		"CLOUD_AUTH_IT_AZURE_TENANT_ID",
@@ -186,8 +155,7 @@ func TestAzureLifecycle(t *testing.T) {
 	})
 }
 
-// The 20-credential cap is enforced client-side against a count read from the
-// live tenant, so this is the assertion a fake cannot make honestly.
+// The 20-credential cap is enforced client-side against a count read from the live tenant, so this is the assertion a fake cannot make honestly.
 func TestAzureFederatedCredentialCapIsRealHere(t *testing.T) {
 	env := requireEnv(t, "CLOUD_AUTH_IT_AZURE_APP_OBJECT_ID")
 	t.Skipf("manual: creating 20 credentials on %s to prove the 21st is refused is "+

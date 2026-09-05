@@ -18,8 +18,7 @@ func rec(resource, subject string, breadth core.Breadth, state core.NamespaceSta
 	}
 }
 
-// Worst first, so the row that needs acting on is the first one read — and
-// stable within a severity, so two runs diff cleanly.
+// Worst first, so the row that needs acting on is the first one read — and stable within a severity, so two runs diff cleanly.
 func TestAuditOrdersWorstFirst(t *testing.T) {
 	records := []core.TrustRecord{
 		rec("arn:aws:iam::1:role/fine", "repo:o/r:ref:refs/heads/main", core.BreadthExact, core.NamespaceLive),
@@ -46,9 +45,7 @@ func TestAuditOrdersWorstFirst(t *testing.T) {
 	}
 }
 
-// An inventory missing a cloud is not an inventory. The warning goes FIRST,
-// because a reader who stops at the table would otherwise conclude those clouds
-// were clean.
+// An inventory missing a cloud is not an inventory.
 func TestAuditTableLeadsWithIncompleteness(t *testing.T) {
 	var sb strings.Builder
 	writeAuditTable(&sb, []core.TrustRecord{
@@ -64,8 +61,7 @@ func TestAuditTableLeadsWithIncompleteness(t *testing.T) {
 	}
 }
 
-// A critical row gets its detail spelled out: a table cell cannot carry
-// "anyone can register this name and assume this role right now".
+// A critical row gets its detail spelled out: a table cell cannot carry "anyone can register this name and assume this role right now".
 func TestAuditTableExplainsCriticalRows(t *testing.T) {
 	r := rec("arn:aws:iam::1:role/claimable", "repo:gone/x:ref:refs/heads/main",
 		core.BreadthExact, core.NamespaceUnregistered)
@@ -138,8 +134,7 @@ func TestAuditExit(t *testing.T) {
 		{"clean inventory passes", []core.TrustRecord{clean}, nil, "critical", false},
 		{"an unknown threshold is an error", []core.TrustRecord{clean}, nil, "nonsense", true},
 		{
-			// A green gate over a cloud that was never read is worse than no
-			// gate: the unread cloud is exactly where an unseen finding is.
+			// A green gate over a cloud that was never read is worse than no gate: the unread cloud is exactly where an unseen finding is.
 			name:    "clean but incomplete does not pass the gate",
 			records: []core.TrustRecord{clean}, failures: []error{errors.New("gcp: no credentials")},
 			failOn: "critical", wantErr: true,
@@ -153,8 +148,7 @@ func TestAuditExit(t *testing.T) {
 			if err == nil {
 				return
 			}
-			// A gate failure must be a validation failure, so main maps it to
-			// the exit code that means "misconfigured", not "the run broke".
+			// A gate failure must be a validation failure, so main maps it to the exit code that means "misconfigured", not "the run broke".
 			var vf validationFailure
 			if tc.failOn != "nonsense" && !errors.As(err, &vf) {
 				t.Errorf("gate failure is not a validationFailure: %T", err)
@@ -163,9 +157,7 @@ func TestAuditExit(t *testing.T) {
 	}
 }
 
-// The rename-fragile summary is the query nothing else answers: the trust works
-// until somebody renames a repo, and that change looks nothing like an auth
-// change.
+// The rename-fragile summary is the query nothing else answers: the trust works until somebody renames a repo, and that change looks nothing like an auth change.
 func TestAuditTableSummarisesRenameFragility(t *testing.T) {
 	r := rec("arn:aws:iam::1:role/legacy", "repo:o/r:ref:refs/heads/main",
 		core.BreadthExact, core.NamespaceLive)

@@ -5,9 +5,7 @@ import (
 	"testing"
 )
 
-// One AWS AccessDenied covers roughly fifteen root causes. These are the seven
-// worth naming, tested against fixtures with no cloud — which is exactly what
-// keeping the detectors pure buys.
+// One AWS AccessDenied covers roughly fifteen root causes.
 
 // trust builds a policy with one subject condition.
 func trust(operator, subject string) *TrustPolicy {
@@ -54,9 +52,7 @@ func noFindingFrom(t *testing.T, findings []Finding, detector string) {
 	}
 }
 
-// GitHub enforced immutable subject claims on 15 July 2026 for new repositories
-// and for any repository renamed or transferred. Nothing in the workflow
-// changes; the deploy just starts failing.
+// GitHub enforced immutable subject claims on 15 July 2026 for new repositories and for any repository renamed or transferred.
 func TestImmutableSubjectMismatch(t *testing.T) {
 	const legacy = "repo:myorg/myrepo:ref:refs/heads/main"
 	const immutable = "repo:myorg@123456/myrepo@456789:ref:refs/heads/main"
@@ -107,8 +103,7 @@ func TestImmutableSubjectMismatch(t *testing.T) {
 	})
 }
 
-// GitHub's sub is a positional concatenation: adding an environment REPLACES
-// the ref segment. Nothing in the workflow diff looks related to auth.
+// GitHub's sub is a positional concatenation: adding an environment REPLACES the ref segment.
 func TestEnvironmentOverridesBranch(t *testing.T) {
 	const pinnedToRef = "repo:myorg/myrepo:ref:refs/heads/main"
 	const presentsEnv = "repo:myorg/myrepo:environment:production"
@@ -137,8 +132,7 @@ func TestEnvironmentOverridesBranch(t *testing.T) {
 	})
 }
 
-// A "*" under StringEquals is matched literally: the trust is not too wide, it
-// is silently dead, and the AccessDenied looks identical to a wrong subject.
+// A "*" under StringEquals is matched literally: the trust is not too wide, it is silently dead, and the AccessDenied looks identical to a wrong subject.
 func TestWildcardUnderExactOperator(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -170,8 +164,7 @@ func TestWildcardUnderExactOperator(t *testing.T) {
 	}
 }
 
-// Entra matches case-sensitively, and a case-only difference is close to
-// invisible to a human reading a diff.
+// Entra matches case-sensitively, and a case-only difference is close to invisible to a human reading a diff.
 func TestCaseOnlyMismatch(t *testing.T) {
 	tp := trust("StringEquals", "repo:MyOrg/MyRepo:ref:refs/heads/main")
 	f := findingFor(t, Explain(ExplainInput{
@@ -193,8 +186,7 @@ func TestCaseOnlyMismatch(t *testing.T) {
 	})
 }
 
-// GCP's google.subject is capped at 127 bytes, and GitHub's immutable subjects
-// are materially longer than the legacy ones.
+// GCP's google.subject is capped at 127 bytes, and GitHub's immutable subjects are materially longer than the legacy ones.
 func TestOversizedMappedSubject(t *testing.T) {
 	long := "repo:averyveryverylongorganizationname@123456789/" +
 		"anextremelylongrepositoryname@987654321:ref:refs/heads/a-long-release-branch-name"
@@ -229,8 +221,7 @@ func TestOversizedMappedSubject(t *testing.T) {
 	})
 }
 
-// A trailing ":*" also matches repo:…:pull_request, which a FORK's pull request
-// reaches — so anyone able to open a PR can run with these credentials.
+// A trailing ":*" also matches repo:…:pull_request, which a FORK's pull request reaches — so anyone able to open a PR can run with these credentials.
 func TestForkPullRequestExposure(t *testing.T) {
 	f := findingFor(t, Explain(ExplainInput{
 		Trust: trust("StringLike", "repo:myorg/myrepo:*"),
@@ -253,9 +244,7 @@ func TestForkPullRequestExposure(t *testing.T) {
 	})
 
 	t.Run("a literal trailing star under StringEquals matches nothing", func(t *testing.T) {
-		// The wildcard-under-exact-operator detector owns that case; this one
-		// must not also claim it, or one policy produces two contradictory
-		// findings — too wide AND matches nothing.
+		// The wildcard-under-exact-operator detector owns that case; this one must not also claim it, or one policy produces two contradictory findings — too wide AND matches nothing.
 		noFindingFrom(t, Explain(ExplainInput{
 			Trust: trust("StringEquals", "repo:myorg/myrepo:*"),
 			Token: token("repo:myorg/myrepo:ref:refs/heads/main"),
@@ -263,8 +252,7 @@ func TestForkPullRequestExposure(t *testing.T) {
 	})
 }
 
-// "No provider registered" and "registered, issuer differs" surface as the same
-// AccessDenied and need opposite fixes.
+// "No provider registered" and "registered, issuer differs" surface as the same AccessDenied and need opposite fixes.
 func TestIssuerMismatch(t *testing.T) {
 	t.Run("no provider registered", func(t *testing.T) {
 		tp := trust("StringEquals", "repo:myorg/myrepo:ref:refs/heads/main")
@@ -300,8 +288,7 @@ func TestIssuerMismatch(t *testing.T) {
 	})
 
 	t.Run("scheme differences are not a mismatch", func(t *testing.T) {
-		// AWS registers a bare host; the token carries https://. Reporting that
-		// as a mismatch would be a false positive on every correct AWS setup.
+		// AWS registers a bare host; the token carries https://. Reporting that as a mismatch would be a false positive on every correct AWS setup.
 		tp := trust("StringEquals", "repo:myorg/myrepo:ref:refs/heads/main")
 		tp.Issuer = "token.actions.githubusercontent.com"
 		noFindingFrom(t, Explain(ExplainInput{
@@ -310,8 +297,7 @@ func TestIssuerMismatch(t *testing.T) {
 	})
 }
 
-// Without live trust, Explain returns nothing: base doctor behaviour is
-// unchanged and --explain is opt-in.
+// Without live trust, Explain returns nothing: base doctor behaviour is unchanged and --explain is opt-in.
 func TestExplainWithoutTrustReturnsNothing(t *testing.T) {
 	if got := Explain(ExplainInput{Token: token("repo:o/r:ref:refs/heads/main")}); got != nil {
 		t.Errorf("Explain with no trust policy returned %d findings", len(got))
@@ -340,8 +326,7 @@ func TestFindingsAreOrderedBySeverity(t *testing.T) {
 	}
 }
 
-// Every finding has to be actionable: a detector that says something is wrong
-// without saying what to do is a worse AccessDenied.
+// Every finding has to be actionable: a detector that says something is wrong without saying what to do is a worse AccessDenied.
 func TestEveryFindingCarriesAFix(t *testing.T) {
 	tp := &TrustPolicy{
 		Issuer:   "https://gitlab.example.com",

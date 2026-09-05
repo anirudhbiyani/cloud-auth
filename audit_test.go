@@ -13,16 +13,9 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/internal/audit"
 )
 
-// audit.Emit had one call site — exchange — so the MUTATING control-plane
-// operations, setup and delete, were precisely the ones with no record, along
-// with exec, which injects live credentials into a child process.
-//
-// "Exactly one record per operation" is the property worth testing, and the
-// error paths are where it used to break: an operation that returned early
-// skipped the record entirely, so failures were the least likely to be logged.
+// audit.Emit had one call site — exchange — so the MUTATING control-plane operations, setup and delete, were precisely the ones with no record, along with exec, which injects live credentials into a child process.
 
 // captureStderr runs fn with os.Stderr redirected and returns what it wrote.
-// The audit destination is stderr so it never lands in a command's stdout.
 func captureStderr(t *testing.T, fn func() error) (string, error) {
 	t.Helper()
 	r, w, err := os.Pipe()
@@ -48,9 +41,7 @@ func captureStderr(t *testing.T, fn func() error) (string, error) {
 	return sb.String(), runErr
 }
 
-// auditRecords extracts the JSON audit lines from mixed stderr output. Other
-// diagnostics share the stream, so anything that is not a well-formed record is
-// skipped rather than treated as a parse failure.
+// auditRecords extracts the JSON audit lines from mixed stderr output.
 func auditRecords(t *testing.T, stderr string) []audit.Event {
 	t.Helper()
 	var out []audit.Event
@@ -84,9 +75,7 @@ func TestAuditorEmitsExactlyOnce(t *testing.T) {
 			a := newAuditor(audit.OpExchange)
 			a.log = audit.New(&buf)
 
-			// Called twice on purpose: finish is deferred at some call sites and
-			// also returned explicitly at others, and two records for one
-			// operation would double-count in a SIEM.
+			// Called twice on purpose: finish is deferred at some call sites and also returned explicitly at others, and two records for one operation would double-count in a SIEM.
 			_ = a.finish(tc.err)
 			_ = a.finish(errors.New("a second, different error"))
 
@@ -112,8 +101,7 @@ func TestAuditorEmitsExactlyOnce(t *testing.T) {
 	}
 }
 
-// An operation that dies unexpectedly must record a failure, not a success. The
-// default has to be the safe direction for a security record.
+// An operation that dies unexpectedly must record a failure, not a success.
 func TestAuditorDefaultsToFailure(t *testing.T) {
 	a := newAuditor(audit.OpSetup)
 	if a.event.Outcome != audit.OutcomeFailure {
@@ -122,9 +110,7 @@ func TestAuditorDefaultsToFailure(t *testing.T) {
 	}
 }
 
-// The error is redacted before it lands in the audit log — which is the one file
-// built for long-term retention, and therefore exactly where a leaked assertion
-// would come to rest.
+// The error is redacted before it lands in the audit log — which is the one file built for long-term retention, and therefore exactly where a leaked assertion would come to rest.
 func TestAuditErrorIsRedacted(t *testing.T) {
 	const assertion = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJyZXBvOm9yZy9yZXBvIn0.c2lnbmF0dXJlLW1hdGVyaWFsLXRoYXQtaXMtc2VjcmV0"
 	var buf bytes.Buffer
@@ -140,8 +126,7 @@ func TestAuditErrorIsRedacted(t *testing.T) {
 	}
 }
 
-// setup mutates trust, so it is audited whatever the outcome. This exercises the
-// real command through a dry run, which needs no cloud credentials.
+// setup mutates trust, so it is audited whatever the outcome.
 func TestSetupEmitsAnAuditRecord(t *testing.T) {
 	state := filepath.Join(t.TempDir(), "state.json")
 	stderr, err := captureStderr(t, func() error {
@@ -180,12 +165,6 @@ func TestSetupEmitsAnAuditRecord(t *testing.T) {
 }
 
 // The path that used to be silent: a failing operation returning early.
-//
-// The failure has to happen INSIDE manager.Setup, after the auditor starts —
-// a spec rejected during flag parsing never reaches it and correctly produces
-// no record. This case previously used k8s-federation against GCP, which failed
-// only because no GCP handler existed; closing that gap made this test pass
-// vacuously, so it now uses a refusal that is meant to stay one.
 func TestSetupEmitsARecordOnFailure(t *testing.T) {
 	state := filepath.Join(t.TempDir(), "state.json")
 	stderr, err := captureStderr(t, func() error {
@@ -195,8 +174,7 @@ func TestSetupEmitsARecordOnFailure(t *testing.T) {
 			"--k8s-namespace", "ns",
 			"--k8s-sa-name", "sa",
 			"--oidc-url", "https://issuer.example.com",
-			// Managed identity needs a resource group and an identity name that
-			// azure_config cannot express, so the provider refuses inside Setup.
+			// Managed identity needs a resource group and an identity name that azure_config cannot express, so the provider refuses inside Setup.
 			"--target-cloud", "azure",
 			"--identity-type", "managed-identity",
 			"--tenant-id", "11111111-1111-1111-1111-111111111111",
@@ -221,8 +199,7 @@ func TestSetupEmitsARecordOnFailure(t *testing.T) {
 	}
 }
 
-// Audit records must not land in stdout, which for several commands is a
-// document another program parses.
+// Audit records must not land in stdout, which for several commands is a document another program parses.
 func TestAuditGoesToStderrNotStdout(t *testing.T) {
 	state := filepath.Join(t.TempDir(), "state.json")
 

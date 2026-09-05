@@ -7,16 +7,9 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/provider/aws"
 )
 
-// The example that used to live in this method's doc comment, as a real Example
-// function so the compiler checks it.
-//
-// Example functions with no "Output:" comment are compiled but not run, which
-// is what we want here: this one would talk to AWS STS. Compiling it is the
-// point — a documented example that does not build is worse than no example,
-// because it is the first thing a new user copies.
+// The example that used to live in this method's doc comment, as a real Example function so the compiler checks it.
 
-// AWS workloads can authenticate to GCP with no long-lived credentials, via a
-// workload identity pool provider that trusts the AWS account.
+// AWS workloads can authenticate to GCP with no long-lived credentials, via a workload identity pool provider that trusts the AWS account.
 func ExampleProvider_GenerateGCPWorkloadIdentityToken() {
 	p := aws.New()
 

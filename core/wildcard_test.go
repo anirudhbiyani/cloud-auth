@@ -49,9 +49,7 @@ func TestWildcardMatch(t *testing.T) {
 	}
 }
 
-// The old implementation recursed over every split point per star, which is
-// exponential. The pattern is a live IAM policy value, so its shape is not this
-// code's choice — a pathological one must not stall validation.
+// The old implementation recursed over every split point per star, which is exponential.
 func TestWildcardMatchIsLinear(t *testing.T) {
 	pattern := strings.Repeat("*a", 20) + "*b"
 	value := strings.Repeat("a", 200)
@@ -76,8 +74,7 @@ func FuzzWildcardMatch(f *testing.F) {
 	f.Add("**a**", "aaa")
 
 	f.Fuzz(func(t *testing.T, pattern, value string) {
-		// The invariants: it terminates, and a pattern with no metacharacters
-		// behaves exactly like string equality.
+		// The invariants: it terminates, and a pattern with no metacharacters behaves exactly like string equality.
 		got := wildcardMatch(pattern, value)
 		if !strings.ContainsAny(pattern, "*?") && got != (pattern == value) {
 			t.Fatalf("literal pattern %q vs %q: got %v, want %v", pattern, value, got, pattern == value)

@@ -110,9 +110,7 @@ func TestAWSMintIRSAReadsTokenFile(t *testing.T) {
 }
 
 func TestAWSMintIRSARejectsAudienceMismatch(t *testing.T) {
-	// The projected SA token's aud is fixed by the pod's projected volume. Asking
-	// for a different target audience must fail closed, not return a token that
-	// the target STS will reject.
+	// The projected SA token's aud is fixed by the pod's projected volume.
 	dir := t.TempDir()
 	tokFile := filepath.Join(dir, "token")
 	os.WriteFile(tokFile, []byte(gcpJWT("sts.amazonaws.com")), 0600)
@@ -136,9 +134,7 @@ func TestAWSMintEC2ProducesSigV4Proof(t *testing.T) {
 		WithAWSEnv(envFunc(nil)),
 		WithAWSRegion("us-east-1"),
 		WithAWSCredentials(credentials.NewStaticCredentialsProvider("AKIDEXAMPLE", "secret", "session-tok")),
-		// Pin the proof. The default prefers the STS-vended OIDC JWT, which needs
-		// a live sts:GetWebIdentityToken call; this test is about the SigV4 proof,
-		// so it says so rather than relying on whatever the default happens to be.
+		// Pin the proof.
 		WithAWSProof(AWSProofSigV4),
 	)
 	tok, err := a.Mint(context.Background(), "//iam.googleapis.com/projects/1/locations/global/workloadIdentityPools/p/providers/aws")
@@ -148,8 +144,7 @@ func TestAWSMintEC2ProducesSigV4Proof(t *testing.T) {
 	if tok.Kind != core.AWSSigV4 {
 		t.Fatalf("kind = %v, want AWSSigV4", tok.Kind)
 	}
-	// The serialized proof must be a replayable GetCallerIdentity request that
-	// carries a SigV4 Authorization header.
+	// The serialized proof must be a replayable GetCallerIdentity request that carries a SigV4 Authorization header.
 	if !strings.Contains(tok.Value, "GetCallerIdentity") {
 		t.Errorf("proof missing GetCallerIdentity action: %s", tok.Value)
 	}

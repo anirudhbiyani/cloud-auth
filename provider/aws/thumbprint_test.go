@@ -12,15 +12,12 @@ import (
 	"testing"
 )
 
-// The thumbprint must be computed from the certificate the issuer actually
-// presents. It used to be a hardcoded map with a forty-zero fallback, so any
-// issuer outside that map got a pin that pinned nothing.
+// The thumbprint must be computed from the certificate the issuer actually presents.
 func TestThumbprintIsComputedFromTheServedCertificate(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
 	defer srv.Close()
 
-	// httptest serves a self-signed certificate — the same shape as an issuer
-	// behind a private CA, which is what WithThumbprintTLSConfig is for.
+	// httptest serves a self-signed certificate — the same shape as an issuer behind a private CA, which is what WithThumbprintTLSConfig is for.
 	pool := x509.NewCertPool()
 	pool.AddCert(srv.Certificate())
 	p := New(WithThumbprintTLSConfig(&tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}))
@@ -49,9 +46,7 @@ func TestThumbprintIsComputedFromTheServedCertificate(t *testing.T) {
 	}
 }
 
-// An unreachable or non-TLS issuer is an error, never a placeholder. Setup wraps
-// this in ErrNetwork and fails closed, which is the correct outcome: better to
-// refuse than to register a provider whose pin is meaningless.
+// An unreachable or non-TLS issuer is an error, never a placeholder.
 func TestThumbprintFailsClosed(t *testing.T) {
 	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
 	defer plain.Close()
@@ -75,8 +70,7 @@ func TestThumbprintFailsClosed(t *testing.T) {
 	}
 }
 
-// The chain is verified by default. A thumbprint read over an unverified
-// handshake would let anyone in the network path choose what gets pinned.
+// The chain is verified by default.
 func TestThumbprintVerifiesTheChainByDefault(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
 	defer srv.Close()

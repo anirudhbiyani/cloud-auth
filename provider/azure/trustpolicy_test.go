@@ -93,9 +93,7 @@ func TestAzureTrustPolicyFromManagedIdentityFIC(t *testing.T) {
 	}
 }
 
-// Entra matches issuer/subject/audience case-sensitively and exactly. This is
-// the most common Azure federation failure and it must be named, not buried in
-// a generic mismatch message.
+// Entra matches issuer/subject/audience case-sensitively and exactly.
 func TestAzureCaseOnlyMismatchIsDiagnosed(t *testing.T) {
 	p := &Provider{graphClient: &stubGraph{cred: &FederatedIdentityCredential{
 		Issuer:    strings.ToLower(issuer), // ...id/abc instead of ...id/ABC

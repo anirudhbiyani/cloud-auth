@@ -9,14 +9,9 @@ import (
 	"testing"
 )
 
-// `list --output json` is what a script reads. It printed the prose
-// "No mechanisms found" whenever the state file was empty — the one case a
-// script is most likely to hit — because the empty check returned before the
-// output switch. And the table separator was fmt.Println(string(make([]byte,
-// 100))): 100 NUL bytes, not a rule.
+// `list --output json` is what a script reads.
 
 // captureStdout runs fn with os.Stdout redirected and returns what it wrote.
-// cmdList writes with fmt.Println, so there is no writer to inject.
 func captureStdout(t *testing.T, fn func() error) (string, error) {
 	t.Helper()
 	r, w, err := os.Pipe()
@@ -90,8 +85,7 @@ func TestListJSONIsAlwaysValidJSON(t *testing.T) {
 			if len(refs) != tc.want {
 				t.Errorf("got %d mechanisms, want %d", len(refs), tc.want)
 			}
-			// Empty must marshal as [], never null: a consumer doing
-			// `for _, m := range parsed` should not have to special-case it.
+			// Empty must marshal as [], never null: a consumer doing `for _, m := range parsed` should not have to special-case it.
 			if tc.want == 0 && !strings.Contains(out, "[]") {
 				t.Errorf("empty list should render as [], got:\n%s", out)
 			}

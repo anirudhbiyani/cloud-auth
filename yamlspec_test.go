@@ -9,9 +9,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// The help text has always advertised "Spec file (YAML or JSON)". Only JSON
-// worked, and a YAML file failed with "invalid character 'y' in literal true" —
-// an error that says nothing about the real cause.
+// The help text has always advertised "Spec file (YAML or JSON)".
 func TestLoadSpecAcceptsYAMLAndJSON(t *testing.T) {
 	dir := t.TempDir()
 
@@ -54,8 +52,7 @@ policy_arns:
 			if !ok {
 				t.Fatalf("got %T, want the AWS spec type", spec)
 			}
-			// Both formats must produce the same spec, including the nested list —
-			// a decoder that silently dropped policy_arns would still "work".
+			// Both formats must produce the same spec, including the nested list — a decoder that silently dropped policy_arns would still "work".
 			if aws.RoleName != "deploy" || aws.Subject != "repo:myorg/myrepo:ref:refs/heads/main" {
 				t.Errorf("scalar fields not decoded: %+v", aws)
 			}
@@ -66,8 +63,7 @@ policy_arns:
 	}
 }
 
-// Feeding a federation config to --file used to say "spec must include 'type'
-// field", which describes the symptom rather than the mistake.
+// Feeding a federation config to --file used to say "spec must include 'type' field", which describes the symptom rather than the mistake.
 func TestLoadSpecRecognisesAFederationConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cloud-auth.yaml")
 	cfg := `

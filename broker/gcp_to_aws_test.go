@@ -14,17 +14,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/target"
 )
 
-// End-to-end exercise of the GCP GCE -> AWS pair (first-class pair #1) through
-// the real source, target and broker code, against fakes that mimic the two
-// services closely enough to catch wiring mistakes:
-//
-//   - a GCE metadata server that issues a Google-shaped ID token, including the
-//     azp claim a service-account token really carries;
-//   - an AWS STS that asserts the AssumeRoleWithWebIdentity request shape and
-//     returns a realistic XML response.
-//
-// This cannot prove the AWS-side trust policy is right — only a live exchange
-// can — but it does prove the client half end-to-end.
+// End-to-end exercise of the GCP GCE -> AWS pair (first-class pair #1) through the real source, target and broker code, against fakes that mimic the two services closely enough to catch wiring mistakes:
 func googleIDToken(t *testing.T, audience, saUniqueID string) string {
 	t.Helper()
 	enc := func(v any) string {
@@ -32,10 +22,7 @@ func googleIDToken(t *testing.T, audience, saUniqueID string) string {
 		return base64.RawURLEncoding.EncodeToString(b)
 	}
 	header := map[string]any{"alg": "RS256", "kid": "abc", "typ": "JWT"}
-	// A GCE service-account ID token sets sub AND azp to the SA's numeric unique
-	// id, and aud to whatever audience was requested. The azp claim is why the
-	// AWS trust policy must pin the audience with :oaud — accounts.google.com:aud
-	// maps to azp whenever azp is present.
+	// A GCE service-account ID token sets sub AND azp to the SA's numeric unique id, and aud to whatever audience was requested.
 	payload := map[string]any{
 		"iss": "https://accounts.google.com",
 		"aud": audience,
@@ -60,8 +47,7 @@ func TestGCPToAWSEndToEnd(t *testing.T) {
 			w.WriteHeader(http.StatusForbidden)
 			return
 		}
-		// The real server echoes the header back, and the client requires it:
-		// that round trip is how a spoofed metadata.google.internal is detected.
+		// The real server echoes the header back, and the client requires it: that round trip is how a spoofed metadata.google.internal is detected.
 		w.Header().Set("Metadata-Flavor", "Google")
 		switch {
 		case strings.Contains(r.URL.Path, "/identity"):

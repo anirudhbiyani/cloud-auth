@@ -7,8 +7,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// IAM role ARNs may carry a path, and GetRole takes the name only. Splitting on
-// the last "/" naively would look up the wrong role, or none.
+// IAM role ARNs may carry a path, and GetRole takes the name only.
 func TestRoleNameFromARN(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -42,8 +41,7 @@ func TestRoleNameFromARN(t *testing.T) {
 	}
 }
 
-// A trust read that FAILED must never render as "no problems found" — the same
-// distinction validate draws between skipped and passed.
+// A trust read that FAILED must never render as "no problems found" — the same distinction validate draws between skipped and passed.
 func TestExplanationDistinguishesUnreadFromClean(t *testing.T) {
 	var sb strings.Builder
 	writeExplanation(&sb, nil, nil, errRead{})
@@ -70,8 +68,7 @@ type errRead struct{}
 
 func (errRead) Error() string { return "no credentials" }
 
-// A trust with no conditions at all admits every identity its issuer serves,
-// and an empty section would read as though there were simply nothing to show.
+// A trust with no conditions at all admits every identity its issuer serves, and an empty section would read as though there were simply nothing to show.
 func TestExplanationCallsOutAnUnconditionedTrust(t *testing.T) {
 	var sb strings.Builder
 	writeExplanation(&sb, &core.TrustPolicy{Issuer: "https://issuer.example.com"}, nil, nil)
@@ -80,8 +77,7 @@ func TestExplanationCallsOutAnUnconditionedTrust(t *testing.T) {
 	}
 }
 
-// The fix text is long by design — a remediation that fits on one line usually
-// is not one — so it wraps rather than running off the terminal.
+// The fix text is long by design — a remediation that fits on one line usually is not one — so it wraps rather than running off the terminal.
 func TestFixTextWraps(t *testing.T) {
 	long := strings.Repeat("word ", 40)
 	got := wrapFix(long, 40, "    ")
@@ -97,8 +93,7 @@ func TestFixTextWraps(t *testing.T) {
 	}
 }
 
-// Azure trust cannot be resolved from a runtime target, and saying so beats
-// reporting no findings as though the trust were fine.
+// Azure trust cannot be resolved from a runtime target, and saying so beats reporting no findings as though the trust were fine.
 func TestAzureExplainRefusesClearly(t *testing.T) {
 	_, err := trustForTarget(t.Context(), core.AzureTarget{
 		Tenant:   "11111111-1111-1111-1111-111111111111",
@@ -108,8 +103,7 @@ func TestAzureExplainRefusesClearly(t *testing.T) {
 	if err == nil {
 		t.Fatal("want a refusal")
 	}
-	// It must name the actual obstacle — object id vs client id — not just
-	// "unsupported".
+	// It must name the actual obstacle — object id vs client id — not just "unsupported".
 	if !strings.Contains(err.Error(), "object id") {
 		t.Errorf("the refusal does not explain why: %v", err)
 	}
@@ -118,8 +112,7 @@ func TestAzureExplainRefusesClearly(t *testing.T) {
 	}
 }
 
-// A GCP pool without the /providers/ segment names a pool, not a provider, and
-// the trust lives on the provider.
+// A GCP pool without the /providers/ segment names a pool, not a provider, and the trust lives on the provider.
 func TestGCPExplainRequiresTheProviderResource(t *testing.T) {
 	_, err := trustForTarget(t.Context(), core.GCPTarget{
 		WorkloadIdentityPool: "//iam.googleapis.com/projects/1/locations/global/workloadIdentityPools/p",

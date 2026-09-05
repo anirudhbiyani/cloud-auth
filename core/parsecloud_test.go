@@ -5,9 +5,7 @@ import (
 	"testing"
 )
 
-// ParseCloud used to reject five of this package's own Cloud constants, because
-// it conflated "a cloud we know" with "a cloud we can obtain credentials for".
-// Those are different questions and now have different functions.
+// ParseCloud used to reject five of this package's own Cloud constants, because it conflated "a cloud we know" with "a cloud we can obtain credentials for".
 func TestParseCloudAcceptsEveryDeclaredCloud(t *testing.T) {
 	for _, in := range []string{
 		"aws", "gcp", "azure",
@@ -26,7 +24,6 @@ func TestParseCloudAcceptsEveryDeclaredCloud(t *testing.T) {
 }
 
 // A trust peer is a real cloud but not somewhere a workload can get credentials.
-// Saying that is more useful than calling it unknown.
 func TestParseFederationTargetRejectsTrustPeers(t *testing.T) {
 	for _, in := range []string{"aws", "gcp", "azure"} {
 		if _, err := ParseFederationTarget(in); err != nil {

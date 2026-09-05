@@ -20,9 +20,7 @@ func serve(t *testing.T, status int, body string) *httptest.Server {
 	return srv
 }
 
-// A 2xx whose body does not carry credentials is a failure, not a success with
-// empty fields. Returning zero values here produced an empty access key that
-// failed much later, in a caller with no idea why.
+// A 2xx whose body does not carry credentials is a failure, not a success with empty fields.
 func TestAWSExchangeRejectsSuccessWithoutCredentials(t *testing.T) {
 	srv := serve(t, 200, `<AssumeRoleWithWebIdentityResponse>
 	  <ResponseMetadata><RequestId>req-empty</RequestId></ResponseMetadata>
@@ -41,9 +39,7 @@ func TestAWSExchangeRejectsSuccessWithoutCredentials(t *testing.T) {
 	}
 }
 
-// An unparseable Expiration used to be discarded, yielding a zero Expiry — which
-// Credentials.Expired then treated as "never expires", so the cache served dead
-// credentials for the life of the process.
+// An unparseable Expiration used to be discarded, yielding a zero Expiry — which Credentials.Expired then treated as "never expires", so the cache served dead credentials for the life of the process.
 func TestAWSExchangeRejectsUnparseableExpiration(t *testing.T) {
 	srv := serve(t, 200, `<AssumeRoleWithWebIdentityResponse>
 	  <AssumeRoleWithWebIdentityResult><Credentials>

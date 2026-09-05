@@ -16,20 +16,16 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/test/harness/verifier/verify"
 )
 
-// defaultTargetsPath is where the driver merges the stage-2 outputs. Tests run
-// with their package directory as the working directory.
+// defaultTargetsPath is where the driver merges the stage-2 outputs.
 const defaultTargetsPath = "../harness/state/targets.json"
 
-// detectTimeout bounds runtime detection. Off-cloud, every metadata probe has
-// to fail before we can skip, so this is also the worst-case skip latency.
+// detectTimeout bounds runtime detection.
 const detectTimeout = 10 * time.Second
 
 // caseTimeout bounds a single exchange.
 const caseTimeout = 60 * time.Second
 
-// loadPlan resolves the merged targets.json, skipping the whole test when the
-// harness has not been stood up. A malformed plan is a real failure: the file
-// exists, so something is wrong with it.
+// loadPlan resolves the merged targets.json, skipping the whole test when the harness has not been stood up.
 func loadPlan(t *testing.T) *verify.Plan {
 	t.Helper()
 	plan, origin, err := verify.ResolvePlan(os.Getenv, defaultTargetsPath)
@@ -45,8 +41,7 @@ func loadPlan(t *testing.T) *verify.Plan {
 	return plan
 }
 
-// detectRuntime resolves the runtime this test process is running on, skipping
-// when it is not one of the harness source runtimes (i.e. a laptop).
+// detectRuntime resolves the runtime this test process is running on, skipping when it is not one of the harness source runtimes (i.e. a laptop).
 func detectRuntime(t *testing.T) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), detectTimeout)
@@ -65,10 +60,7 @@ func detectRuntime(t *testing.T) string {
 	return key
 }
 
-// TestPairMatrix runs one subtest per case in the merged plan, named after the
-// case. Cases belonging to another source runtime skip: the matrix is executed
-// by running this same suite in every source runtime, and each run owns its
-// slice of it.
+// TestPairMatrix runs one subtest per case in the merged plan, named after the case.
 func TestPairMatrix(t *testing.T) {
 	plan := loadPlan(t)
 	key := detectRuntime(t)
@@ -98,9 +90,7 @@ func TestPairMatrix(t *testing.T) {
 	}
 }
 
-// TestPlanCoversTheDocumentedGap guards the negative row of the matrix: the
-// harness must assert that AWS-EC2 → Azure fails with ErrNoFirstClassPath. A
-// plan without it would go green while the guard silently rotted away.
+// TestPlanCoversTheDocumentedGap guards the negative row of the matrix: the harness must assert that AWS-EC2 → Azure fails with ErrNoFirstClassPath.
 func TestPlanCoversTheDocumentedGap(t *testing.T) {
 	plan := loadPlan(t)
 
@@ -117,9 +107,7 @@ func TestPlanCoversTheDocumentedGap(t *testing.T) {
 	}
 }
 
-// TestPlanRuntimeCoverage reports which source runtimes the plan expects, so a
-// harness run that never scheduled one of them is visible in the logs rather
-// than silently passing with everything skipped.
+// TestPlanRuntimeCoverage reports which source runtimes the plan expects, so a harness run that never scheduled one of them is visible in the logs rather than silently passing with everything skipped.
 func TestPlanRuntimeCoverage(t *testing.T) {
 	plan := loadPlan(t)
 
@@ -135,9 +123,7 @@ func TestPlanRuntimeCoverage(t *testing.T) {
 	}
 }
 
-// logResult prints the scrubbed JSON result for the case. It goes through the
-// same report writer as the verifier, so the no-credentials guarantee holds
-// here too.
+// logResult prints the scrubbed JSON result for the case.
 func logResult(t *testing.T, s *verify.Scrubber, res verify.CaseResult) {
 	t.Helper()
 	b, err := json.MarshalIndent(res, "", "  ")

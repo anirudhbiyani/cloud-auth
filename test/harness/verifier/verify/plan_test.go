@@ -8,8 +8,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// contractPlan is the example from test/harness/CONTRACT.md, verbatim. If this
-// stops parsing, the verifier has drifted from the authoritative contract.
+// contractPlan is the example from test/harness/CONTRACT.md, verbatim.
 const contractPlan = `{
   "run_id": "20260705-abc123",
   "cases": [

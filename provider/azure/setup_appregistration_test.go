@@ -10,10 +10,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// The app-registration half of Setup, the counterpart to the managed-identity
-// tests. It creates up to three Graph objects and has to unwind all of them on
-// a partial failure, which is the part worth pinning: a rollback that misses
-// leaves an orphaned application in the tenant that nothing later reclaims.
+// The app-registration half of Setup, the counterpart to the managed-identity tests.
 
 type recordingGraph struct {
 	GraphClient
@@ -108,8 +105,6 @@ func TestSetupAppRegistrationCreatesAllThreeObjects(t *testing.T) {
 		t.Errorf("created %v, want %v in that order", g.created, want)
 	}
 	// The credential must be addressed by the OBJECT id, not the client id.
-	// Graph exposes both on an application and they are different values;
-	// using appId here silently targets nothing.
 	if g.credApp != "obj-1" {
 		t.Errorf("credential addressed to %q, want the object id obj-1", g.credApp)
 	}
@@ -125,9 +120,7 @@ func TestSetupAppRegistrationCreatesAllThreeObjects(t *testing.T) {
 	}
 }
 
-// Rollback. Both failure points delete the application we created — and only
-// then, because deleting an application the operator already had would destroy
-// a resource cloud-auth does not own.
+// Rollback.
 func TestSetupAppRegistrationRollsBackWhatItCreated(t *testing.T) {
 	boom := errors.New("insufficient privileges")
 
@@ -164,9 +157,7 @@ func TestSetupAppRegistrationNeverDeletesAPreexistingApplication(t *testing.T) {
 	}
 }
 
-// Graph exposes appId and id as different identifiers. An application with no
-// object id cannot be addressed for federated credentials at all, and the
-// earlier code papered over it by reusing the client id for both.
+// Graph exposes appId and id as different identifiers.
 func TestSetupAppRegistrationRefusesAnApplicationWithNoObjectID(t *testing.T) {
 	g := &recordingGraph{existing: &Application{AppID: "their-client"}}
 	spec := appSpec(func(s *core.AzureFederatedCredentialSpec) {
@@ -204,9 +195,7 @@ func TestSetupRejectsAnUnknownIdentityType(t *testing.T) {
 	}
 }
 
-// Delete. Absence is success — a delete that reports failure because the
-// resource is already gone makes cleanup non-idempotent, and cleanup is exactly
-// the path most likely to be retried.
+// Delete.
 func TestDeleteIsIdempotentAndRespectsOwnership(t *testing.T) {
 	ref := func(owned bool) core.MechanismRef {
 		return core.MechanismRef{
@@ -253,10 +242,7 @@ func TestDeleteIsIdempotentAndRespectsOwnership(t *testing.T) {
 	})
 }
 
-// The two cross-cloud token paths. Their shared shape is: refuse without a
-// token client, refuse on any missing field, and refuse app registrations
-// outright — the last one because there is no flow that can work off-Azure,
-// and returning a token-shaped nothing would be worse than an error.
+// The two cross-cloud token paths.
 func TestGenerateCrossCloudTokens(t *testing.T) {
 	expiry := time.Now().Add(time.Hour).Truncate(time.Second)
 	tc := &fakeTokenClient{token: "eyJ-mi", expires: expiry}
@@ -290,8 +276,7 @@ func TestGenerateCrossCloudTokens(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GenerateGCPWorkloadIdentityToken: %v", err)
 		}
-		// GCP's audience is the provider's full resource name, and it must match
-		// character for character or the exchange fails with no useful detail.
+		// GCP's audience is the provider's full resource name, and it must match character for character or the exchange fails with no useful detail.
 		want := "//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/pool/providers/azure"
 		if out.Audience != want {
 			t.Errorf("audience = %q, want %q", out.Audience, want)
@@ -319,9 +304,7 @@ func TestGenerateCrossCloudTokensRefuseBadInput(t *testing.T) {
 	p := New(WithTokenClient(&fakeTokenClient{token: "x"}))
 
 	t.Run("nil input", func(t *testing.T) {
-		// These are exported methods. A nil input is a caller bug, but a panic
-		// takes the process down instead of returning the error the caller can
-		// act on, and every other entry point in this package returns.
+		// These are exported methods.
 		if _, err := p.GenerateAWSRoleAssumptionToken(context.Background(), nil); err == nil {
 			t.Error("aws: want an error, not a panic")
 		}
@@ -334,8 +317,7 @@ func TestGenerateCrossCloudTokensRefuseBadInput(t *testing.T) {
 		"no tenant":   {ClientID: "c", RoleARN: "r", UseManagedIdentity: true},
 		"no client":   {TenantID: "t", RoleARN: "r", UseManagedIdentity: true},
 		"no role arn": {TenantID: "t", ClientID: "c", UseManagedIdentity: true},
-		// Not a missing field: an app registration has no way to obtain a token
-		// off-Azure, so it is refused rather than half-attempted.
+		// Not a missing field: an app registration has no way to obtain a token off-Azure, so it is refused rather than half-attempted.
 		"app registration": {TenantID: "t", ClientID: "c", RoleARN: "r"},
 	} {
 		t.Run("aws/"+name, func(t *testing.T) {

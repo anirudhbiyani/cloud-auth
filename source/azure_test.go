@@ -75,9 +75,7 @@ func TestAzureMintAKSReadsProjectedToken(t *testing.T) {
 }
 
 func TestAzureMintAKSRejectsAudienceMismatch(t *testing.T) {
-	// The projected token's aud is fixed by the webhook. If the caller asks for a
-	// different target audience (e.g. an AWS target), we must fail closed rather
-	// than hand back a token the target STS will reject.
+	// The projected token's aud is fixed by the webhook.
 	dir := t.TempDir()
 	tokFile := filepath.Join(dir, "token")
 	os.WriteFile(tokFile, []byte(azureJWT("api://AzureADTokenExchange")), 0600)
@@ -91,8 +89,7 @@ func TestAzureMintAKSRejectsAudienceMismatch(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a fail-closed error on audience mismatch, got nil")
 	}
-	// The message must name both the requested and the actual audience so the
-	// operator knows to reconfigure the projected token's audience.
+	// The message must name both the requested and the actual audience so the operator knows to reconfigure the projected token's audience.
 	msg := err.Error()
 	for _, want := range []string{"sts.amazonaws.com", "api://AzureADTokenExchange"} {
 		if !strings.Contains(msg, want) {
@@ -132,15 +129,12 @@ func TestAzureDetectVMViaIMDS(t *testing.T) {
 		t.Error("a VM's IMDS vends access tokens, not assertions; it is not a federation source")
 	}
 
-	// Minting a cross-cloud proof here must fail closed rather than hand a live
-	// ARM access token to a third-party STS.
+	// Minting a cross-cloud proof here must fail closed rather than hand a live ARM access token to a third-party STS.
 	if _, err := a.Mint(context.Background(), "https://management.azure.com/"); !errors.Is(err, core.ErrNonFederatableSource) {
 		t.Fatalf("Mint should refuse with ErrNonFederatableSource, got %v", err)
 	}
 
-	// The IMDS access-token path itself still works — it is just not a
-	// federation source. Nothing in this process calls it today; it is exercised
-	// here because Detect shares its transport and its host checks.
+	// The IMDS access-token path itself still works — it is just not a federation source.
 	tok, err := a.mintFromIMDS(context.Background(), "https://management.azure.com/")
 	if err != nil {
 		t.Fatalf("mintFromIMDS: %v", err)

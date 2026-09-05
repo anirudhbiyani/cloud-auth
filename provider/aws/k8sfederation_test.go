@@ -7,10 +7,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// k8s-federation shipped a complete CLI surface, spec type, help text, YAML
-// loader and two example files, and no provider handled the spec — every
-// invocation died on "unsupported spec type", --dry-run included. The subject is
-// the part worth pinning: it is what decides which workload can assume the role.
+// k8s-federation shipped a complete CLI surface, spec type, help text, YAML loader and two example files, and no provider handled the spec — every invocation died on "unsupported spec type", --dry-run included.
 
 func k8sSpec(mutate func(*core.K8sServiceAccountFederationSpec)) *core.K8sServiceAccountFederationSpec {
 	s := &core.K8sServiceAccountFederationSpec{
@@ -42,8 +39,7 @@ func TestK8sToRoleTrustSpecMapsTheSubject(t *testing.T) {
 	if want := "system:serviceaccount:payments:ledger"; got.Subject != want {
 		t.Errorf("Subject = %q, want %q", got.Subject, want)
 	}
-	// Exact match, not StringLike: the subject is fully known, so a pattern
-	// operator could only accept more than was asked for.
+	// Exact match, not StringLike: the subject is fully known, so a pattern operator could only accept more than was asked for.
 	if got.SubjectCondition != "StringEquals" {
 		t.Errorf("SubjectCondition = %q, want StringEquals", got.SubjectCondition)
 	}
@@ -66,8 +62,7 @@ func TestK8sToRoleTrustSpecMapsTheSubject(t *testing.T) {
 		t.Errorf("Description = %q, want the cluster named", got.Description)
 	}
 
-	// The translated spec must satisfy the same validation a hand-written role
-	// trust spec does, or setup would refuse it one layer down.
+	// The translated spec must satisfy the same validation a hand-written role trust spec does, or setup would refuse it one layer down.
 	if err := got.Validate(); err != nil {
 		t.Errorf("translated spec fails AWSRoleTrustOIDCSpec.Validate: %v", err)
 	}
@@ -117,8 +112,7 @@ func TestK8sToRoleTrustSpecRefusals(t *testing.T) {
 	}
 }
 
-// The provider must accept the spec type at all — this is the exact failure that
-// made every `setup --type k8s-federation` unusable.
+// The provider must accept the spec type at all — this is the exact failure that made every `setup --type k8s-federation` unusable.
 func TestProviderAcceptsK8sFederationSpec(t *testing.T) {
 	p := New()
 	_, err := p.Setup(t.Context(), k8sSpec(nil), core.SetupOptions{DryRun: true})

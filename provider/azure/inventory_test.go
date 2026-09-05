@@ -9,10 +9,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// Published telemetry put 24% of GitHub namespaces referenced in Azure trust
-// configuration at unregistered and claimable — a higher rate than AWS, and
-// none of it created by cloud-auth. So the tenant is what gets enumerated, not
-// the state file.
+// Published telemetry put 24% of GitHub namespaces referenced in Azure trust configuration at unregistered and claimable — a higher rate than AWS, and none of it created by cloud-auth.
 
 type listingGraph struct {
 	GraphClient
@@ -34,10 +31,7 @@ func (l *listingGraph) ListFederatedIdentityCredentials(_ context.Context, appID
 }
 
 func TestAzureListTrustRecords(t *testing.T) {
-	// This test is about the APPLICATION half. Naming a subscription whose ARM
-	// client reports no identities isolates it: leaving the subscription unset
-	// would add the managed-identity gap row, which is correct behaviour and
-	// not what is under test here.
+	// This test is about the APPLICATION half.
 	t.Setenv(inventorySubscriptionEnv, "sub")
 
 	graph := &listingGraph{
@@ -52,8 +46,7 @@ func TestAzureListTrustRecords(t *testing.T) {
 				Subject:   "repo:myorg/myrepo:ref:refs/heads/main",
 				Audiences: []string{core.DefaultAzureAudience},
 			}},
-			// An application with no federated credentials is not a trust
-			// relationship and must not appear.
+			// An application with no federated credentials is not a trust relationship and must not appear.
 			"app-2": {},
 		},
 	}
@@ -76,9 +69,6 @@ func TestAzureListTrustRecords(t *testing.T) {
 		t.Errorf("SubjectCondition = %q", r.SubjectCondition)
 	}
 	// Azure has no condition operator: subjects are compared literally, always.
-	// Recording that explicitly matters because the breadth scorer and the
-	// wildcard detector both read the operator, and an absent one would read as
-	// "unknown" rather than "exact by construction".
 	if r.Operator != "StringEquals" {
 		t.Errorf("Operator = %q, want StringEquals — Azure matches subjects literally", r.Operator)
 	}
@@ -94,9 +84,7 @@ func TestAzureListTrustRecords(t *testing.T) {
 	}
 }
 
-// One unreadable application must not abort the tenant — a single app the
-// caller cannot read would otherwise hide every other finding — and it is
-// recorded as a gap rather than skipped.
+// One unreadable application must not abort the tenant — a single app the caller cannot read would otherwise hide every other finding — and it is recorded as a gap rather than skipped.
 func TestAzureUnreadableApplicationIsRecordedAsUnknown(t *testing.T) {
 	t.Setenv(inventorySubscriptionEnv, "sub")
 
@@ -133,9 +121,7 @@ func TestAzureUnreadableApplicationIsRecordedAsUnknown(t *testing.T) {
 	}
 }
 
-// A failure listing applications at all is a real error: unlike one bad app, it
-// means nothing about the tenant was seen, and returning an empty inventory
-// would read as "no federated trust".
+// A failure listing applications at all is a real error: unlike one bad app, it means nothing about the tenant was seen, and returning an empty inventory would read as "no federated trust".
 func TestAzureListApplicationsFailureIsAnError(t *testing.T) {
 	t.Setenv(inventorySubscriptionEnv, "sub")
 	graph := &listingGraph{appsErr: errors.New("Graph unavailable")}
@@ -152,9 +138,7 @@ func TestAzureInventoryCloud(t *testing.T) {
 	}
 }
 
-// The managed-identity half was the stated gap in `audit`, and it is the half
-// an AKS workload actually uses. ARM has no tenant-wide list of user-assigned
-// identities, so it needs a subscription named.
+// The managed-identity half was the stated gap in `audit`, and it is the half an AKS workload actually uses.
 
 type listingARM struct {
 	ARMClient
@@ -216,9 +200,7 @@ func TestAzureManagedIdentityRecords(t *testing.T) {
 	}
 }
 
-// No subscription produces a GAP RECORD, not silence. A reader otherwise cannot
-// tell "no managed identities federate" from "managed identities were never
-// looked at" — and only one of those is reassuring.
+// No subscription produces a GAP RECORD, not silence.
 func TestAzureNoSubscriptionIsRecordedAsAGap(t *testing.T) {
 	t.Setenv(inventorySubscriptionEnv, "")
 
@@ -237,8 +219,7 @@ func TestAzureNoSubscriptionIsRecordedAsAGap(t *testing.T) {
 	}
 }
 
-// Every subsequent ARM call is addressed by resource group, which is parsed out
-// of the id. An unexpected id shape is a gap, not a reason to guess.
+// Every subsequent ARM call is addressed by resource group, which is parsed out of the id.
 func TestAzureIdentityWithNoResourceGroupIsAGap(t *testing.T) {
 	t.Setenv(inventorySubscriptionEnv, "sub")
 
@@ -259,8 +240,7 @@ func TestAzureIdentityWithNoResourceGroupIsAGap(t *testing.T) {
 	}
 }
 
-// The resource group is only available by parsing the ARM id: a
-// subscription-wide listing does not carry it as a field.
+// The resource group is only available by parsing the ARM id: a subscription-wide listing does not carry it as a field.
 func TestResourceGroupFromID(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
 		{"/subscriptions/s/resourceGroups/my-rg/providers/Microsoft.ManagedIdentity/" +
