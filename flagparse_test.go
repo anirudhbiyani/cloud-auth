@@ -118,8 +118,8 @@ func TestParseSetupOptsInputModeRules(t *testing.T) {
 	}{
 		"neither":       {[]string{}, "either --file or --type is required"},
 		"both":          {[]string{"--file", "s.yaml", "--type", "aws-oidc"}, "mutually exclusive"},
-		"unknown":       {[]string{"--type", "aws-oidc", "--nope"}, "unknown option: --nope"},
-		"missing value": {[]string{"--type"}, "--type requires an argument"},
+		"unknown":       {[]string{"--type", "aws-oidc", "--nope"}, "flag provided but not defined"},
+		"missing value": {[]string{"--type"}, "flag needs an argument"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := parseSetupOpts(tc.args)
@@ -133,15 +133,30 @@ func TestParseSetupOptsInputModeRules(t *testing.T) {
 	}
 }
 
-// Current behaviour, recorded rather than endorsed: the parser compares each
-// argument to the flag name exactly, so the --flag=value form every other Go
-// CLI accepts is rejected here. The exec and doctor commands, which use
-// flag.FlagSet, DO accept it — so the same binary answers differently
-// depending on which subcommand you typed.
-func TestParseSetupOptsRejectsEqualsForm(t *testing.T) {
-	_, err := parseSetupOpts([]string{"--type=aws-oidc"})
-	if err == nil || !strings.Contains(err.Error(), "unknown option: --type=aws-oidc") {
-		t.Fatalf("error = %v, want the equals form rejected (recorded, not endorsed)", err)
+// The equals form. The hand-rolled parsers compared each argument to the flag
+// name exactly, so `--type=aws-oidc` was rejected as an unknown option while
+// `exec` and `doctor` — already on flag.FlagSet — accepted `--to=aws`. The same
+// binary answered differently depending on the subcommand. Both forms now work
+// everywhere, and a bare word is still refused, since these subcommands take
+// options only.
+func TestParseSetupOptsAcceptsBothFlagForms(t *testing.T) {
+	for _, args := range [][]string{
+		{"--type=aws-oidc"},
+		{"--type", "aws-oidc"},
+		{"-type=aws-oidc"},
+	} {
+		opts, err := parseSetupOpts(args)
+		if err != nil {
+			t.Fatalf("parseSetupOpts(%v): %v", args, err)
+		}
+		if opts.mechType != "aws-oidc" {
+			t.Errorf("parseSetupOpts(%v): mechType = %q", args, opts.mechType)
+		}
+	}
+
+	if _, err := parseSetupOpts([]string{"--type", "aws-oidc", "stray"}); err == nil ||
+		!strings.Contains(err.Error(), "unexpected argument: stray") {
+		t.Errorf("error = %v, want a positional argument refused", err)
 	}
 }
 
@@ -180,8 +195,8 @@ func TestParseValidateOpts(t *testing.T) {
 	}{
 		"ref required":    {[]string{}, "--ref is required"},
 		"bad duration":    {[]string{"--ref", "r", "--timeout", "soon"}, "invalid timeout duration"},
-		"missing ref arg": {[]string{"--ref"}, "--ref requires an ID argument"},
-		"unknown":         {[]string{"--ref", "r", "--x"}, "unknown option: --x"},
+		"missing ref arg": {[]string{"--ref"}, "flag needs an argument"},
+		"unknown":         {[]string{"--ref", "r", "--x"}, "flag provided but not defined"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := parseValidateOpts(tc.args); err == nil ||
