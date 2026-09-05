@@ -1,15 +1,4 @@
-// Package verify holds the cloud-independent core of the harness verifier: the
-// targets.json plan model, runtime self-selection, sentinel-error mapping, the
-// case runner (over an injected exchanger), credential redaction, and the
-// machine-readable report.
-//
-// Everything here is pure or driven through injected interfaces so the whole
-// contract is unit-testable with no cloud, no network, and no credentials. The
-// cmd wrapper (../main.go) supplies the real broker; the integration tests
-// (test/integration) reuse the same runner.
-//
-// The shapes below are defined by test/harness/CONTRACT.md, which is
-// authoritative. Do not rename keys here without changing the contract.
+// Package verify holds the cloud-independent core of the harness verifier: the targets.json plan model, runtime self-selection, sentinel-error mapping, the case runner (over an injected exchanger), credential redaction, and the machine-readable report.
 package verify
 
 import (
@@ -22,9 +11,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// Environment variables the verifier reads for its plan. The inline form exists
-// so a driver can deliver targets.json as a ConfigMap value or EC2/GCE
-// user-data without a writable filesystem path.
+// Environment variables the verifier reads for its plan.
 const (
 	// EnvTargetsInline carries the targets.json document itself.
 	EnvTargetsInline = "CLOUD_AUTH_TARGETS_JSON"
@@ -38,8 +25,7 @@ const (
 	ExpectError   = "error"
 )
 
-// Canonical source-runtime keys. A case's source_runtime must normalize to one
-// of these; the verifier runs only the cases matching the runtime it detects.
+// Canonical source-runtime keys.
 const (
 	RuntimeAWSEC2            = "aws-ec2"
 	RuntimeAWSECS            = "aws-ecs"
@@ -53,10 +39,7 @@ const (
 	RuntimeAzureVM           = "azure-vm"
 )
 
-// runtimeAliases maps every spelling the harness may use (contract prose says
-// "AKS-WI", stage-1 outputs say "aks-workload-identity", cloud-auth's own
-// detector says "aks-workload-identity") onto one canonical key. Normalization
-// is lower-cased with underscores folded to dashes before lookup.
+// runtimeAliases maps every spelling the harness may use (contract prose says "AKS-WI", stage-1 outputs say "aks-workload-identity", cloud-auth's own detector says "aks-workload-identity") onto one canonical key.
 var runtimeAliases = map[string]string{
 	// AWS
 	"aws-ec2": RuntimeAWSEC2, "ec2": RuntimeAWSEC2,
@@ -76,9 +59,7 @@ var runtimeAliases = map[string]string{
 	"azure-vm": RuntimeAzureVM, "azure-vmss": RuntimeAzureVM,
 }
 
-// sentinels maps the names the contract uses in expect_error onto the real
-// sentinel errors. Lookup is case-insensitive; anything absent is a hard error
-// rather than a silent pass, so a typo in targets.json cannot fake a green run.
+// sentinels maps the names the contract uses in expect_error onto the real sentinel errors.
 var sentinels = map[string]error{
 	"errnofirstclasspath":     core.ErrNoFirstClassPath,
 	"errtrustmissing":         core.ErrTrustMissing,
@@ -86,8 +67,7 @@ var sentinels = map[string]error{
 	"errnotthisruntime":       core.ErrNotThisRuntime,
 }
 
-// Plan is the merged state/targets.json the driver produces from the stage-2
-// outputs of every cloud.
+// Plan is the merged state/targets.json the driver produces from the stage-2 outputs of every cloud.
 type Plan struct {
 	RunID string `json:"run_id"`
 	Cases []Case `json:"cases"`
@@ -98,23 +78,17 @@ type Case struct {
 	Name string `json:"name"`
 	// Expect is "success" or "error".
 	Expect string `json:"expect"`
-	// ExpectError names the sentinel a case with expect="error" must match,
-	// e.g. "ErrNoFirstClassPath" for the documented AWS-EC2→Azure gap.
+	// ExpectError names the sentinel a case with expect="error" must match, e.g. "ErrNoFirstClassPath" for the documented AWS-EC2→Azure gap.
 	ExpectError string `json:"expect_error,omitempty"`
-	// SourceRuntime is the canonical runtime this case runs on. The verifier
-	// self-selects on it; see SelectCases.
+	// SourceRuntime is the canonical runtime this case runs on.
 	SourceRuntime string `json:"source_runtime"`
 	// Target is the explicit target binding.
 	Target TargetSpec `json:"target"`
-	// Probe optionally names a post-exchange check that the credentials really
-	// work. An unknown or failing probe is a soft result, never a crash.
+	// Probe optionally names a post-exchange check that the credentials really work.
 	Probe string `json:"probe,omitempty"`
 }
 
-// TargetSpec is the JSON form of core.Target. Alias keys are accepted for
-// the GCP pool and impersonation fields because the stage-2 outputs name them
-// "provider_for_*"/"audience_for_*"; whichever the driver emits, it resolves to
-// the same core.Target.
+// TargetSpec is the JSON form of core.Target.
 type TargetSpec struct {
 	Cloud    string `json:"cloud"`
 	Audience string `json:"audience"`
@@ -171,16 +145,13 @@ func (s TargetSpec) Target() (core.Target, error) {
 	}
 }
 
-// CanonicalRuntime normalizes a source-runtime spelling to its canonical key,
-// returning "" when the value is not a runtime this harness knows about.
+// CanonicalRuntime normalizes a source-runtime spelling to its canonical key, returning "" when the value is not a runtime this harness knows about.
 func CanonicalRuntime(s string) string {
 	k := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(s)), "_", "-")
 	return runtimeAliases[k]
 }
 
-// RuntimeKey derives the canonical runtime key from cloud-auth's own detection
-// result. An unrecognized cloud/sub-runtime pair yields "" so the verifier
-// refuses to guess which cases belong to it.
+// RuntimeKey derives the canonical runtime key from cloud-auth's own detection result.
 func RuntimeKey(rt *core.Runtime) string {
 	if rt == nil {
 		return ""
@@ -188,9 +159,7 @@ func RuntimeKey(rt *core.Runtime) string {
 	return CanonicalRuntime(string(rt.Cloud) + "-" + rt.SubRuntime)
 }
 
-// SelectCases returns the cases whose source_runtime matches runtime. The same
-// verifier binary is deployed to every source, so this is how it decides what
-// is its to run. An empty or unknown runtime selects nothing.
+// SelectCases returns the cases whose source_runtime matches runtime.
 func SelectCases(cases []Case, runtime string) []Case {
 	key := CanonicalRuntime(runtime)
 	if key == "" {
@@ -216,13 +185,10 @@ func SentinelNames() []string {
 	return []string{"ErrNoFirstClassPath", "ErrTrustMissing", "ErrNonFederatableSource", "ErrNotThisRuntime"}
 }
 
-// LoadPlan parses and validates a targets.json document. Validation is strict:
-// a plan that cannot be executed exactly as written is rejected up front rather
-// than producing an ambiguous run.
+// LoadPlan parses and validates a targets.json document.
 func LoadPlan(data []byte) (*Plan, error) {
 	var p Plan
-	// Unknown keys are tolerated: the driver may add provenance fields, and a
-	// stricter decode would couple the verifier to the driver's bookkeeping.
+	// Unknown keys are tolerated: the driver may add provenance fields, and a stricter decode would couple the verifier to the driver's bookkeeping.
 	if err := json.Unmarshal(data, &p); err != nil {
 		return nil, fmt.Errorf("verify: parsing targets.json: %w", err)
 	}
@@ -306,14 +272,10 @@ func (s TargetSpec) validate() error {
 	return nil
 }
 
-// ErrPlanNotFound means no targets.json was supplied by env or file. Callers
-// that must degrade gracefully (the integration tests) branch on it.
+// ErrPlanNotFound means no targets.json was supplied by env or file.
 var ErrPlanNotFound = errors.New("verify: no targets.json found")
 
-// ResolvePlan loads the plan from, in order: the inline env document, the env
-// path override, then path. It returns the plan and a human description of
-// where it came from. Missing input yields ErrPlanNotFound; malformed input is
-// a real error (never silently skipped).
+// ResolvePlan loads the plan from, in order: the inline env document, the env path override, then path.
 func ResolvePlan(getenv func(string) string, path string) (*Plan, string, error) {
 	if getenv == nil {
 		getenv = os.Getenv

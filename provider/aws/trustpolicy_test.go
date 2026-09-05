@@ -8,8 +8,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// stubIAM implements just enough of IAMClient for the trust-policy and
-// granted-policy lookups; every other method fails loudly if called.
+// stubIAM implements just enough of IAMClient for the trust-policy and granted-policy lookups; every other method fails loudly if called.
 type stubIAM struct {
 	IAMClient
 	role         *Role
@@ -76,8 +75,7 @@ func TestTrustPolicyParsesLiveRolePolicy(t *testing.T) {
 }
 
 func TestTrustPolicyHandlesScalarAndArrayForms(t *testing.T) {
-	// IAM accepts a bare string or an array in Principal.Federated and in
-	// condition values. Both shapes appear in real policies.
+	// IAM accepts a bare string or an array in Principal.Federated and in condition values.
 	const arrayForm = `{
       "Statement": [{
         "Effect": "Allow",
@@ -96,8 +94,7 @@ func TestTrustPolicyHandlesScalarAndArrayForms(t *testing.T) {
 	if tp.Issuer != "https://accounts.google.com" {
 		t.Errorf("issuer = %q", tp.Issuer)
 	}
-	// :oaud is the audience key for Google (":aud" maps to azp there), so it
-	// must be collected too or the audience check would find nothing.
+	// :oaud is the audience key for Google (":aud" maps to azp there), so it must be collected too or the audience check would find nothing.
 	if len(tp.Audiences) != 2 {
 		t.Errorf("audiences = %v, want both entries from the array", tp.Audiences)
 	}
@@ -141,8 +138,7 @@ func TestGrantedPoliciesCombinesAttachedAndInline(t *testing.T) {
 	}
 }
 
-// The whole point of the wiring: the core validators must actually run against
-// the provider rather than reporting "skipped".
+// The whole point of the wiring: the core validators must actually run against the provider rather than reporting "skipped".
 func TestProviderSatisfiesValidationSources(t *testing.T) {
 	var _ core.TrustPolicySource = (*Provider)(nil)
 	var _ core.GrantedPolicySource = (*Provider)(nil)
@@ -168,8 +164,7 @@ func TestProviderSatisfiesValidationSources(t *testing.T) {
 	}
 }
 
-// End-to-end: Provider.Validate must now actually run the trust-policy and
-// permission checks, not just "role exists".
+// End-to-end: Provider.Validate must now actually run the trust-policy and permission checks, not just "role exists".
 func TestValidateRunsTrustAndPermissionChecks(t *testing.T) {
 	fullRef := core.MechanismRef{
 		ID:   "m1",
@@ -201,8 +196,7 @@ func TestValidateRunsTrustAndPermissionChecks(t *testing.T) {
 	})
 
 	t.Run("widened trust policy is detected", func(t *testing.T) {
-		// Someone replaced the scoped subject with a wildcard — the confused
-		// deputy hole. Previously this validated clean.
+		// Someone replaced the scoped subject with a wildcard — the confused deputy hole.
 		const widened = `{"Statement":[{"Effect":"Allow",
 			"Principal":{"Federated":"arn:aws:iam::1:oidc-provider/token.actions.githubusercontent.com"},
 			"Condition":{"StringEquals":{"x:aud":"sts.amazonaws.com"},"StringLike":{"x:sub":"*"}}}]}`

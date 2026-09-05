@@ -9,12 +9,9 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// `--subject "repo:myorg/myrepo:*"` — the value this project's own README used
-// to suggest — passed every gate with no warning, because validateSubjectScope
-// tests exact membership in {"*", "?*", "*:*", "**"}.
+// `--subject "repo:myorg/myrepo:*"` — the value this project's own README used to suggest — passed every gate with no warning, because validateSubjectScope tests exact membership in {"*", "?*", "*:*", "**"}.
 
-// setupWith runs a dry-run setup with the given subject and extra flags,
-// returning what reached stdout and stderr.
+// setupWith runs a dry-run setup with the given subject and extra flags, returning what reached stdout and stderr.
 func setupWith(t *testing.T, subject string, extra ...string) (stdout, stderr string, err error) {
 	t.Helper()
 	state := filepath.Join(t.TempDir(), "state.json")
@@ -77,8 +74,7 @@ func TestSetupWarnsOnBroadSubjects(t *testing.T) {
 	}
 }
 
-// Critical breadth is refused, and the refusal has to name the override rather
-// than leaving someone to find it.
+// Critical breadth is refused, and the refusal has to name the override rather than leaving someone to find it.
 func TestSetupRefusesCriticalBreadth(t *testing.T) {
 	_, _, err := setupWith(t, "repo:*")
 	if err == nil {
@@ -96,8 +92,7 @@ func TestSetupRefusesCriticalBreadth(t *testing.T) {
 	}
 }
 
-// The override exists so the decision is recorded, not so it can be waved
-// through — but when it is passed, setup must proceed.
+// The override exists so the decision is recorded, not so it can be waved through — but when it is passed, setup must proceed.
 func TestSetupAcceptsCriticalBreadthWithAJustification(t *testing.T) {
 	_, _, err := setupWith(t, "repo:*",
 		"--allow-unscoped-subject",
@@ -107,8 +102,7 @@ func TestSetupAcceptsCriticalBreadthWithAJustification(t *testing.T) {
 	}
 }
 
-// A wildcard silently upgraded the IAM operator to one that honours it, so the
-// same flag both widened the trust and made the widening take effect.
+// A wildcard silently upgraded the IAM operator to one that honours it, so the same flag both widened the trust and made the widening take effect.
 func TestSetupAnnouncesTheStringLikeFlip(t *testing.T) {
 	_, stderr, err := setupWith(t, "repo:myorg/myrepo:*")
 	if err != nil {
@@ -138,10 +132,7 @@ func TestBreadthWarningsGoToStderr(t *testing.T) {
 	}
 }
 
-// Only specs carrying a single subject condition are scored. A GCP pool
-// provider constrains identities through a CEL attribute condition — a
-// different shape, and a string score pretending to analyse one would be worse
-// than saying nothing.
+// Only specs carrying a single subject condition are scored.
 func TestOnlySubjectBearingSpecsAreScored(t *testing.T) {
 	if _, ok := subjectOf(&core.AWSRoleTrustOIDCSpec{Subject: "repo:o/r:*"}); !ok {
 		t.Error("an AWS role trust spec should be scorable")

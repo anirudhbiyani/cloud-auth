@@ -12,11 +12,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// The ARM half. A user-assigned managed identity carries federated credentials
-// exactly as an application does, and every constraint that applies to the
-// Graph path applies here too — the cap, the wildcards, the creation throttle.
-// Those were asserted for applications and not for identities, which is the
-// half an AKS workload actually uses.
+// The ARM half.
 
 const (
 	testSub = "22222222-2222-2222-2222-222222222222"
@@ -47,8 +43,7 @@ func TestManagedIdentityFederatedCredentialLifecycle(t *testing.T) {
 	})
 	f.handle(identityPath("/federatedIdentityCredentials/aks-ledger"),
 		func(w http.ResponseWriter, r *http.Request) {
-			// ARM nests the credential under "properties"; Graph does not, and
-			// sending the Graph shape here creates a credential with no issuer.
+			// ARM nests the credential under "properties"; Graph does not, and sending the Graph shape here creates a credential with no issuer.
 			if r.Method == http.MethodPut {
 				body := f.lastJSON()
 				props, ok := body["properties"].(map[string]any)
@@ -94,9 +89,7 @@ func TestManagedIdentityFederatedCredentialLifecycle(t *testing.T) {
 	}
 }
 
-// The 20-credential cap is per RESOURCE, so it applies to a managed identity
-// just as to an application. Asserting it only for applications left the half
-// an AKS workload uses unchecked.
+// The 20-credential cap is per RESOURCE, so it applies to a managed identity just as to an application.
 func TestManagedIdentityCapIsEnforcedToo(t *testing.T) {
 	f := newFakeAzure(t)
 
@@ -122,8 +115,7 @@ func TestManagedIdentityCapIsEnforcedToo(t *testing.T) {
 	}
 }
 
-// Wildcards are rejected on this path too: Azure matches literally, so a
-// wildcard creates a credential that never matches a token.
+// Wildcards are rejected on this path too: Azure matches literally, so a wildcard creates a credential that never matches a token.
 func TestManagedIdentityRejectsWildcards(t *testing.T) {
 	cred := micred("aks-*")
 	_, err := f0(t).CreateManagedIdentityFederatedCredential(
@@ -136,15 +128,13 @@ func TestManagedIdentityRejectsWildcards(t *testing.T) {
 	}
 }
 
-// f0 is a client whose fake answers nothing: validation must refuse before any
-// request is made, so no handler is needed.
+// f0 is a client whose fake answers nothing: validation must refuse before any request is made, so no handler is needed.
 func f0(t *testing.T) *restClient {
 	t.Helper()
 	return newFakeAzure(t).client(t)
 }
 
-// Creation is paced on the ARM path as well. Azure throttles per resource, and
-// a loop over namespaces hits it exactly as a loop over repositories does.
+// Creation is paced on the ARM path as well.
 func TestManagedIdentityCreationIsPaced(t *testing.T) {
 	f := newFakeAzure(t)
 	var inFlight, maxInFlight atomic.Int32
@@ -275,8 +265,7 @@ func TestRoleAssignmentListAndDelete(t *testing.T) {
 	if len(assignments) != 1 || assignments[0].PrincipalID != "principal-1" {
 		t.Errorf("assignments = %+v", assignments)
 	}
-	// Filtering server-side matters: a subscription can hold thousands of
-	// assignments and filtering client-side would page through all of them.
+	// Filtering server-side matters: a subscription can hold thousands of assignments and filtering client-side would page through all of them.
 	if !strings.Contains(gotFilter, "principalId eq 'principal-1'") {
 		t.Errorf("$filter = %q, want a principalId filter", gotFilter)
 	}
@@ -296,8 +285,6 @@ func TestRoleAssignmentListAndDelete(t *testing.T) {
 }
 
 // An ARM scope arrives with a leading slash and the base URL ends without one.
-// Joining them naively produces a double slash, which ARM answers with a 400
-// that says nothing about the URL.
 func TestARMScopeIsNormalized(t *testing.T) {
 	for _, scope := range []string{
 		"/subscriptions/sub",
@@ -310,10 +297,7 @@ func TestARMScopeIsNormalized(t *testing.T) {
 	}
 }
 
-// Reading IMDS belongs to the data plane, where source/azure.go already does it
-// behind the check that matters: IDENTITY_ENDPOINT must be loopback or
-// link-local before the IDENTITY_HEADER secret is sent. A second copy of a
-// security control is a second place for it to rot.
+// Reading IMDS belongs to the data plane, where source/azure.go already does it behind the check that matters: IDENTITY_ENDPOINT must be loopback or link-local before the IDENTITY_HEADER secret is sent.
 func TestManagedIdentityTokenIsDeliberatelyNotImplemented(t *testing.T) {
 	_, err := f0(t).GetManagedIdentityToken(context.Background(),
 		&GetManagedIdentityTokenInput{Resource: "https://management.azure.com/"})
@@ -328,9 +312,7 @@ func TestManagedIdentityTokenIsDeliberatelyNotImplemented(t *testing.T) {
 	}
 }
 
-// The inventory client methods. The InventorySource was tested against a fake
-// ARM client, so these — the code that actually speaks to ARM — had no coverage
-// at all, including the paging I wrote for them.
+// The inventory client methods.
 func TestListManagedIdentitiesFollowsPaging(t *testing.T) {
 	f := newFakeAzure(t)
 	base := "/subscriptions/" + testSub +
@@ -355,9 +337,7 @@ func TestListManagedIdentitiesFollowsPaging(t *testing.T) {
 					"principalId": "p1", "clientId": "c1", "tenantId": "t",
 				},
 			}},
-			// ARM pages with an absolute nextLink. Stopping at page one answers
-			// "these are your identities" with a prefix of them, and the
-			// inventory decides what exists from the result.
+			// ARM pages with an absolute nextLink.
 			"nextLink": f.server.URL + base + "?page=2",
 		})
 	})
@@ -369,8 +349,7 @@ func TestListManagedIdentitiesFollowsPaging(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("got %d identities, want 2 — paging was not followed", len(got))
 	}
-	// The resource group is not a field on the response; it is parsed out of
-	// the id, and every subsequent call is addressed by it.
+	// The resource group is not a field on the response; it is parsed out of the id, and every subsequent call is addressed by it.
 	if got[0].ResourceGroup != testRG {
 		t.Errorf("ResourceGroup = %q, want it parsed from the ARM id", got[0].ResourceGroup)
 	}
@@ -411,8 +390,7 @@ func TestListManagedIdentityFederatedCredentials(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("got %d credentials", len(got))
 	}
-	// ARM nests these under properties; a flat read returns a credential with
-	// no issuer, which the inventory would then score as trusting nothing.
+	// ARM nests these under properties; a flat read returns a credential with no issuer, which the inventory would then score as trusting nothing.
 	if got[0].Issuer == "" || got[0].Subject == "" {
 		t.Errorf("credential = %+v — ARM nests these under properties", got[0])
 	}

@@ -5,9 +5,7 @@ import (
 	"testing"
 )
 
-// source.detect restricts which identity a workload may use, so a value that
-// parses must mean exactly what it says: no silent widening, no fallback to
-// auto, and every accepted value must round-trip.
+// source.detect restricts which identity a workload may use, so a value that parses must mean exactly what it says: no silent widening, no fallback to auto, and every accepted value must round-trip.
 func FuzzParseSelector(f *testing.F) {
 	f.Add("auto")
 	f.Add("aws")
@@ -27,8 +25,7 @@ func FuzzParseSelector(f *testing.F) {
 			}
 			return
 		}
-		// Anything that parsed must round-trip, or String and ParseSelector
-		// disagree about what was configured.
+		// Anything that parsed must round-trip, or String and ParseSelector disagree about what was configured.
 		round, rerr := ParseSelector(sel.String())
 		if rerr != nil || round != sel {
 			t.Fatalf("%q parsed to %+v, which does not round-trip (%+v, %v)", in, sel, round, rerr)
@@ -41,8 +38,7 @@ func FuzzParseSelector(f *testing.F) {
 	})
 }
 
-// A trust policy's subject arrives from IAM. Neither the parse nor the match may
-// panic, and an unscoped verdict must not depend on incidental whitespace.
+// A trust policy's subject arrives from IAM.
 func FuzzIsUnscoped(f *testing.F) {
 	f.Add("*")
 	f.Add("repo:org/repo:*")
@@ -55,10 +51,7 @@ func FuzzIsUnscoped(f *testing.F) {
 		if got != isUnscoped("  "+pattern+"  ") {
 			t.Fatalf("isUnscoped(%q) depends on surrounding whitespace", pattern)
 		}
-		// Anything that pins a real character is scoped. Blankness is judged with
-		// strings.TrimSpace, matching the implementation: a whitespace-only subject
-		// pins nothing and IS unscoped, which the fuzzer established with "\v"
-		// against a narrower trim set in this assertion.
+		// Anything that pins a real character is scoped.
 		meaningful := strings.Trim(strings.ReplaceAll(strings.TrimSpace(pattern), ":", ""), "*?")
 		if got && meaningful != "" {
 			t.Fatalf("isUnscoped(%q) = true but it pins real characters (%q)", pattern, meaningful)

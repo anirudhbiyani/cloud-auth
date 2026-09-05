@@ -18,15 +18,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/internal/redact"
 )
 
-// This file is the concrete client behind VaultClient. Without it the provider
-// could plan and never act: every non-dry-run setup, validate and delete stopped
-// at "Vault client not configured".
-//
-// Vault's HTTP API is uniform enough that no SDK is warranted: every call is a
-// JSON request to /v1/<path> with an X-Vault-Token header, and responses share
-// one envelope. hashicorp/vault/api would add a large dependency tree — it
-// carries the whole server's helper packages — for request shaping this file
-// does in a page.
+// This file is the concrete client behind VaultClient.
 
 const (
 	// requestTimeout bounds a single API call.
@@ -36,8 +28,7 @@ const (
 
 	// tokenHeader carries the caller's Vault token.
 	tokenHeader = "X-Vault-Token"
-	// namespaceHeader selects a Vault Enterprise namespace. Ignored by OSS
-	// Vault, so it is safe to send whenever one is configured.
+	// namespaceHeader selects a Vault Enterprise namespace.
 	namespaceHeader = "X-Vault-Namespace"
 )
 
@@ -60,19 +51,12 @@ func (e *apiError) Error() string {
 }
 
 // NotFound reports absence.
-//
-// Vault answers a missing path with 404 and an EMPTY errors array, and answers a
-// permission failure with 403. Conflating the two is how a create-or-update
-// decision goes wrong, so the distinction is typed rather than recovered from
-// the message.
 func (e *apiError) NotFound() bool { return e.StatusCode == http.StatusNotFound }
 
 // Forbidden reports a permission failure — explicitly NOT absence.
 func (e *apiError) Forbidden() bool { return e.StatusCode == http.StatusForbidden }
 
-// Sealed reports that Vault is sealed or standby. This is neither a
-// misconfiguration nor absence: the operator needs to unseal, and saying "not
-// found" would send them to look at their policy instead.
+// Sealed reports that Vault is sealed or standby.
 func (e *apiError) Sealed() bool {
 	return e.StatusCode == http.StatusServiceUnavailable
 }
@@ -109,10 +93,6 @@ func WithNamespace(ns string) ClientOption {
 }
 
 // NewClient builds a Vault client from the environment.
-//
-// VAULT_ADDR and VAULT_TOKEN are the documented configuration and are required;
-// there is no discovery chain to fall back through, and guessing an address
-// would mean sending a token somewhere the operator did not name.
 func NewClient(opts ...ClientOption) (VaultClient, error) {
 	c := &restClient{
 		http:      httpx.NewSTSClient(requestTimeout),
@@ -140,8 +120,7 @@ func NewClient(opts ...ClientOption) (VaultClient, error) {
 	return c, nil
 }
 
-// secret is Vault's response envelope. Every read and every credential-issuing
-// call returns this shape.
+// secret is Vault's response envelope.
 type secret struct {
 	RequestID     string          `json:"request_id"`
 	LeaseID       string          `json:"lease_id"`
@@ -169,9 +148,6 @@ func (s *secret) decodeData(out any) error {
 }
 
 // do performs one authenticated call against /v1/<path>.
-//
-// out may be nil for calls whose body is not needed. Vault answers a successful
-// write with 204 and no body, which is not an error.
 func (c *restClient) do(ctx context.Context, method, path string, body any, out *secret) error {
 	endpoint := c.address + "/v1/" + strings.TrimLeft(path, "/")
 
@@ -228,8 +204,7 @@ func parseAPIError(status int, raw []byte, path string) error {
 	}
 	if err := json.Unmarshal(raw, &envelope); err == nil {
 		for _, msg := range envelope.Errors {
-			// Vault echoes request material into some errors, and a token
-			// present in one is a live credential.
+			// Vault echoes request material into some errors, and a token present in one is a live credential.
 			e.Errors = append(e.Errors, redact.Body(msg, errorBodyLimit))
 		}
 		return e

@@ -9,8 +9,7 @@ import (
 	"time"
 )
 
-// Entra token acquisition: the client-credentials grant with a federated token
-// as the client assertion.
+// Entra token acquisition: the client-credentials grant with a federated token as the client assertion.
 
 const (
 	// entraEndpoint is the Entra v2.0 token endpoint template.
@@ -19,12 +18,10 @@ const (
 	// clientAssertionType is the only assertion type Entra accepts here.
 	clientAssertionType = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
 
-	// propagationCode is Entra's answer while a newly created federated identity
-	// credential has not yet propagated.
+	// propagationCode is Entra's answer while a newly created federated identity credential has not yet propagated.
 	propagationCode = "AADSTS70021"
 
-	// propagationRetries and propagationBackoff bound the wait for that
-	// propagation. See exchangeWithPropagationRetry.
+	// propagationRetries and propagationBackoff bound the wait for that propagation.
 	propagationRetries = 4
 	propagationBackoff = 3 * time.Second
 )
@@ -67,18 +64,6 @@ func (c *restClient) ExchangeToken(ctx context.Context, input *ExchangeTokenInpu
 }
 
 // exchangeWithPropagationRetry posts the grant, retrying only AADSTS70021.
-//
-// This is a deliberate, narrow exception to the rule that 4xx is never retried.
-// The rule exists because a rejected trust does not become accepted on the third
-// attempt, and retrying turns a clear misconfiguration into a slow one. This
-// case is the opposite: the trust IS correct and Entra has not finished
-// replicating it. A federated identity credential created seconds ago
-// legitimately fails for a few minutes, and the failure is indistinguishable to
-// the operator from a wrong subject.
-//
-// Scoped as tightly as it can be: only AADSTS70021, only a bounded number of
-// attempts, only here. Every other 4xx — including AADSTS700213 for a wrong
-// subject, which looks superficially similar — fails immediately, as it should.
 func (c *restClient) exchangeWithPropagationRetry(ctx context.Context, endpoint string, form url.Values) (*ExchangeTokenOutput, error) {
 	var lastErr error
 	for attempt := range propagationRetries {
@@ -95,9 +80,7 @@ func (c *restClient) exchangeWithPropagationRetry(ctx context.Context, endpoint 
 		if attempt == propagationRetries-1 {
 			break
 		}
-		// Linear, not exponential: propagation is a fixed-ish delay, not
-		// congestion, so backing off harder only makes the caller wait longer
-		// for the same answer.
+		// Linear, not exponential: propagation is a fixed-ish delay, not congestion, so backing off harder only makes the caller wait longer for the same answer.
 		if err := c.sleep(ctx, propagationBackoff); err != nil {
 			return nil, err
 		}
@@ -107,8 +90,6 @@ func (c *restClient) exchangeWithPropagationRetry(ctx context.Context, endpoint 
 }
 
 // postForm posts an application/x-www-form-urlencoded grant to Entra.
-//
-// Unauthenticated by design: the client assertion in the body IS the credential.
 func (c *restClient) postForm(ctx context.Context, endpoint string, form url.Values) (*ExchangeTokenOutput, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
@@ -151,12 +132,6 @@ func (c *restClient) postForm(ctx context.Context, endpoint string, form url.Val
 }
 
 // GetManagedIdentityToken is not implemented on the control-plane client.
-//
-// Reading IMDS belongs to the runtime data plane, where source/azure.go already
-// does it — and does it behind the checks that matter: IDENTITY_ENDPOINT is
-// validated to be loopback or link-local before the IDENTITY_HEADER secret is
-// sent anywhere. Duplicating it here would duplicate those checks too, and a
-// second copy of a security control is a second place for it to rot.
 func (c *restClient) GetManagedIdentityToken(_ context.Context, _ *GetManagedIdentityTokenInput) (*GetManagedIdentityTokenOutput, error) {
 	return nil, fmt.Errorf("azure: managed identity tokens are a runtime concern, not a control-plane one; " +
 		"use `cloud-auth exchange` or the source package")

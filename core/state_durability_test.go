@@ -10,18 +10,9 @@ import (
 	"testing"
 )
 
-// The state file decides what Delete is willing to remove. A lost record makes a
-// real cloud resource undeletable through this tool, so concurrent writers must
-// not overwrite each other from stale in-memory copies.
+// The state file decides what Delete is willing to remove.
 func TestConcurrentWritersDoNotLoseRecords(t *testing.T) {
-	// This test drives four independent stores over one file, so the in-process
-	// mutex does not cover them and flock is what genuinely arbitrates. Where
-	// the lock is a documented no-op — anything that is not unix — there is
-	// nothing to arbitrate and records legitimately are lost.
-	//
-	// Skipped loudly rather than quietly relaxed: the guarantee is absent on
-	// that platform, and a test that passed anyway would be asserting the
-	// opposite of the truth.
+	// This test drives four independent stores over one file, so the in-process mutex does not cover them and flock is what genuinely arbitrates.
 	if !lockingIsReal {
 		t.Skip("cross-process file locking is a no-op on this platform; " +
 			"FileStateStore does not serialize concurrent processes here")
@@ -29,8 +20,7 @@ func TestConcurrentWritersDoNotLoseRecords(t *testing.T) {
 
 	path := filepath.Join(t.TempDir(), "state.json")
 
-	// Two independent stores over one file: this is what two cloud-auth
-	// processes look like, and the in-process mutex says nothing about it.
+	// Two independent stores over one file: this is what two cloud-auth processes look like, and the in-process mutex says nothing about it.
 	const writers, each = 4, 25
 	var wg sync.WaitGroup
 	for w := 0; w < writers; w++ {
@@ -69,8 +59,7 @@ func TestConcurrentWritersDoNotLoseRecords(t *testing.T) {
 	}
 }
 
-// A fixed ".tmp" name meant two concurrent writers used the same path and one
-// clobbered the other mid-write. Nothing should be left behind either way.
+// A fixed ".tmp" name meant two concurrent writers used the same path and one clobbered the other mid-write.
 func TestSaveLeavesNoTempFiles(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "state.json")
@@ -111,11 +100,7 @@ func TestStateFileIsNotWorldReadable(t *testing.T) {
 	}
 	perm := info.Mode().Perm()
 	if !posixFileModes {
-		// Windows has no POSIX permission bits: os.Chmod toggles a read-only
-		// flag and Perm() reports 0666 whatever was requested. The state file is
-		// genuinely NOT protected by mode there — it relies on the ACL of the
-		// directory it sits in — so this asserts the platform's actual behaviour
-		// rather than pretending the guarantee holds.
+		// Windows has no POSIX permission bits: os.Chmod toggles a read-only flag and Perm() reports 0666 whatever was requested.
 		if perm == 0o600 {
 			t.Errorf("mode = 0600 on a platform without POSIX modes; " +
 				"posixFileModes is wrong for this build")
@@ -129,8 +114,7 @@ func TestStateFileIsNotWorldReadable(t *testing.T) {
 	}
 }
 
-// A malformed state file must fail loudly. Silently starting from empty would
-// orphan every resource it recorded.
+// A malformed state file must fail loudly.
 func TestCorruptStateFileIsAnError(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {

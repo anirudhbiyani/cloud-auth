@@ -27,9 +27,7 @@ func (s *stubLifecycle) Validate(context.Context, MechanismRef, ValidateOptions)
 }
 func (s *stubLifecycle) Delete(context.Context, MechanismRef, DeleteOptions) error { return nil }
 
-// A state-store failure used to be printed to stdout and forgotten. The
-// resources exist but nothing records that cloud-auth made them, so Delete will
-// later refuse to remove them — the caller has to be told, in something it reads.
+// A state-store failure used to be printed to stdout and forgotten.
 func TestSetupReportsAStateStoreFailure(t *testing.T) {
 	reg := NewRegistry()
 	ref := CreateMechanismRef(MechanismAWSRoleTrustOIDC, AWS,
@@ -73,9 +71,7 @@ func (s slowValidator) Validate(ctx context.Context, _ MechanismRef) ValidationC
 	return ValidationCheck{ID: s.id, Status: CheckStatusPassed, Severity: SeverityError}
 }
 
-// Each check is a cloud API call. Running the rest of the list after the caller
-// has timed out spends quota to produce a report nobody reads — and the report
-// must say the remaining checks did not run, not imply they passed.
+// Each check is a cloud API call.
 func TestRunValidationStopsWhenCancelled(t *testing.T) {
 	validators := []Validator{
 		slowValidator{"one"}, slowValidator{"two"}, slowValidator{"three"}, slowValidator{"four"},

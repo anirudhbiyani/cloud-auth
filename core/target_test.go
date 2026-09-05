@@ -5,9 +5,7 @@ import (
 	"testing"
 )
 
-// The point of per-cloud types: an impossible combination cannot be written
-// down. This test documents what each type requires, and that each rejects an
-// incomplete binding before any network call.
+// The point of per-cloud types: an impossible combination cannot be written down.
 func TestTargetValidation(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -100,8 +98,7 @@ func TestTargetValidation(t *testing.T) {
 	}
 }
 
-// Each cloud's audience has one correct value or one conventional one, so
-// requiring the caller to restate it adds nothing but a chance to get it wrong.
+// Each cloud's audience has one correct value or one conventional one, so requiring the caller to restate it adds nothing but a chance to get it wrong.
 func TestTargetAudienceDefaults(t *testing.T) {
 	if got := (AWSTarget{RoleARN: "r"}).Audience(); got != DefaultAWSAudience {
 		t.Errorf("aws audience = %q, want %q", got, DefaultAWSAudience)

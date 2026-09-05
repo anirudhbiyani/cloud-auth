@@ -6,14 +6,12 @@ import (
 )
 
 // Registry manages provider registration and discovery.
-// It provides thread-safe access to registered providers.
 type Registry struct {
 	mu        sync.RWMutex
 	providers map[Cloud]Provider
 }
 
 // DefaultRegistry is the global provider registry.
-// Providers register themselves via init() functions.
 var DefaultRegistry = NewRegistry()
 
 // NewRegistry creates a new empty registry.
@@ -24,7 +22,6 @@ func NewRegistry() *Registry {
 }
 
 // Register adds a provider to the registry.
-// This is typically called from provider package init() functions.
 func (r *Registry) Register(p Provider) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

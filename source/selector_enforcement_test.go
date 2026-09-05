@@ -21,8 +21,7 @@ func (f fixedRuntime) Mint(context.Context, string) (*core.SourceToken, error) {
 	return &core.SourceToken{Kind: core.OIDC}, nil
 }
 
-// The point of the whole feature: a host that satisfies a probe the operator did
-// not authorise must fail, not silently authenticate as that identity.
+// The point of the whole feature: a host that satisfies a probe the operator did not authorise must fail, not silently authenticate as that identity.
 func TestRestrictedRegistryRefusesTheWrongRuntime(t *testing.T) {
 	onAWS := NewRegistry(fixedRuntime{&core.Runtime{Cloud: core.AWS, SubRuntime: "ec2"}})
 
@@ -44,8 +43,7 @@ func TestRestrictedRegistryRefusesTheWrongRuntime(t *testing.T) {
 	}
 }
 
-// Pinning a sub-runtime distinguishes two identities on the same cloud — an EKS
-// pod's projected token versus the node's instance profile, for instance.
+// Pinning a sub-runtime distinguishes two identities on the same cloud — an EKS pod's projected token versus the node's instance profile, for instance.
 func TestRestrictedRegistryChecksTheSubRuntime(t *testing.T) {
 	reg := NewRegistry(fixedRuntime{&core.Runtime{Cloud: core.AWS, SubRuntime: "ec2"}}).
 		Restrict(core.Selector{Cloud: core.AWS, SubRuntime: "eks-irsa"})
@@ -55,8 +53,7 @@ func TestRestrictedRegistryChecksTheSubRuntime(t *testing.T) {
 	}
 }
 
-// A restriction with nothing detected must say what was required, not just
-// "no supported runtime".
+// A restriction with nothing detected must say what was required, not just "no supported runtime".
 func TestRestrictedRegistryExplainsWhenNothingDetected(t *testing.T) {
 	reg := NewRegistry(fixedRuntime{nil}).Restrict(core.Selector{Cloud: core.GCP, SubRuntime: "gke"})
 	_, _, err := reg.Detect(context.Background())

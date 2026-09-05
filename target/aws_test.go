@@ -38,9 +38,7 @@ func oidcToken() *core.SourceToken {
 	return oidcTokenFor("sts.amazonaws.com")
 }
 
-// oidcTokenFor mints a proof pinned to aud. Tests must use the audience of the
-// target they exchange at: a proof minted for one target is refused at another,
-// which is the whole point of checkAudienceBinding.
+// oidcTokenFor mints a proof pinned to aud.
 func oidcTokenFor(aud string) *core.SourceToken {
 	return &core.SourceToken{Kind: core.OIDC, Value: "eyJ.payload.sig", Audience: aud}
 }
@@ -118,14 +116,6 @@ func TestAWSExchangeRetriesOn5xx(t *testing.T) {
 
 func TestAWSExchangeRejectsSigV4Token(t *testing.T) {
 	// AWS WebIdentity accepts only OIDC JWTs, not a SigV4 proof.
-	//
-	// This used to assert only err != nil, which would pass if the message were
-	// "no" — and it did pass while the error carried no sentinel at all, so
-	// core.CategoryOf filed a configuration problem as an internal fault and
-	// doctor printed the generic mint failure instead of the bridge options it
-	// already had written. Matching target/azure_test.go's rigour is the fix:
-	// the sentinel is the contract, and the remedies are the reason anyone
-	// reads the error.
 	e := NewAWSExchanger()
 	_, err := e.Exchange(context.Background(), &core.SourceToken{Kind: core.AWSSigV4}, awsTarget())
 	if err == nil {

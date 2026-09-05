@@ -11,9 +11,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// A caller of Exchange must be able to tell "the network is down" from "the
-// trust is misconfigured" from "we are being throttled" — without matching on
-// message text. The taxonomy existed for this and was wired to nothing.
+// A caller of Exchange must be able to tell "the network is down" from "the trust is misconfigured" from "we are being throttled" — without matching on message text.
 func TestExchangeErrorsCarryACategory(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -74,8 +72,7 @@ func TestTransportFailuresAreCategorized(t *testing.T) {
 		t.Error("a dial failure should be retryable")
 	}
 
-	// A cancelled caller is a timeout, and must NOT be retried: the caller has
-	// already given up.
+	// A cancelled caller is a timeout, and must NOT be retried: the caller has already given up.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		time.Sleep(500 * time.Millisecond)
 	}))

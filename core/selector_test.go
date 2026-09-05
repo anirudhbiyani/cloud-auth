@@ -31,8 +31,7 @@ func TestParseSelector(t *testing.T) {
 		}
 	}
 
-	// A typo must fail loudly. Silently falling back to auto would leave the
-	// operator believing they had pinned an identity source when they had not.
+	// A typo must fail loudly.
 	invalid := []string{"aws-ec3", "gcp-gek", "azure-vmm", "kubernetes", "amazon", "aws-", "-ec2"}
 	for _, in := range invalid {
 		if got, err := ParseSelector(in); err == nil {
@@ -66,8 +65,7 @@ func TestSelectorMatch(t *testing.T) {
 		t.Errorf("exact match: %v", err)
 	}
 
-	// The cases that matter: detection succeeded, but produced an identity the
-	// operator forbade.
+	// The cases that matter: detection succeeded, but produced an identity the operator forbade.
 	wrongCloud := (Selector{Cloud: GCP}).Match(ec2)
 	if !errors.Is(wrongCloud, ErrRuntimeMismatch) {
 		t.Errorf("want ErrRuntimeMismatch for a different cloud, got %v", wrongCloud)

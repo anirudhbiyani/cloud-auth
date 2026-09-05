@@ -9,10 +9,6 @@ import (
 )
 
 // Workload Identity Pool and provider operations.
-//
-// Every mutation here is a long-running operation. They are awaited rather than
-// fired and forgotten, because Setup's next step binds IAM against the resource
-// this step created.
 
 // wifPool is the wire shape of a workload identity pool.
 type wifPool struct {
@@ -110,11 +106,6 @@ func (c *restClient) CreateWorkloadIdentityPool(ctx context.Context, parent, poo
 }
 
 // DeleteWorkloadIdentityPool soft-deletes a pool and waits for it.
-//
-// GCP soft-deletes: the pool moves to DELETED and its id stays reserved for 30
-// days. That is the API's behaviour, not something this client can change, and
-// it is why re-running setup with the same pool id shortly after a delete fails
-// with ALREADY_EXISTS rather than creating a fresh pool.
 func (c *restClient) DeleteWorkloadIdentityPool(ctx context.Context, name string) error {
 	var op operation
 	if err := c.do(ctx, http.MethodDelete, c.iamURL+"/"+name, nil, &op, name); err != nil {
@@ -190,17 +181,7 @@ func (c *restClient) DeleteWorkloadIdentityPoolProvider(ctx context.Context, nam
 	return c.await(ctx, &op, nil)
 }
 
-// checkAttributeMapping enforces GCP's documented mapping limits before the
-// call.
-//
-// The API rejects an over-limit mapping with a message naming the ceiling but
-// not which entry crossed it, and by then the pool has already been created —
-// so the operator is left rolling back a half-built setup to fix a typo. The
-// google.subject length limit is the one that cannot be checked here: its value
-// is produced at exchange time by CEL over a token this code has not seen. A
-// literal mapping can be checked, and GitHub's immutable subject claims made
-// overflow materially more likely, so a literal that is already too long is
-// worth catching.
+// checkAttributeMapping enforces GCP's documented mapping limits before the call.
 func checkAttributeMapping(mapping map[string]string) error {
 	if len(mapping) == 0 {
 		return nil
@@ -221,12 +202,10 @@ func checkAttributeMapping(mapping map[string]string) error {
 
 	subject, ok := mapping["google.subject"]
 	if !ok {
-		// google.subject is the only required mapping; without it the provider
-		// cannot name the federated principal at all.
+		// google.subject is the only required mapping; without it the provider cannot name the federated principal at all.
 		return fmt.Errorf("gcp: attribute_mapping must include google.subject")
 	}
-	// Only a literal can be measured. Anything referencing the assertion is
-	// resolved per-token at exchange time.
+	// Only a literal can be measured.
 	if !strings.Contains(subject, "assertion") && len(subject) > maxMappedSubjectBytes {
 		return fmt.Errorf("gcp: google.subject is %d bytes, over the %d-byte limit",
 			len(subject), maxMappedSubjectBytes)
@@ -235,12 +214,6 @@ func checkAttributeMapping(mapping map[string]string) error {
 }
 
 // ListWorkloadIdentityPools enumerates the pools under a parent.
-//
-// Returns what the API returns, INCLUDING soft-deleted pools. GCP keeps a
-// deleted pool listed with state DELETED for 30 days, and a client that
-// silently dropped them would hide the reason a create fails with
-// ALREADY_EXISTS on a name nothing appears to be using. Deciding which pools
-// are a live trust relationship belongs to the consumer; see inventory.go.
 func (c *restClient) ListWorkloadIdentityPools(ctx context.Context, parent string) ([]*WorkloadIdentityPool, error) {
 	var out []*WorkloadIdentityPool
 	pageToken := ""

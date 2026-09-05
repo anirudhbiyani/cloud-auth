@@ -16,12 +16,6 @@ import (
 )
 
 // S3 as a shared state backend.
-//
-// S3 gained conditional writes in 2024: If-None-Match on a PutObject creates
-// only when nothing is there, and If-Match writes only when the current ETag
-// still matches. Together those are a compare-and-swap, which is what makes a
-// shared store safe without a lock table — no DynamoDB alongside, and nothing
-// to leave stale when a process dies mid-write.
 
 // s3API is the subset used here, so the store can be tested against a fake.
 type s3API interface {
@@ -91,10 +85,6 @@ func (o *S3Objects) Get(ctx context.Context) ([]byte, string, error) {
 }
 
 // Put writes the document under a precondition.
-//
-// An empty expectedVersion means "create only": If-None-Match: * fails if
-// anything is already there, which is what makes two operators initialising the
-// same bucket at the same moment safe.
 func (o *S3Objects) Put(ctx context.Context, data []byte, expectedVersion string) error {
 	in := &s3.PutObjectInput{
 		Bucket:      aws.String(o.bucket),
@@ -127,10 +117,6 @@ func isS3NotFound(err error) bool {
 }
 
 // isS3PreconditionFailed reports whether a conditional write lost.
-//
-// S3 answers a failed If-Match with 412, and a failed If-None-Match with 409 —
-// two statuses for one meaning, and treating either as a hard error would turn
-// a normal race into a failed command.
 func isS3PreconditionFailed(err error) bool {
 	switch s3StatusCode(err) {
 	case http.StatusPreconditionFailed, http.StatusConflict:

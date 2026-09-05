@@ -1,13 +1,4 @@
-// Package architecture asserts the import structure, because it is a property
-// this codebase deliberately maintains and nothing else would notice breaking.
-//
-// The alternative was splitting the control plane into its own module, which
-// would let the compiler enforce the same boundary. Measured, that split saved
-// 76 KB of binary and two go.sum entries — Go's linker already eliminates the
-// unused code, and the data plane pulls most of the AWS SDK anyway through one
-// LoadDefaultConfig call. It would also have added permanent multi-module
-// friction: replace directives, two-commit changes, two tags in order. These
-// tests buy the property that actually mattered for the cost of one file.
+// Package architecture asserts the import structure, because it is a property this codebase deliberately maintains and nothing else would notice breaking.
 package architecture
 
 import (
@@ -28,14 +19,11 @@ type pkg struct {
 	TestImports []string
 }
 
-// firstPartyImports returns every in-module package each package imports,
-// including from its tests: a test-only edge is still an edge, and a layering
-// violation introduced in a test tends to become one in production later.
+// firstPartyImports returns every in-module package each package imports, including from its tests: a test-only edge is still an edge, and a layering violation introduced in a test tends to become one in production later.
 func firstPartyImports(t *testing.T) map[string][]string {
 	t.Helper()
 
-	// ./... from the repository root. The test binary runs in this directory, so
-	// walk up two levels.
+	// ./...
 	cmd := exec.Command("go", "list", "-json", "./...")
 	cmd.Dir = "../.."
 	out, err := cmd.Output()
@@ -88,12 +76,6 @@ func dedupe(xs []string) []string {
 var dataPlane = []string{"source", "target", "broker", "adapters", "config"}
 
 // The data plane must not reach the control plane.
-//
-// A provider talks to IAM, Graph or Vault with ambient administrative
-// credentials. A workload obtaining its own credentials has no business linking
-// that code, and more importantly no business being able to call it: the two
-// halves have completely different trust assumptions, and the moment one imports
-// the other, "this binary can only mint credentials" stops being true.
 func TestDataPlaneDoesNotImportTheControlPlane(t *testing.T) {
 	graph := firstPartyImports(t)
 
@@ -113,13 +95,7 @@ func TestDataPlaneDoesNotImportTheControlPlane(t *testing.T) {
 	}
 }
 
-// core is a leaf. Everything else may import it; it imports nothing of ours.
-//
-// This is what lets the control-plane validators read provider state without
-// core importing providers — the dependency is inverted through
-// TrustPolicySource and GrantedPolicySource instead. Give core one first-party
-// import and that inversion is no longer necessary, so it will stop being
-// maintained.
+// core is a leaf.
 func TestCoreIsALeaf(t *testing.T) {
 	graph := firstPartyImports(t)
 
@@ -131,8 +107,7 @@ func TestCoreIsALeaf(t *testing.T) {
 	}
 }
 
-// No provider imports another. They are meant to evolve independently, and a
-// shared helper between two of them belongs in core or internal.
+// No provider imports another.
 func TestProvidersDoNotImportEachOther(t *testing.T) {
 	graph := firstPartyImports(t)
 
@@ -154,9 +129,7 @@ func TestProvidersDoNotImportEachOther(t *testing.T) {
 	}
 }
 
-// adapters wraps a source and an exchanger the CALLER supplies, so it depends on
-// neither. That is what lets a consumer inject a fake for testing without
-// standing up the whole data plane.
+// adapters wraps a source and an exchanger the CALLER supplies, so it depends on neither.
 func TestAdaptersDependOnNeitherSourceNorTarget(t *testing.T) {
 	graph := firstPartyImports(t)
 
@@ -168,9 +141,7 @@ func TestAdaptersDependOnNeitherSourceNorTarget(t *testing.T) {
 	}
 }
 
-// internal/redact is imported by the error and audit paths, so it must stay
-// dependency-free: an import cycle through core would be the one way to make
-// redaction impossible to apply where it is needed.
+// internal/redact is imported by the error and audit paths, so it must stay dependency-free: an import cycle through core would be the one way to make redaction impossible to apply where it is needed.
 func TestRedactStaysDependencyFree(t *testing.T) {
 	graph := firstPartyImports(t)
 
@@ -182,8 +153,7 @@ func TestRedactStaysDependencyFree(t *testing.T) {
 	}
 }
 
-// The graph must be acyclic. Go rejects import cycles at compile time for
-// production code, but this also covers test-only edges, which it does not.
+// The graph must be acyclic.
 func TestNoImportCycles(t *testing.T) {
 	graph := firstPartyImports(t)
 

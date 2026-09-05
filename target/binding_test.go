@@ -10,9 +10,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// A proof minted for one target must never reach another's STS. The remote side
-// would reject it, but only after we had disclosed a usable assertion about our
-// identity to a party that was not the intended audience.
+// A proof minted for one target must never reach another's STS.
 func TestExchangeRefusesAProofMintedForAnotherTarget(t *testing.T) {
 	var reached bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -91,8 +89,7 @@ func TestAzureTenantValidation(t *testing.T) {
 	}
 }
 
-// A multi-tenant alias would mean "whichever tenant the assertion resolves to",
-// which for a federated grant is precisely the decision we must not delegate.
+// A multi-tenant alias would mean "whichever tenant the assertion resolves to", which for a federated grant is precisely the decision we must not delegate.
 func TestAzureExchangeRefusesMultiTenantAlias(t *testing.T) {
 	_, err := NewAzureExchanger().Exchange(context.Background(),
 		oidcTokenFor("api://AzureADTokenExchange"),

@@ -36,11 +36,7 @@ func build(t *testing.T, spec *core.AWSRoleTrustOIDCSpec, arn string) builtPolic
 	return bp
 }
 
-// The condition key prefix is the OIDC PROVIDER NAME (host+path), never the
-// provider ARN. AWS: "Define condition keys using the name of the OIDC provider
-// (token.actions.githubusercontent.com) followed by a claim (:aud)". Using the
-// ARN produces a key that never exists in the request context, so StringEquals
-// fails and the role can never be assumed.
+// The condition key prefix is the OIDC PROVIDER NAME (host+path), never the provider ARN.
 func TestTrustPolicyConditionKeysUseProviderNameNotARN(t *testing.T) {
 	spec := &core.AWSRoleTrustOIDCSpec{
 		OIDCProviderURL:  "https://token.actions.githubusercontent.com",
@@ -89,8 +85,7 @@ func TestTrustPolicyEKSIssuerWithPath(t *testing.T) {
 	}
 }
 
-// Google is a BUILT-IN AWS identity provider: the principal is the bare issuer
-// host, not a provider ARN.
+// Google is a BUILT-IN AWS identity provider: the principal is the bare issuer host, not a provider ARN.
 func TestTrustPolicyGooglePrincipalIsBareHost(t *testing.T) {
 	spec := &core.AWSRoleTrustOIDCSpec{
 		OIDCProviderURL: "https://accounts.google.com",
@@ -103,9 +98,7 @@ func TestTrustPolicyGooglePrincipalIsBareHost(t *testing.T) {
 	}
 }
 
-// For accounts.google.com the :aud key maps to the token's azp claim whenever
-// azp is set — and GCE service-account tokens set it. The audience must
-// therefore be pinned with :oaud, or the condition can never match.
+// For accounts.google.com the :aud key maps to the token's azp claim whenever azp is set — and GCE service-account tokens set it.
 func TestTrustPolicyGooglePinsAudienceWithOaud(t *testing.T) {
 	spec := &core.AWSRoleTrustOIDCSpec{
 		OIDCProviderURL: "https://accounts.google.com",
@@ -148,11 +141,7 @@ func TestNeedsOIDCProviderResource(t *testing.T) {
 	}
 }
 
-// A spec with no subject must not produce a policy at all. Pinning only `aud`
-// leaves the role assumable by every workload the issuer serves, and for GitHub
-// Actions the audience (sts.amazonaws.com) is requestable by any repository on
-// GitHub — so this is the difference between "our deploy role" and "a role the
-// internet can assume".
+// A spec with no subject must not produce a policy at all.
 func TestTrustPolicyRefusesUnscopedSubject(t *testing.T) {
 	spec := &core.AWSRoleTrustOIDCSpec{
 		RoleName:        "deploy",
@@ -172,8 +161,7 @@ func TestTrustPolicyRefusesUnscopedSubject(t *testing.T) {
 	}
 }
 
-// The escape hatch still works, and still emits no sub condition — the point is
-// that reaching it takes a deliberate flag, not an omission.
+// The escape hatch still works, and still emits no sub condition — the point is that reaching it takes a deliberate flag, not an omission.
 func TestTrustPolicyAllowsUnscopedWhenExplicit(t *testing.T) {
 	spec := &core.AWSRoleTrustOIDCSpec{
 		RoleName:              "internal-idp-role",

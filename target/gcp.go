@@ -27,10 +27,7 @@ const (
 	requestedTokenAccess = "urn:ietf:params:oauth:token-type:access_token"
 )
 
-// GCPExchanger exchanges a source proof for GCP credentials via Workload
-// Identity Federation. It defaults to direct resource access (the returned
-// federated token is used directly) and only performs service-account
-// impersonation when Target.ImpersonateServiceAccount is set.
+// GCPExchanger exchanges a source proof for GCP credentials via Workload Identity Federation.
 type GCPExchanger struct {
 	stsEndpoint string
 	iamEndpoint string
@@ -117,8 +114,7 @@ func (e *GCPExchanger) Exchange(ctx context.Context, tok *core.SourceToken, targ
 	if sts.AccessToken == "" {
 		return nil, fmt.Errorf("gcp: STS returned %d with no access_token in the body", status)
 	}
-	// expires_in is required for a token we are about to cache. Absent, it would
-	// become an already-expired credential and every caller would re-exchange.
+	// expires_in is required for a token we are about to cache.
 	if sts.ExpiresIn <= 0 {
 		return nil, fmt.Errorf("gcp: STS returned no usable expires_in (%d); refusing to cache "+
 			"a token of unknown lifetime", sts.ExpiresIn)
@@ -136,8 +132,7 @@ func (e *GCPExchanger) Exchange(ctx context.Context, tok *core.SourceToken, targ
 
 // impersonate exchanges the federated token for a service-account access token.
 func (e *GCPExchanger) impersonate(ctx context.Context, federatedToken, sa string) (*core.Credentials, error) {
-	// PathEscape the account: it reaches here from configuration, and it is being
-	// interpolated into a URL that carries a live federated token as its bearer.
+	// PathEscape the account: it reaches here from configuration, and it is being interpolated into a URL that carries a live federated token as its bearer.
 	endpoint := fmt.Sprintf("%s/v1/projects/-/serviceAccounts/%s:generateAccessToken",
 		e.iamEndpoint, url.PathEscape(sa))
 	reqBody := fmt.Sprintf(`{"scope":[%q]}`, gcpScope)

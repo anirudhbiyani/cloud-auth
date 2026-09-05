@@ -50,10 +50,7 @@ func TestGetRefreshesWithinBuffer(t *testing.T) {
 	if _, err := c.Get(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	// Advance to within the 5m refresh buffer of the 1h expiry. The credentials
-	// are still valid, so Get must return immediately and refresh in the
-	// background — blocking here is what turned a transient STS blip inside the
-	// buffer into a stall for every caller.
+	// Advance to within the 5m refresh buffer of the 1h expiry.
 	clk.Advance(56 * time.Minute)
 	if _, err := c.Get(context.Background()); err != nil {
 		t.Fatal(err)
@@ -63,8 +60,7 @@ func TestGetRefreshesWithinBuffer(t *testing.T) {
 	}
 }
 
-// eventually polls for a condition the background refresh satisfies
-// asynchronously. Serve-stale means Get returns before the refresh completes.
+// eventually polls for a condition the background refresh satisfies asynchronously.
 func eventually(cond func() bool) bool {
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {

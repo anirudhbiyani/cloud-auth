@@ -45,8 +45,7 @@ func TestHundredCallersBeforeExpiry(t *testing.T) {
 	}
 }
 
-// 100 callers arriving on a cold cache must collapse into one exchange, and all
-// must receive the same credentials.
+// 100 callers arriving on a cold cache must collapse into one exchange, and all must receive the same credentials.
 func TestHundredCallersDuringRefresh(t *testing.T) {
 	clk := core.NewFakeClock(time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC))
 	var fetches int64
@@ -85,9 +84,7 @@ func TestHundredCallersDuringRefresh(t *testing.T) {
 	}
 }
 
-// The audit measured 200 STS calls for 200 callers during an outage. Every
-// caller must still receive the error — failing silently would be worse — but
-// the upstream must be hit once per error window, not once per caller.
+// The audit measured 200 STS calls for 200 callers during an outage.
 func TestRefreshFailureWithConcurrentWaiters(t *testing.T) {
 	clk := core.NewFakeClock(time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC))
 	var fetches int64
@@ -142,8 +139,7 @@ func TestRecoveryAfterFailure(t *testing.T) {
 	}
 }
 
-// A caller's deadline is its own. It used to wait for the length of somebody
-// else's exchange, because Get held a plain mutex across the fetch.
+// A caller's deadline is its own.
 func TestCallerCancellationDoesNotAbortTheRefresh(t *testing.T) {
 	clk := core.NewFakeClock(time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC))
 	release := make(chan struct{})
@@ -211,8 +207,7 @@ func TestInvalidateForcesARefresh(t *testing.T) {
 	}
 }
 
-// Jitter must stay inside its bound, or a fleet either synchronizes or refreshes
-// far too early.
+// Jitter must stay inside its bound, or a fleet either synchronizes or refreshes far too early.
 func TestJitterStaysWithinBounds(t *testing.T) {
 	c := New(func(context.Context) (*core.Credentials, error) { return nil, nil },
 		WithJitter(30*time.Second))

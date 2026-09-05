@@ -5,9 +5,7 @@ import (
 	"time"
 )
 
-// Credentials with an unknown expiry must count as expired. They used to count
-// as immortal, so a dropped time.Parse anywhere upstream produced credentials
-// the cache would serve for the life of the process.
+// Credentials with an unknown expiry must count as expired.
 func TestCredentialsWithUnknownExpiryAreExpired(t *testing.T) {
 	c := Credentials{Cloud: AWS, AccessKeyID: "ASIA123"} // Expiry zero
 	now := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
@@ -35,9 +33,7 @@ func TestCredentialsExpiryBoundary(t *testing.T) {
 	}
 }
 
-// The opposite convention for SourceToken is deliberate, not an oversight: an
-// AWSSigV4 proof has no exp claim, so failing closed on a zero Expiry would make
-// every EC2 and ECS source permanently unusable.
+// The opposite convention for SourceToken is deliberate, not an oversight: an AWSSigV4 proof has no exp claim, so failing closed on a zero Expiry would make every EC2 and ECS source permanently unusable.
 func TestSourceTokenWithUnknownExpiryIsNotExpired(t *testing.T) {
 	sigv4 := SourceToken{Kind: AWSSigV4, Value: `{"url":"..."}`}
 	if sigv4.Expired(time.Now(), 0) {

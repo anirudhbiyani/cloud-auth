@@ -65,8 +65,7 @@ func TestAWSAdapterRetrieveMapsAndCaches(t *testing.T) {
 // Compile-time proof the adapter satisfies the AWS SDK interface.
 var _ awssdk.CredentialsProvider = (*AWSProvider)(nil)
 
-// Each adapter must expose invalidation, or a caller holding a revoked session
-// has no way to recover except waiting out the refresh buffer.
+// Each adapter must expose invalidation, or a caller holding a revoked session has no way to recover except waiting out the refresh buffer.
 func TestAdaptersExposeInvalidate(t *testing.T) {
 	src, ex := &fakeSource{}, &fakeExchanger{}
 	target := core.AWSTarget{RoleARN: "arn:aws:iam::123456789012:role/r"}

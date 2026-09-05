@@ -10,14 +10,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// Regression for the audit's probe H: credentials whose expiry never parsed were
-// cached forever — advancing a year used to yield exactly one fetch.
-//
-// They are now refused outright rather than re-fetched. Serving them would mean
-// handing out credentials of unknown lifetime; re-fetching them forever would
-// spin, because Get loops until it holds something valid. The exchangers already
-// reject the STS responses that produce this, so reaching it means a bug
-// upstream, and an error naming that beats either alternative.
+// Regression for the audit's probe H: credentials whose expiry never parsed were cached forever — advancing a year used to yield exactly one fetch.
 func TestCredentialsWithUnknownExpiryAreRefused(t *testing.T) {
 	var calls int64
 	clock := core.NewFakeClock(time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC))

@@ -8,9 +8,7 @@ import (
 	"time"
 )
 
-// Go strips only Authorization, Cookie and Www-Authenticate on a cross-domain
-// redirect. Every header that authenticates a metadata request is a custom one,
-// so a followed redirect hands those credentials to the redirect target.
+// Go strips only Authorization, Cookie and Www-Authenticate on a cross-domain redirect.
 func TestClientsRefuseRedirects(t *testing.T) {
 	var leaked []string
 	attacker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -58,9 +56,7 @@ func TestClientsRefuseRedirects(t *testing.T) {
 	}
 }
 
-// A proxy in the environment must not see metadata traffic. AWS's guidance is to
-// exclude 169.254.169.254 from proxying; the client should not depend on the
-// operator having remembered.
+// A proxy in the environment must not see metadata traffic.
 func TestMetadataClientIgnoresProxyEnvironment(t *testing.T) {
 	t.Setenv("HTTP_PROXY", "http://proxy.invalid:3128")
 	t.Setenv("HTTPS_PROXY", "http://proxy.invalid:3128")
@@ -73,8 +69,7 @@ func TestMetadataClientIgnoresProxyEnvironment(t *testing.T) {
 		t.Error("metadata transport has a Proxy func; IMDS traffic could be routed through it")
 	}
 
-	// End to end: a request to a local server must succeed despite the bogus
-	// proxy, because the proxy is not consulted.
+	// End to end: a request to a local server must succeed despite the bogus proxy, because the proxy is not consulted.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	}))
@@ -87,8 +82,7 @@ func TestMetadataClientIgnoresProxyEnvironment(t *testing.T) {
 	defer resp.Body.Close()
 }
 
-// The STS client deliberately does honour a proxy: those are ordinary internet
-// calls a corporate egress proxy legitimately handles.
+// The STS client deliberately does honour a proxy: those are ordinary internet calls a corporate egress proxy legitimately handles.
 func TestSTSClientHonoursProxyEnvironment(t *testing.T) {
 	transport, ok := NewSTSClient(time.Second).Transport.(*http.Transport)
 	if !ok {

@@ -7,20 +7,9 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/provider/gcp"
 )
 
-// The examples that used to live in these methods' doc comments, as real
-// Example functions so the compiler checks them.
-//
-// Example functions with no "Output:" comment are compiled but not run, which
-// is what we want here: every one of these would talk to Google. Compiling them
-// is the point — a documented example that does not build is worse than no
-// example, because it is the first thing a new user copies.
+// The examples that used to live in these methods' doc comments, as real Example functions so the compiler checks them.
 
-// GCP workloads can authenticate to AWS with no long-lived credentials. The
-// token is a JWT signed by Google that AWS validates.
-//
-// The AWS IAM role must trust the Google OIDC issuer
-// (https://accounts.google.com), and the service account needs
-// iam.serviceAccounts.signJwt.
+// GCP workloads can authenticate to AWS with no long-lived credentials.
 func ExampleProvider_GenerateAWSRoleAssumptionToken() {
 	p := gcp.New()
 
@@ -36,8 +25,7 @@ func ExampleProvider_GenerateAWSRoleAssumptionToken() {
 	_ = token.Token
 }
 
-// The Azure direction, via an Entra federated credential trusting the Google
-// issuer.
+// The Azure direction, via an Entra federated credential trusting the Google issuer.
 func ExampleProvider_GenerateAzureFederatedToken() {
 	p := gcp.New()
 

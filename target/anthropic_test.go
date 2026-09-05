@@ -14,10 +14,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// The Claude Platform's WIF exchanges an OIDC proof for a short-lived
-// sk-ant-oat01-... token. Its protocol differs from every other token endpoint
-// in this tree in one way that a form-encoded assumption would get wrong, and
-// in one semantic that a caching assumption would get wrong.
+// The Claude Platform's WIF exchanges an OIDC proof for a short-lived sk-ant-oat01-...
 
 func anthropicTarget() core.AnthropicTarget {
 	return core.AnthropicTarget{
@@ -81,8 +78,7 @@ func TestAnthropicExchange(t *testing.T) {
 		t.Error("no expiry was set; the cache treats a zero expiry as expired")
 	}
 
-	// JSON, not form-encoded. This is the one protocol difference from every
-	// other token endpoint here, and a form gets a 400 that explains nothing.
+	// JSON, not form-encoded.
 	if !strings.Contains(gotContentType, "application/json") {
 		t.Errorf("Content-Type = %q, want application/json — this endpoint does NOT take a form",
 			gotContentType)
@@ -90,8 +86,7 @@ func TestAnthropicExchange(t *testing.T) {
 	if gotBody["grant_type"] != jwtBearerGrant {
 		t.Errorf("grant_type = %v, want %q", gotBody["grant_type"], jwtBearerGrant)
 	}
-	// The rule and the identity are named in the REQUEST, because Anthropic
-	// holds the match conditions on the rule rather than on the resource.
+	// The rule and the identity are named in the REQUEST, because Anthropic holds the match conditions on the rule rather than on the resource.
 	for field, want := range map[string]string{
 		"federation_rule_id": "fdrl_test",
 		"organization_id":    "00000000-0000-0000-0000-000000000000",
@@ -107,8 +102,7 @@ func TestAnthropicExchange(t *testing.T) {
 	}
 }
 
-// workspace_id is optional: the platform resolves it when the rule covers one
-// workspace, and sending an empty string is not the same as omitting it.
+// workspace_id is optional: the platform resolves it when the rule covers one workspace, and sending an empty string is not the same as omitting it.
 func TestAnthropicOmitsAnEmptyWorkspace(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -130,9 +124,7 @@ func TestAnthropicOmitsAnEmptyWorkspace(t *testing.T) {
 	}
 }
 
-// A jti-bearing identity token is single-use. The error must say so, and must
-// point at the actual cause — a retry loop or a cached proof — rather than at
-// the rule.
+// A jti-bearing identity token is single-use.
 func TestAnthropicJTIReuseIsExplained(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -155,16 +147,13 @@ func TestAnthropicJTIReuseIsExplained(t *testing.T) {
 	if !strings.Contains(err.Error(), "FRESH") {
 		t.Errorf("the error does not say what to do: %v", err)
 	}
-	// It must NOT send the reader to look at the federation rule, which is the
-	// wrong place entirely for this failure.
+	// It must NOT send the reader to look at the federation rule, which is the wrong place entirely for this failure.
 	if strings.Contains(err.Error(), "rule's conditions") {
 		t.Errorf("a jti reuse was reported as a rule mismatch: %v", err)
 	}
 }
 
-// A 401 that is NOT a jti reuse is a rule mismatch, and the message must say
-// that rules are matched by id and never searched — otherwise the obvious
-// assumption is that some other rule would have matched.
+// A 401 that is NOT a jti reuse is a rule mismatch, and the message must say that rules are matched by id and never searched — otherwise the obvious assumption is that some other rule would have matched.
 func TestAnthropicRefusalPointsAtTheNamedRule(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
@@ -186,8 +175,7 @@ func TestAnthropicRefusalPointsAtTheNamedRule(t *testing.T) {
 	}
 }
 
-// A SigV4 proof cannot be verified against a JWKS, and the refusal must carry
-// the sentinel so doctor recognises it and CategoryOf files it as configuration.
+// A SigV4 proof cannot be verified against a JWKS, and the refusal must carry the sentinel so doctor recognises it and CategoryOf files it as configuration.
 func TestAnthropicRejectsNonOIDCProof(t *testing.T) {
 	e := NewAnthropicExchanger()
 	_, err := e.Exchange(context.Background(),
@@ -208,9 +196,7 @@ func TestAnthropicRejectsNonOIDCProof(t *testing.T) {
 	}
 }
 
-// A mis-audienced proof must not be transmitted. The target STS would reject it
-// anyway, but only AFTER disclosure — and a federation rule may match on an
-// exact audience, so the wrong one is a proof for somebody else.
+// A mis-audienced proof must not be transmitted.
 func TestAnthropicRefusesAMisAudiencedProof(t *testing.T) {
 	var reached bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -243,8 +229,7 @@ func TestAnthropicTargetValidation(t *testing.T) {
 		{"missing service account", func(t *core.AnthropicTarget) { t.ServiceAccountID = "" }, "service_account_id is required"},
 		{"service account of the wrong shape", func(t *core.AnthropicTarget) { t.ServiceAccountID = "fdrl_oops" }, "expected svac_"},
 		{"workspace of the wrong shape", func(t *core.AnthropicTarget) { t.WorkspaceID = "svac_oops" }, "expected wrkspc_"},
-		// No default audience, deliberately: a rule may match on an exact one,
-		// and guessing pins the proof to the wrong party.
+		// No default audience, deliberately: a rule may match on an exact one, and guessing pins the proof to the wrong party.
 		{"missing audience", func(t *core.AnthropicTarget) { t.TokenAudience = "" }, "no default"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -265,8 +250,7 @@ func TestAnthropicTargetValidation(t *testing.T) {
 	}
 }
 
-// The dispatcher has to know about it, or --to anthropic reports an unsupported
-// cloud despite the exchanger existing.
+// The dispatcher has to know about it, or --to anthropic reports an unsupported cloud despite the exchanger existing.
 func TestAnthropicIsDispatched(t *testing.T) {
 	ex, err := For(core.Anthropic)
 	if err != nil {

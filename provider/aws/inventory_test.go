@@ -7,10 +7,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// The population `audit` serves is roles that predate this tool: AWS's
-// shared-IdP guardrail explicitly does not apply to roles created before June
-// 2025. Enumerating from cloud-auth's state file would list what cloud-auth
-// created, which is the one set already known to be fine.
+// The population `audit` serves is roles that predate this tool: AWS's shared-IdP guardrail explicitly does not apply to roles created before June 2025. Enumerating from cloud-auth's state file would list what cloud-auth created, which is the one set already known to be fine.
 
 type listIAM struct {
 	IAMClient
@@ -23,11 +20,6 @@ func (f *listIAM) ListRoles(context.Context) ([]*Role, error) { return f.roles, 
 const ghProviderARN = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
 
 // federatedPolicy builds a realistic assume-role policy.
-//
-// The audience and the subject share one operator object when the operator IS
-// StringEquals. Emitting two "StringEquals" keys in one JSON object is what a
-// naive fixture does, and the second silently overwrites the first — which is
-// how the first version of this test "proved" the audience was being dropped.
 func federatedPolicy(operator, subject string) string {
 	conditions := `"` + operator + `":{` +
 		`"token.actions.githubusercontent.com:aud":"sts.amazonaws.com",` +
@@ -48,8 +40,7 @@ func TestListTrustRecords(t *testing.T) {
 	p := New(WithIAMClient(&listIAM{roles: []*Role{
 		{ARN: "arn:aws:iam::123456789012:role/deploy", RoleName: "deploy",
 			AssumeRolePolicyDocument: federatedPolicy("StringEquals", "repo:myorg/myrepo:ref:refs/heads/main")},
-		// Assumable only by an IAM principal in the same account: not a
-		// cross-cloud trust, and listing it would bury the ones that are.
+		// Assumable only by an IAM principal in the same account: not a cross-cloud trust, and listing it would bury the ones that are.
 		{ARN: "arn:aws:iam::123456789012:role/internal", RoleName: "internal",
 			AssumeRolePolicyDocument: `{"Version":"2012-10-17","Statement":[{
 			  "Effect":"Allow","Principal":{"AWS":"arn:aws:iam::123456789012:root"},
@@ -82,8 +73,7 @@ func TestListTrustRecords(t *testing.T) {
 	}
 }
 
-// One row per (role, subject): each is separately scoreable and separately
-// claimable, and collapsing them hides the worst behind the best.
+// One row per (role, subject): each is separately scoreable and separately claimable, and collapsing them hides the worst behind the best.
 func TestOneRecordPerSubjectCondition(t *testing.T) {
 	doc := `{"Version":"2012-10-17","Statement":[{
 	  "Effect":"Allow","Principal":{"Federated":"` + ghProviderARN + `"},
@@ -104,8 +94,7 @@ func TestOneRecordPerSubjectCondition(t *testing.T) {
 	}
 }
 
-// A federated trust with no subject condition is the widest possible one. It is
-// the finding, so it must be a row rather than an omission.
+// A federated trust with no subject condition is the widest possible one.
 func TestNoSubjectConditionIsARecord(t *testing.T) {
 	doc := `{"Version":"2012-10-17","Statement":[{
 	  "Effect":"Allow","Principal":{"Federated":"` + ghProviderARN + `"},
@@ -152,8 +141,7 @@ func TestDenyStatementsAreNotInventoried(t *testing.T) {
 	}
 }
 
-// A policy that cannot be parsed is surfaced, not dropped: "we could not tell"
-// is not "nothing here".
+// A policy that cannot be parsed is surfaced, not dropped: "we could not tell" is not "nothing here".
 func TestUnparseablePolicyIsStillARecord(t *testing.T) {
 	p := New(WithIAMClient(&listIAM{roles: []*Role{
 		{ARN: "arn:aws:iam::1:role/weird", RoleName: "weird", AssumeRolePolicyDocument: "not json"},

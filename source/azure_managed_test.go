@@ -24,9 +24,7 @@ func TestAzureDetectContainerApps(t *testing.T) {
 	if rt.Cloud != core.Azure || rt.SubRuntime != "container-apps" {
 		t.Errorf("runtime = %+v, want azure/container-apps", rt)
 	}
-	// Managed identity vends Entra access tokens, not assertions another cloud
-	// can verify. Reporting it as federatable is what let callers build on a
-	// path that cannot work.
+	// Managed identity vends Entra access tokens, not assertions another cloud can verify.
 	if rt.Federatable {
 		t.Error("container apps managed identity is NOT a federation source")
 	}
@@ -47,8 +45,7 @@ func TestAzureDetectAppService(t *testing.T) {
 	}
 }
 
-// Mint must refuse: the caller is asking for a cross-cloud proof, and this
-// runtime cannot produce one.
+// Mint must refuse: the caller is asking for a cross-cloud proof, and this runtime cannot produce one.
 func TestAzureMintRefusesManagedIdentity(t *testing.T) {
 	a := NewAzure(WithAzureEnv(envFunc(map[string]string{
 		"CONTAINER_APP_NAME": "my-app",
@@ -65,7 +62,6 @@ func TestAzureMintRefusesManagedIdentity(t *testing.T) {
 }
 
 // The token endpoint still works for same-cloud use and for doctor's reporting.
-// It must carry the header secret, the resource, and the requested identity.
 func TestAzureManagedIdentityTokenPassesClientID(t *testing.T) {
 	var gotHeader, gotResource, gotAPIVersion, gotClientID string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -103,17 +99,13 @@ func TestAzureManagedIdentityTokenPassesClientID(t *testing.T) {
 	if gotAPIVersion != "2019-08-01" {
 		t.Errorf("api-version = %q, want 2019-08-01", gotAPIVersion)
 	}
-	// Without client_id, a host with several user-assigned identities returns
-	// whichever the platform considers default — so Detect would report one
-	// identity while Mint authenticated as another.
+	// Without client_id, a host with several user-assigned identities returns whichever the platform considers default — so Detect would report one identity while Mint authenticated as another.
 	if gotClientID != "the-uami-client-id" {
 		t.Errorf("client_id = %q, want the identity Detect reported", gotClientID)
 	}
 }
 
-// The IDENTITY_HEADER secret must never leave the host. IDENTITY_ENDPOINT is an
-// environment-supplied URL, so anything able to influence the environment could
-// otherwise redirect it and collect the secret on every mint.
+// The IDENTITY_HEADER secret must never leave the host.
 func TestAzureRefusesRemoteIdentityEndpoint(t *testing.T) {
 	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("the secret reached a remote host: %s", r.Header.Get("X-IDENTITY-HEADER"))
@@ -159,8 +151,7 @@ func TestLocalIdentityEndpoint(t *testing.T) {
 	}
 }
 
-// AKS Workload Identity (env AZURE_FEDERATED_TOKEN_FILE) must still take
-// precedence over the managed-identity endpoint hints.
+// AKS Workload Identity (env AZURE_FEDERATED_TOKEN_FILE) must still take precedence over the managed-identity endpoint hints.
 func TestAzureWorkloadIdentityPreferredOverManaged(t *testing.T) {
 	a := NewAzure(WithAzureEnv(envFunc(map[string]string{
 		"AZURE_FEDERATED_TOKEN_FILE": "/var/run/secrets/token",

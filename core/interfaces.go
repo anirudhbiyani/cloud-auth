@@ -5,8 +5,6 @@ import (
 )
 
 // Mechanism represents a cross-cloud authentication configuration instance.
-// A mechanism encapsulates all the resources and configuration needed for
-// one identity to assume another identity across cloud boundaries.
 type Mechanism interface {
 	// Type returns the mechanism type identifier.
 	Type() MechanismType
@@ -22,7 +20,6 @@ type Mechanism interface {
 }
 
 // MechanismSpec is the base interface for all mechanism specifications.
-// Each mechanism type has its own concrete spec type implementing this interface.
 type MechanismSpec interface {
 	// Type returns the mechanism type this spec configures.
 	Type() MechanismType
@@ -38,25 +35,14 @@ type MechanismSpec interface {
 }
 
 // MechanismManager provides lifecycle operations for mechanisms.
-// This is the primary interface for managing cross-cloud authentication.
 type MechanismManager interface {
 	// Setup creates or updates a mechanism based on the provided specification.
-	// If DryRun is set in options, returns a Plan without making changes.
-	//
-	// Setup is designed to be idempotent: calling it multiple times with the
-	// same spec should result in the same end state.
 	Setup(ctx context.Context, spec MechanismSpec, opts SetupOptions) (*Outputs, error)
 
 	// Validate checks if a mechanism is correctly configured and functional.
-	// Returns a detailed ValidationReport with individual check results.
 	Validate(ctx context.Context, ref MechanismRef, opts ValidateOptions) (*ValidationReport, error)
 
 	// Delete removes a mechanism and its associated resources.
-	// By default, only deletes resources that were created by cloud-auth (owned).
-	// Set Force to delete non-owned resources.
-	//
-	// Delete is designed to be idempotent: calling it on an already-deleted
-	// mechanism should succeed without error.
 	Delete(ctx context.Context, ref MechanismRef, opts DeleteOptions) error
 
 	// Get retrieves a mechanism by its reference.
@@ -85,7 +71,6 @@ type ListFilter struct {
 }
 
 // Provider is the base interface for cloud provider implementations.
-// Providers handle authentication and API interactions with a specific cloud.
 type Provider interface {
 	// Name returns the provider identifier.
 	Name() Cloud
@@ -98,7 +83,6 @@ type Provider interface {
 }
 
 // LifecycleProvider extends Provider with mechanism lifecycle operations.
-// Providers that can create, validate, and delete mechanisms implement this.
 type LifecycleProvider interface {
 	Provider
 

@@ -70,8 +70,7 @@ func TestRegistryDetectNoMatch(t *testing.T) {
 }
 
 func TestRegistryDetectPropagatesRealError(t *testing.T) {
-	// A non-ErrNotThisRuntime error (e.g. metadata server misbehaving) must
-	// not be swallowed as "not this runtime".
+	// A non-ErrNotThisRuntime error (e.g. metadata server misbehaving) must not be swallowed as "not this runtime".
 	var order []string
 	boom := errors.New("metadata server on fire")
 	reg := NewRegistry(&fakeProvider{name: "aws", err: boom, order: &order})

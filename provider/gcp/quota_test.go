@@ -15,10 +15,7 @@ import (
 	"golang.org/x/oauth2"
 )
 
-// GCP's rate quotas. Unlike the size limits, a rate cannot be checked before a
-// single call — one request is never over a per-minute quota — so the two
-// things worth doing are pacing a burst so it does not provoke one, and naming
-// the quota when the API says no.
+// GCP's rate quotas.
 
 type staticToken struct{}
 
@@ -26,9 +23,7 @@ func (staticToken) Token() (*oauth2.Token, error) {
 	return &oauth2.Token{AccessToken: "t", Expiry: time.Now().Add(time.Hour)}, nil
 }
 
-// GCP answers every exhausted quota with RESOURCE_EXHAUSTED, so the raw error
-// sends an operator to check storage or CPU. Which quota applies is decided by
-// the endpoint, which this layer knows and the caller does not.
+// GCP answers every exhausted quota with RESOURCE_EXHAUSTED, so the raw error sends an operator to check storage or CPU.
 func TestQuotaErrorsNameTheQuota(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -76,8 +71,7 @@ func TestQuotaErrorsNameTheQuota(t *testing.T) {
 	}
 }
 
-// A non-quota error must not be annotated: telling someone about a rate limit
-// when they have a permissions problem is worse than saying nothing.
+// A non-quota error must not be annotated: telling someone about a rate limit when they have a permissions problem is worse than saying nothing.
 func TestNonQuotaErrorsAreNotAnnotated(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
@@ -99,9 +93,7 @@ func TestNonQuotaErrorsAreNotAnnotated(t *testing.T) {
 	}
 }
 
-// Writes are serialized and paced. A setup creating a pool and a provider is two
-// writes; a loop over repositories is many, and hitting the quota mid-loop
-// leaves a half-built pool behind.
+// Writes are serialized and paced.
 func TestWorkloadIdentityWritesArePaced(t *testing.T) {
 	var inFlight, maxInFlight atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -170,8 +162,7 @@ func TestWorkloadIdentityWritesArePaced(t *testing.T) {
 	}
 }
 
-// The STS exchange quota is a different number, and the message must say which
-// one applies.
+// The STS exchange quota is a different number, and the message must say which one applies.
 func TestSTSQuotaIsNamedSeparately(t *testing.T) {
 	err := annotateQuota(&apiError{
 		StatusCode: http.StatusTooManyRequests, Status: "RESOURCE_EXHAUSTED",

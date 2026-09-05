@@ -1,9 +1,4 @@
 // Package config loads and validates cloud-auth's declarative federation config.
-//
-// Precedence is code > env > file: a file provides the base, environment
-// variables (CLOUD_AUTH_*) override it, and programmatic setters override those.
-// Validation is strict and fails closed — an invalid or ambiguous config is a
-// hard error, never a degraded fallback.
 package config
 
 import (
@@ -26,12 +21,7 @@ type Config struct {
 
 // Source configures runtime detection.
 type Source struct {
-	// Detect pins which runtime the workload may authenticate as: "auto" (the
-	// default), a cloud ("aws"), or a cloud and sub-runtime ("aws-ec2").
-	//
-	// A mismatch is a hard error. That is the point: auto-detection picks an
-	// identity by probe order, and a host can satisfy more than one probe, so an
-	// operator who knows where the workload runs can refuse anything else.
+	// Detect pins which runtime the workload may authenticate as: "auto" (the default), a cloud ("aws"), or a cloud and sub-runtime ("aws-ec2").
 	Detect string `yaml:"detect"`
 }
 
@@ -116,10 +106,7 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("config: refresh.buffer %q: %w", c.Refresh.Buffer, err)
 		}
 	}
-	// Reject an unparseable selector here rather than at first exchange. A typo
-	// in a field whose whole purpose is to constrain which identity may be used
-	// must fail loudly: silently falling back to auto would leave the operator
-	// believing they had pinned something.
+	// Reject an unparseable selector here rather than at first exchange.
 	if _, err := c.SourceSelector(); err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
@@ -140,9 +127,6 @@ func (c *Config) RefreshBuffer() (time.Duration, error) {
 }
 
 // Target resolves a named target into a core.Target.
-// A core.Target is returned on every path including the error paths — never an
-// untyped nil, which would panic at the caller's first method call. See
-// core.NoTarget.
 func (c *Config) Target(name string) (core.Target, error) {
 	for _, t := range c.Targets {
 		if t.Name != name {
@@ -158,10 +142,6 @@ func (c *Config) Target(name string) (core.Target, error) {
 }
 
 // resolve builds the concrete per-cloud target.
-//
-// The required-field checks live on each target type's Validate, so the config
-// layer no longer restates per-cloud rules — and a field belonging to another
-// cloud is now unrepresentable rather than silently ignored.
 func (t Target) resolve(cloud core.Cloud) (core.Target, error) {
 	var out core.Target
 	switch cloud {
@@ -188,9 +168,7 @@ func (t Target) resolve(cloud core.Cloud) (core.Target, error) {
 		return core.NoTarget{}, fmt.Errorf("unsupported target cloud %q", cloud)
 	}
 
-	// Reject fields that belong to another cloud rather than ignoring them: a
-	// tenant on an AWS target means the operator has the wrong block, and
-	// silently dropping it is how a target ends up pointing somewhere unintended.
+	// Reject fields that belong to another cloud rather than ignoring them: a tenant on an AWS target means the operator has the wrong block, and silently dropping it is how a target ends up pointing somewhere unintended.
 	if err := t.rejectForeignFields(cloud); err != nil {
 		return core.NoTarget{}, err
 	}

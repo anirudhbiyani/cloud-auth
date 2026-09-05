@@ -25,8 +25,7 @@ func (f *fakeProvider) Mint(ctx context.Context, aud string) (*core.SourceToken,
 	if f.mintErr != nil {
 		return nil, f.mintErr
 	}
-	// mints counts calls so a test can assert a FRESH proof per exchange, and
-	// the value carries the count so the exchanger can see they differ.
+	// mints counts calls so a test can assert a FRESH proof per exchange, and the value carries the count so the exchanger can see they differ.
 	f.mints++
 	return &core.SourceToken{
 		Kind: core.OIDC, Value: fmt.Sprintf("jwt-with-jti-%d", f.mints), Audience: aud,
@@ -90,15 +89,7 @@ func TestExchangeRequiresAudience(t *testing.T) {
 	}
 }
 
-// The Claude Platform treats a jti-bearing identity token as single-use: each
-// exchange must present a JWT that has not been exchanged before, and
-// re-presenting one is refused as jti_reused.
-//
-// That makes "a fresh proof per exchange" a CORRECTNESS property, not an
-// efficiency choice. It holds today because Exchange calls Mint every time, and
-// an optimisation that cached the source token would silently break Anthropic
-// while leaving AWS, GCP and Azure working — which is exactly the kind of
-// regression nobody would attribute to the cache.
+// The Claude Platform treats a jti-bearing identity token as single-use: each exchange must present a JWT that has not been exchanged before, and re-presenting one is refused as jti_reused.
 func TestEveryExchangeMintsAFreshProof(t *testing.T) {
 	prov := &fakeProvider{rt: &core.Runtime{
 		Cloud: core.AWS, SubRuntime: "eks-irsa", Federatable: true,

@@ -7,10 +7,7 @@ import (
 	"testing"
 )
 
-// Severity is a string type, so comparing it with >= is a lexicographic compare,
-// not a severity compare. "critical" sorts BEFORE "error", which silently
-// inverted the gate: critical failures were ignored while info-level failures
-// invalidated the report. Rank gives it a real ordering.
+// Severity is a string type, so comparing it with >= is a lexicographic compare, not a severity compare.
 func TestSeverityRankOrdering(t *testing.T) {
 	if SeverityInfo.Rank() >= SeverityWarning.Rank() ||
 		SeverityWarning.Rank() >= SeverityError.Rank() ||
@@ -28,8 +25,6 @@ func TestIsValidUsesSeverityRankNotStringCompare(t *testing.T) {
 		want     bool // expected IsValid()
 	}{
 		// The bug this pins: a CRITICAL failure must invalidate the report.
-		// Token acquisition — the check proving credentials actually work — is
-		// SeverityCritical, so this was the most damaging case.
 		{"critical failure invalidates", CheckStatusFailed, SeverityCritical, false},
 		{"error failure invalidates", CheckStatusFailed, SeverityError, false},
 		// ...and a low-severity failure must NOT invalidate it.
@@ -50,10 +45,7 @@ func TestIsValidUsesSeverityRankNotStringCompare(t *testing.T) {
 	}
 }
 
-// A skipped check verified nothing. Reporting "valid" when the trust policy and
-// permissions were never inspected is the exact failure this tool exists to
-// prevent, so callers need a way to tell "nothing failed" from "everything was
-// actually checked".
+// A skipped check verified nothing.
 func TestIsCompleteDistinguishesUnverifiedFromValid(t *testing.T) {
 	r := &ValidationReport{Checks: []ValidationCheck{
 		{ID: "reachable", Status: CheckStatusPassed, Severity: SeverityError},
@@ -82,8 +74,7 @@ func TestIsCompleteIgnoresLowSeveritySkips(t *testing.T) {
 	}
 }
 
-// The stubs are honest (Skipped, not Passed) but must say so loudly enough that
-// a caller can act on it.
+// The stubs are honest (Skipped, not Passed) but must say so loudly enough that a caller can act on it.
 func TestStubbedValidatorsAreSkippedWithRemediation(t *testing.T) {
 	for _, v := range []Validator{
 		NewTrustPolicyMatchValidator("iss", "aud", "sub"),
@@ -99,9 +90,7 @@ func TestStubbedValidatorsAreSkippedWithRemediation(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Trust-policy and permission validators, once a provider supplies live facts.
-// ---------------------------------------------------------------------------
+// --------------------------------------------------------------------------- Trust-policy and permission validators, once a provider supplies live facts.
 
 type fakeTrustSource struct {
 	tp  *TrustPolicy
@@ -158,8 +147,7 @@ func TestTrustPolicyMatchAgainstLivePolicy(t *testing.T) {
 			mentions: "subject",
 		},
 		{
-			// A StringLike wildcard in the deployed policy legitimately admits a
-			// concrete expected subject.
+			// A StringLike wildcard in the deployed policy legitimately admits a concrete expected subject.
 			name: "wildcard pattern admits concrete subject",
 			live: &TrustPolicy{Issuer: iss, Audiences: []string{aud}, Subjects: []string{"repo:myorg/myrepo:*"}},
 			want: CheckStatusPassed,
@@ -233,9 +221,7 @@ func TestValidatorsSkipWithoutSource(t *testing.T) {
 	}
 }
 
-// Azure matches issuer/subject/audience case-sensitively and exactly. A
-// case-only difference is the classic FIC trap, and a generic "not admitted"
-// message sends people hunting in the wrong place — so it gets its own wording.
+// Azure matches issuer/subject/audience case-sensitively and exactly.
 func TestTrustPolicyReportsCaseOnlyMismatchExplicitly(t *testing.T) {
 	tests := []struct {
 		name                   string

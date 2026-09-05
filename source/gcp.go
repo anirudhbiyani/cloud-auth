@@ -19,8 +19,7 @@ const DefaultGCPMetadataURL = "http://metadata.google.internal"
 
 const gcpMetadataFlavor = "Google"
 
-// GCP is the Source Identity Provider for GCE, GKE, Cloud Run, and Cloud
-// Functions. It mints Google-signed OIDC ID tokens from the metadata server.
+// GCP is the Source Identity Provider for GCE, GKE, Cloud Run, and Cloud Functions.
 type GCP struct {
 	metadataURL string
 	httpClient  *http.Client
@@ -62,10 +61,7 @@ func (g *GCP) get(ctx context.Context, path string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("gcp metadata %s: status %d", path, resp.StatusCode)
 	}
-	// The header must come back, not just go out. That round trip is the
-	// documented defence against a spoofed or DNS-rebound
-	// metadata.google.internal: an attacker who answers on that name can serve
-	// a token, but a plain HTTP server will not echo this.
+	// The header must come back, not just go out.
 	if flavor := resp.Header.Get("Metadata-Flavor"); flavor != gcpMetadataFlavor {
 		return nil, fmt.Errorf("gcp metadata %s: response Metadata-Flavor is %q, want %q; "+
 			"this is not the GCE metadata server", path, flavor, gcpMetadataFlavor)
@@ -73,14 +69,12 @@ func (g *GCP) get(ctx context.Context, path string) ([]byte, error) {
 	return body, nil
 }
 
-// Detect probes the metadata server. Presence of KUBERNETES_SERVICE_HOST marks
-// the sub-runtime as GKE, otherwise GCE.
+// Detect probes the metadata server.
 func (g *GCP) Detect(ctx context.Context) (*core.Runtime, error) {
 	if _, err := g.get(ctx, "/computeMetadata/v1/"); err != nil {
 		return nil, fmt.Errorf("%w: %v", core.ErrNotThisRuntime, err)
 	}
-	// Env hints resolve the sub-runtime; GKE takes precedence over the
-	// serverless hints, then Cloud Run, then Cloud Functions, else bare GCE.
+	// Env hints resolve the sub-runtime; GKE takes precedence over the serverless hints, then Cloud Run, then Cloud Functions, else bare GCE.
 	sub := "gce"
 	switch {
 	case g.getenv("KUBERNETES_SERVICE_HOST") != "":

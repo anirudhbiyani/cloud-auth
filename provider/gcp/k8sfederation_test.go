@@ -7,10 +7,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// k8s-federation reached "unsupported spec type" on GCP until this landed: only
-// provider/aws handled the spec. The subject and the attribute condition are the
-// parts worth pinning — together they decide which workload can impersonate the
-// service account.
+// k8s-federation reached "unsupported spec type" on GCP until this landed: only provider/aws handled the spec.
 
 func k8sSpec(mutate func(*core.K8sServiceAccountFederationSpec)) *core.K8sServiceAccountFederationSpec {
 	s := &core.K8sServiceAccountFederationSpec{
@@ -42,9 +39,7 @@ func TestK8sToWorkloadIdentitySpec(t *testing.T) {
 	if got.SubjectScope != wantSubject {
 		t.Errorf("SubjectScope = %q, want %q", got.SubjectScope, wantSubject)
 	}
-	// Without an attribute condition the provider accepts every identity the
-	// cluster's issuer will mint a token for — a confused-deputy hole, and the
-	// exact thing core refuses to create.
+	// Without an attribute condition the provider accepts every identity the cluster's issuer will mint a token for — a confused-deputy hole, and the exact thing core refuses to create.
 	if !strings.Contains(got.AttributeCondition, wantSubject) {
 		t.Errorf("AttributeCondition = %q, want it to pin %q", got.AttributeCondition, wantSubject)
 	}
@@ -64,16 +59,13 @@ func TestK8sToWorkloadIdentitySpec(t *testing.T) {
 		t.Errorf("Source = %q", got.Source)
 	}
 
-	// The translated spec must satisfy the same validation a hand-written one
-	// does, or setup refuses it one layer down.
+	// The translated spec must satisfy the same validation a hand-written one does, or setup refuses it one layer down.
 	if err := got.Validate(); err != nil {
 		t.Errorf("translated spec fails GCPWorkloadIdentityPoolSpec.Validate: %v", err)
 	}
 }
 
-// Re-running setup must reuse the pool, not create another — and GCP soft-deletes
-// pools, reserving the id for 30 days, so an unstable id is a name nobody can
-// reuse for a month.
+// Re-running setup must reuse the pool, not create another — and GCP soft-deletes pools, reserving the id for 30 days, so an unstable id is a name nobody can reuse for a month.
 func TestK8sPoolIDIsStableAndLegal(t *testing.T) {
 	a, _ := k8sToWorkloadIdentitySpec(k8sSpec(nil))
 	b, _ := k8sToWorkloadIdentitySpec(k8sSpec(nil))

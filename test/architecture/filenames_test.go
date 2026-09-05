@@ -7,26 +7,9 @@ import (
 	"testing"
 )
 
-// Go treats a trailing _<GOOS> or _<GOARCH> in a filename as an implicit build
-// constraint. `client_arm.go` therefore compiled only on ARM targets, and the
-// package failed with "does not implement ARMClient" while the method sat right
-// there in the file — a failure whose message points nowhere near its cause.
-//
-// It happened twice. The first time was the source file; the second was a test
-// file added months later, because the fix was a rename plus a one-time sweep,
-// and a sweep is not a rule. This is the rule.
-//
-// Only accidental constraints are caught. A file that genuinely means to be
-// platform-specific declares it with an explicit //go:build line, which is
-// visible in review — state_lock_unix.go and state_lock_other.go do exactly
-// that and are not affected, because "unix" and "other" are not GOOS values.
+// Go treats a trailing _<GOOS> or _<GOARCH> in a filename as an implicit build constraint.
 
 // implicitConstraints are the suffixes Go reads as build constraints.
-//
-// The list is the union of GOOS and GOARCH values, plus the few aliases. It
-// does not need to be exhaustive to be useful: it needs to contain the ones
-// somebody would plausibly name a file after, and "arm" is the one that has
-// already cost this repository twice.
 var implicitConstraints = map[string]bool{
 	// GOARCH
 	"386": true, "amd64": true, "arm": true, "arm64": true, "loong64": true,

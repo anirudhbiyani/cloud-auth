@@ -15,12 +15,6 @@ import (
 )
 
 // The Claude Platform as a federation target.
-//
-// Anthropic's WIF exchanges an OIDC proof for a short-lived
-// `sk-ant-oat01-...` token bound to a service account, replacing a static
-// `sk-ant-...` API key. Protocol: RFC 7523 jwt-bearer, posted as JSON — NOT
-// form-encoded, which is where every other OAuth token endpoint in this tree
-// differs from it, Entra included.
 
 const (
 	// DefaultAnthropicEndpoint is the Claude Platform token endpoint.
@@ -85,17 +79,12 @@ func (e *AnthropicExchanger) Exchange(ctx context.Context, tok *core.SourceToken
 		return nil, err
 	}
 
-	// The proof must be pinned to the audience this target names, checked
-	// before it leaves the process. A federation rule may match on an exact
-	// audience, and sending a mis-audienced bearer assertion is a disclosure
-	// whether or not the rule then rejects it.
+	// The proof must be pinned to the audience this target names, checked before it leaves the process.
 	if err := checkAudienceBinding(tok, t.Audience()); err != nil {
 		return nil, fmt.Errorf("anthropic: %w", err)
 	}
 
-	// JSON, not form-encoded. Every other token endpoint in this tree takes
-	// application/x-www-form-urlencoded; this one does not, and sending a form
-	// gets a 400 that says nothing about why.
+	// JSON, not form-encoded.
 	body := map[string]string{
 		"grant_type":         jwtBearerGrant,
 		"assertion":          tok.Reveal(),
@@ -118,9 +107,7 @@ func (e *AnthropicExchanger) Exchange(ctx context.Context, tok *core.SourceToken
 			if rerr != nil {
 				return nil, rerr
 			}
-			// JSON, not form-encoded. Every other token endpoint in this tree
-			// takes application/x-www-form-urlencoded; this one does not, and
-			// sending a form gets a 400 that says nothing about why.
+			// JSON, not form-encoded.
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Accept", "application/json")
 			return req, nil
@@ -146,15 +133,13 @@ func (e *AnthropicExchanger) Exchange(ctx context.Context, tok *core.SourceToken
 
 	return &core.Credentials{
 		Cloud: core.Anthropic,
-		// The bearer-token field, as GCP and Azure use: the credential IS the
-		// token and goes in an Authorization header, not an access-key triple.
+		// The bearer-token field, as GCP and Azure use: the credential IS the token and goes in an Authorization header, not an access-key triple.
 		AccessToken: out.AccessToken,
 		Expiry:      time.Now().Add(time.Duration(out.ExpiresIn) * time.Second),
 	}, nil
 }
 
-// annotateAnthropicError names the failures that are not guessable from the
-// raw response, and that an operator will actually hit.
+// annotateAnthropicError names the failures that are not guessable from the raw response, and that an operator will actually hit.
 func annotateAnthropicError(err error) error {
 	var he *httpError
 	if !errors.As(err, &he) {
@@ -163,8 +148,6 @@ func annotateAnthropicError(err error) error {
 	scrubbed := redact.Body(string(he.body), 512)
 
 	// A JWT carrying a jti is single-use by default: re-presenting one fails.
-	// The cause is almost always a retry loop or a cached proof, and the fix is
-	// to mint a fresh JWT per exchange rather than to widen anything.
 	if strings.Contains(string(he.body), "jti_reused") {
 		return fmt.Errorf("anthropic: this identity token was already exchanged (jti_reused). "+
 			"Identity tokens carrying a jti claim are single-use, so every exchange needs a FRESH "+

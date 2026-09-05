@@ -8,9 +8,7 @@ import (
 	"testing"
 )
 
-// metadata.google.internal is a DNS name, and a name can be hijacked. The
-// documented defence is that the real metadata server echoes Metadata-Flavor
-// back; a plain HTTP server answering on that name will not.
+// metadata.google.internal is a DNS name, and a name can be hijacked.
 func TestGCPRefusesAServerThatDoesNotEchoMetadataFlavor(t *testing.T) {
 	spoof := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Serves plausible content, but is not the metadata server.

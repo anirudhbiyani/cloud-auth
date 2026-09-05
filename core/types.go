@@ -1,8 +1,4 @@
-// Package core provides the types and interfaces for cross-cloud
-// authentication lifecycle management.
-//
-// This package defines the fundamental abstractions for managing cross-cloud
-// authentication mechanisms including setup, validation, and deletion operations.
+// Package core provides the types and interfaces for cross-cloud authentication lifecycle management.
 package core
 
 import (
@@ -29,9 +25,7 @@ const (
 	CapabilityFederationSAML Capability = "federation_saml"
 )
 
-// Cloud (aws/gcp/azure/vault/okta/github_oidc/kubernetes) and its
-// constants are defined in federation.go — the single provider enum for the
-// whole module.
+// Cloud (aws/gcp/azure/vault/okta/github_oidc/kubernetes) and its constants are defined in federation.go — the single provider enum for the whole module.
 
 // MechanismType identifies the type of cross-cloud auth mechanism.
 type MechanismType string
@@ -48,7 +42,6 @@ const (
 )
 
 // MechanismRef is a stable reference to a created mechanism instance.
-// It contains identifiers needed to validate, update, or delete the mechanism.
 type MechanismRef struct {
 	// ID is a unique identifier for this mechanism instance.
 	ID string `json:"id"`
@@ -60,14 +53,12 @@ type MechanismRef struct {
 	Provider Cloud `json:"provider"`
 
 	// ResourceIDs contains cloud-specific resource identifiers.
-	// Keys are resource types (e.g., "role_arn", "pool_id"), values are IDs.
 	ResourceIDs map[string]string `json:"resource_ids"`
 
 	// CreatedAt is when this mechanism was created.
 	CreatedAt time.Time `json:"created_at"`
 
-	// Owned indicates whether the mechanism was created by cloud-auth
-	// and can be safely deleted.
+	// Owned indicates whether the mechanism was created by cloud-auth and can be safely deleted.
 	Owned bool `json:"owned"`
 
 	// Version tracks schema version for migration purposes.
@@ -80,11 +71,9 @@ type Outputs struct {
 	Ref MechanismRef `json:"ref"`
 
 	// Values contains non-secret output values.
-	// Keys are output names (e.g., "audience", "issuer_url"), values are strings.
 	Values map[string]string `json:"values,omitempty"`
 
 	// SecretRefs contains references to secrets (not the secrets themselves).
-	// The actual secrets should be handled via SecretSink.
 	SecretRefs map[string]SecretRef `json:"secret_refs,omitempty"`
 
 	// Instructions contains human-readable setup instructions if manual steps needed.
@@ -92,7 +81,6 @@ type Outputs struct {
 }
 
 // SecretRef is a reference to a secret stored in an external secret manager.
-// cloud-auth never returns secret values directly; it returns references.
 type SecretRef struct {
 	// Provider is the secret store provider (e.g., "aws_secrets_manager", "vault").
 	Provider string `json:"provider"`
@@ -115,12 +103,6 @@ const (
 )
 
 // Rank returns the ordinal severity, for comparisons.
-//
-// Severity is a string, so comparing two values with < or >= compares them
-// lexicographically rather than by seriousness — and "critical" sorts BEFORE
-// "error". Code that gated on `severity >= SeverityError` therefore ignored
-// every critical finding while treating info-level ones as blocking, exactly
-// inverting the intent. Always compare Rank(), never the raw values.
 func (s Severity) Rank() int {
 	switch s {
 	case SeverityInfo:
@@ -132,8 +114,7 @@ func (s Severity) Rank() int {
 	case SeverityCritical:
 		return 4
 	default:
-		// Unknown severities are treated as the most serious: an unrecognized
-		// value should fail loudly rather than be silently discounted.
+		// Unknown severities are treated as the most serious: an unrecognized value should fail loudly rather than be silently discounted.
 		return 4
 	}
 }
@@ -168,8 +149,7 @@ type ValidationCheck struct {
 	// Evidence contains data supporting the check result.
 	Evidence map[string]interface{} `json:"evidence,omitempty"`
 
-	// Message is a short human-readable summary of the outcome — in particular
-	// what was NOT verified when a check is skipped.
+	// Message is a short human-readable summary of the outcome — in particular what was NOT verified when a check is skipped.
 	Message string `json:"message,omitempty"`
 
 	// Remediation contains steps to fix a failed check.
@@ -204,10 +184,6 @@ type ValidationSummary struct {
 }
 
 // IsValid reports whether no check failed at error severity or above.
-//
-// It answers "did anything fail?", NOT "was everything verified" — a skipped
-// check proves nothing. Pair it with IsComplete before treating a mechanism as
-// trustworthy.
 func (r *ValidationReport) IsValid() bool {
 	for _, check := range r.Checks {
 		if check.Status == CheckStatusFailed && check.Severity.Rank() >= SeverityError.Rank() {
@@ -218,11 +194,6 @@ func (r *ValidationReport) IsValid() bool {
 }
 
 // IsComplete reports whether every check that matters actually ran.
-//
-// A skipped or unknown check at error severity or above means the mechanism was
-// not verified — the trust policy or permissions may be wrong and we simply did
-// not look. Callers that need assurance (rather than merely "nothing failed")
-// must require IsValid && IsComplete.
 func (r *ValidationReport) IsComplete() bool {
 	for _, check := range r.Checks {
 		if check.Severity.Rank() < SeverityError.Rank() {
@@ -236,14 +207,9 @@ func (r *ValidationReport) IsComplete() bool {
 }
 
 // HasChecks reports whether the report contains any check at all.
-//
-// An empty report satisfies IsValid and IsComplete vacuously — nothing failed
-// and nothing was skipped, because nothing ran. Callers must distinguish that
-// from a genuine pass, or "Valid: true" ends up meaning "we did not look".
 func (r *ValidationReport) HasChecks() bool { return len(r.Checks) > 0 }
 
-// SkippedChecks returns the checks that did not run, so callers can report what
-// was left unverified rather than silently treating it as fine.
+// SkippedChecks returns the checks that did not run, so callers can report what was left unverified rather than silently treating it as fine.
 func (r *ValidationReport) SkippedChecks() []ValidationCheck {
 	var skipped []ValidationCheck
 	for _, check := range r.Checks {
@@ -337,12 +303,10 @@ type DeleteOptions struct {
 	OwnedOnly bool
 
 	// Confirm is a callback that must return true to proceed.
-	// Used for interactive confirmation.
 	Confirm func(Plan) bool
 }
 
 // SecretSink is an interface for securely handling generated secrets.
-// Implementations can write secrets to secure storage like Vault or cloud secret managers.
 type SecretSink interface {
 	// StoreSecret stores a secret and returns a reference to it.
 	StoreSecret(ctx context.Context, name string, value []byte) (SecretRef, error)

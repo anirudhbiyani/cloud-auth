@@ -26,9 +26,7 @@ func fakeGCPMetadata(t *testing.T, requireFlavor bool) *httptest.Server {
 			w.WriteHeader(http.StatusForbidden)
 			return
 		}
-		// The real metadata server echoes this back, and the client now requires
-		// it — that round trip is what distinguishes the metadata server from
-		// anything else answering on metadata.google.internal.
+		// The real metadata server echoes this back, and the client now requires it — that round trip is what distinguishes the metadata server from anything else answering on metadata.google.internal.
 		w.Header().Set("Metadata-Flavor", "Google")
 		switch r.URL.Path {
 		case "/computeMetadata/v1/":

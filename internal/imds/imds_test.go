@@ -8,9 +8,7 @@ import (
 	"time"
 )
 
-// fakeIMDS emulates IMDSv2: a token must be minted via PUT /latest/api/token
-// (with a TTL header) before any GET, which must carry the token header.
-// Requests without a valid token get 401 — mirroring IMDSv2-only enforcement.
+// fakeIMDS emulates IMDSv2: a token must be minted via PUT /latest/api/token (with a TTL header) before any GET, which must carry the token header.
 func fakeIMDS(t *testing.T) (*httptest.Server, *int) {
 	t.Helper()
 	const tokenValue = "FAKE-IMDS-TOKEN"
@@ -55,9 +53,7 @@ func TestGetUsesTokenFirst(t *testing.T) {
 }
 
 func TestNoIMDSv1Fallback(t *testing.T) {
-	// Server that refuses to mint tokens (simulates a broken/blocked token
-	// endpoint). An IMDSv1 client would fall back to a tokenless GET; we must
-	// NOT — we must fail closed.
+	// Server that refuses to mint tokens (simulates a broken/blocked token endpoint).
 	getCalled := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPut {

@@ -17,24 +17,13 @@ import (
 )
 
 // GitHub Actions as a source of identity.
-//
-// Detection covered eleven CLOUD runtimes and zero CI platforms, so
-// `cloud-auth exchange` inside a GitHub Actions runner probed AWS, GCP and
-// Azure metadata, failed all three, and reported "no supported runtime
-// detected" — for the use case this project's README opens with.
-//
-// CI→cloud is the overwhelming majority of observable demand for this category.
-// The cloud→cloud case the runtime half was built for is real, and narrow.
 
 const (
-	// requestURLEnv and requestTokenEnv are injected by the Actions runner when
-	// a workflow or job grants `id-token: write`. Both are present or neither
-	// is; the runner does not set one alone.
+	// requestURLEnv and requestTokenEnv are injected by the Actions runner when a workflow or job grants `id-token: write`.
 	requestURLEnv   = "ACTIONS_ID_TOKEN_REQUEST_URL"
 	requestTokenEnv = "ACTIONS_ID_TOKEN_REQUEST_TOKEN"
 
-	// githubMintTimeout bounds the token request. The endpoint is on the
-	// runner's own network path and answers in milliseconds.
+	// githubMintTimeout bounds the token request.
 	githubMintTimeout = 10 * time.Second
 )
 
@@ -60,10 +49,7 @@ func WithGitHubEnv(f func(string) string) GitHubOption {
 // NewGitHub builds the GitHub Actions source provider.
 func NewGitHub(opts ...GitHubOption) *GitHub {
 	g := &GitHub{
-		// The STS client, NOT the metadata client. This endpoint is a normal
-		// internet address that a corporate egress proxy legitimately handles —
-		// the metadata client sets Proxy: nil deliberately, because a metadata
-		// address must never be proxied, and that reasoning does not apply here.
+		// The STS client, NOT the metadata client.
 		httpClient: httpx.NewSTSClient(githubMintTimeout),
 		getenv:     os.Getenv,
 	}
@@ -76,23 +62,14 @@ func NewGitHub(opts ...GitHubOption) *GitHub {
 // Name identifies the provider.
 func (g *GitHub) Name() string { return "github-actions" }
 
-// Detect reports whether this process is a GitHub Actions job that may request
-// an OIDC token.
-//
-// Both variables or neither. GITHUB_ACTIONS alone is not enough: it is set in
-// every workflow, including the ones without `id-token: write`, and detecting
-// on it would claim a runtime this provider then cannot mint for — turning a
-// clear "permission not granted" into "detection succeeded, mint failed".
+// Detect reports whether this process is a GitHub Actions job that may request an OIDC token.
 func (g *GitHub) Detect(_ context.Context) (*core.Runtime, error) {
 	requestURL := strings.TrimSpace(g.getenv(requestURLEnv))
 	requestToken := strings.TrimSpace(g.getenv(requestTokenEnv))
 
 	if requestURL == "" || requestToken == "" {
 		if g.getenv("GITHUB_ACTIONS") == "true" && requestURL == "" && requestToken == "" {
-			// Running in Actions, but the token endpoint was not injected. Say
-			// which permission is missing rather than "not this runtime": this
-			// is the single most common setup mistake, and the raw failure is
-			// opaque.
+			// Running in Actions, but the token endpoint was not injected.
 			return nil, fmt.Errorf("%w: this is a GitHub Actions job, but %s is not set — the "+
 				"workflow or job needs `permissions: id-token: write`. A workflow that sets any "+
 				"`permissions:` block must list id-token explicitly, because naming any permission "+
@@ -105,10 +82,7 @@ func (g *GitHub) Detect(_ context.Context) (*core.Runtime, error) {
 
 	rt := &core.Runtime{
 		Cloud: core.GitHubOIDC,
-		// "actions", not "github-actions": source.detect splits cloud from
-		// sub-runtime on "-", so the operator writes "github-actions" and the
-		// selector holds {github, actions}. Naming the sub-runtime
-		// "github-actions" would make the config value "github-github-actions".
+		// "actions", not "github-actions": source.detect splits cloud from sub-runtime on "-", so the operator writes "github-actions" and the selector holds {github, actions}.
 		SubRuntime:  "actions",
 		Federatable: true,
 		Issuer:      "https://token.actions.githubusercontent.com",
@@ -118,14 +92,6 @@ func (g *GitHub) Detect(_ context.Context) (*core.Runtime, error) {
 }
 
 // subjectFromEnv reconstructs the sub claim from the runner's environment.
-//
-// Best-effort and advisory only: doctor shows it before any token is minted, so
-// an operator can compare it against a trust policy without granting anything.
-// The authoritative value is the one in the minted token, and Mint overwrites
-// this from the token it actually receives.
-//
-// GitHub's sub is a POSITIONAL concatenation, and environment REPLACES ref
-// rather than joining it — the trap detectExplain names.
 func (g *GitHub) subjectFromEnv() string {
 	repo := g.getenv("GITHUB_REPOSITORY")
 	if repo == "" {
@@ -152,8 +118,7 @@ func (g *GitHub) Mint(ctx context.Context, audience string) (*core.SourceToken, 
 			core.ErrNotThisRuntime, requestURLEnv, requestTokenEnv)
 	}
 
-	// The runner supplies the URL with its own query already attached, so the
-	// audience is appended rather than replacing what is there.
+	// The runner supplies the URL with its own query already attached, so the audience is appended rather than replacing what is there.
 	endpoint, err := appendAudience(requestURL, audience)
 	if err != nil {
 		return nil, err
@@ -193,9 +158,7 @@ func (g *GitHub) Mint(ctx context.Context, audience string) (*core.SourceToken, 
 
 	claims, err := jwt.ParseUnverified(payload.Value)
 	if err != nil {
-		// Fail closed. A token this code cannot read is one whose audience it
-		// cannot check, and handing it onward unchecked is exactly the
-		// disclosure the audience binding exists to prevent.
+		// Fail closed.
 		return nil, fmt.Errorf("github: parsing the minted token: %w", err)
 	}
 	if !claims.HasAudience(audience) {
@@ -220,9 +183,6 @@ func appendAudience(raw, audience string) (string, error) {
 }
 
 // mintHTTPError turns the endpoint's status into something actionable.
-//
-// The raw failure is opaque, and the overwhelmingly common cause of each of
-// these is a specific, fixable mistake.
 func mintHTTPError(status int) error {
 	switch status {
 	case http.StatusForbidden, http.StatusUnauthorized:

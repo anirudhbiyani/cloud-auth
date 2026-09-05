@@ -7,17 +7,9 @@ import (
 	"testing"
 )
 
-// Both stores built their List slice by ranging a map, and Go randomizes map
-// iteration order on purpose — so Offset/Limit were slicing a different
-// arrangement every call. Page 2 could repeat an entry from page 1 and omit
-// another, and nothing about the result would look wrong.
-//
-// FileStateStore is the one the CLI uses, so this was production behaviour, not
-// just a test-store quirk.
+// Both stores built their List slice by ranging a map, and Go randomizes map iteration order on purpose — so Offset/Limit were slicing a different arrangement every call.
 
-// stores returns both implementations under one interface, so every case here
-// runs against both. The PRD named only the memory store; the file store had the
-// same two bugs.
+// stores returns both implementations under one interface, so every case here runs against both.
 func stores(t *testing.T) map[string]StateStore {
 	t.Helper()
 	file, err := NewFileStateStore(filepath.Join(t.TempDir(), "state.json"))
@@ -91,7 +83,6 @@ func TestListIsDeterministicallyOrdered(t *testing.T) {
 }
 
 // Paging must partition the set: every entry exactly once, no repeats, no gaps.
-// That is the property the random order actually broke.
 func TestPagingCoversEveryEntryExactlyOnce(t *testing.T) {
 	for name, store := range stores(t) {
 		t.Run(name, func(t *testing.T) {
@@ -122,10 +113,7 @@ func TestPagingCoversEveryEntryExactlyOnce(t *testing.T) {
 	}
 }
 
-// The second bug, which the PRD did not name: the guard was
-// `Offset > 0 && Offset < len(refs)`, so an offset past the end skipped the
-// slice entirely and returned the FULL list. A client walking pages until it got
-// an empty one never got one.
+// The second bug, which the PRD did not name: the guard was `Offset > 0 && Offset < len(refs)`, so an offset past the end skipped the slice entirely and returned the FULL list.
 func TestOffsetPastTheEndReturnsNothing(t *testing.T) {
 	for name, store := range stores(t) {
 		t.Run(name, func(t *testing.T) {

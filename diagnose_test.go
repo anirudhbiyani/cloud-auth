@@ -67,8 +67,7 @@ func TestDiagnoseNoFirstClassPath(t *testing.T) {
 	if !strings.Contains(out, "no first-class keyless path") {
 		t.Errorf("want ErrNoFirstClassPath message, got:\n%s", out)
 	}
-	// AWS has a first-class remedy now, so the guidance must name it rather than
-	// send the operator off to build a bridge.
+	// AWS has a first-class remedy now, so the guidance must name it rather than send the operator off to build a bridge.
 	if !strings.Contains(out, "outbound identity federation") {
 		t.Errorf("want AWS outbound-federation guidance, got:\n%s", out)
 	}
@@ -160,8 +159,7 @@ func TestDiagnoseHappyPath(t *testing.T) {
 	if !strings.Contains(out, "minted successfully") || !strings.Contains(out, "audience matches") {
 		t.Errorf("want success findings, got:\n%s", out)
 	}
-	// The proof kind decides which target-side trust applies, so "it minted" on
-	// its own is not enough for an operator to act on.
+	// The proof kind decides which target-side trust applies, so "it minted" on its own is not enough for an operator to act on.
 	if !strings.Contains(out, "kind ") {
 		t.Errorf("want the minted proof kind reported, got:\n%s", out)
 	}
@@ -199,11 +197,7 @@ func TestWriteDiagnosesAdvisoryOnlyWhenMintOK(t *testing.T) {
 	}
 }
 
-// bridgeGuidance was dead code: it was reached only from the mint-error path,
-// and no source returns ErrNoFirstClassPath — sources return
-// ErrNonFederatableSource, the exchangers return ErrNoFirstClassPath, and
-// doctor never calls an exchanger. So doctor happily reported a SigV4 proof
-// "minted successfully" and said nothing about the target refusing it.
+// bridgeGuidance was dead code: it was reached only from the mint-error path, and no source returns ErrNoFirstClassPath — sources return ErrNonFederatableSource, the exchangers return ErrNoFirstClassPath, and doctor never calls an exchanger.
 func TestDoctorWarnsWhenTheTargetWillNotAcceptTheProofKind(t *testing.T) {
 	sigv4 := &core.SourceToken{
 		Kind: core.AWSSigV4, Value: "signed-request",
@@ -233,7 +227,6 @@ func TestDoctorWarnsWhenTheTargetWillNotAcceptTheProofKind(t *testing.T) {
 		},
 		{
 			// GCP's STS verifies a SigV4 proof by calling GetCallerIdentity.
-			// Warning here would be a false positive on the one pair that works.
 			name: "SigV4 at GCP is fine",
 			target: core.GCPTarget{
 				WorkloadIdentityPool: "//iam.googleapis.com/projects/1/locations/global/workloadIdentityPools/p/providers/x",
@@ -268,8 +261,7 @@ func TestDoctorWarnsWhenTheTargetWillNotAcceptTheProofKind(t *testing.T) {
 	}
 }
 
-// An OIDC proof is what every target wants; warning about it would be noise on
-// the common path.
+// An OIDC proof is what every target wants; warning about it would be noise on the common path.
 func TestNoProofKindWarningForOIDC(t *testing.T) {
 	target := core.AWSTarget{RoleARN: "arn:aws:iam::123456789012:role/deploy"}
 	p := preflight{

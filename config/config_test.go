@@ -106,9 +106,7 @@ func TestResolveTarget(t *testing.T) {
 	if tgt.Cloud() != core.GCP {
 		t.Errorf("cloud = %v", tgt.Cloud())
 	}
-	// GCP audience defaults to the workload identity pool when unset, in the
-	// //iam.googleapis.com/ form the token exchange requires — the config may
-	// carry either spelling.
+	// GCP audience defaults to the workload identity pool when unset, in the //iam.googleapis.com/ form the token exchange requires — the config may carry either spelling.
 	gcp := tgt.(core.GCPTarget)
 	wantAud := gcp.WorkloadIdentityPool
 	if !strings.HasPrefix(wantAud, "//iam.googleapis.com/") {
@@ -137,8 +135,7 @@ func TestEnvOverridesDetect(t *testing.T) {
 	}
 }
 
-// TestValidateFailClosed enumerates the fail-closed cases as a table. Every case
-// must be rejected by Load (invalid or ambiguous config is a hard error).
+// TestValidateFailClosed enumerates the fail-closed cases as a table.
 func TestValidateFailClosed(t *testing.T) {
 	cases := []struct {
 		name string
@@ -314,8 +311,7 @@ func TestSchemaValidJSON(t *testing.T) {
 	}
 }
 
-// TestSchemaMatchesValidator guards drift between the published JSON schema and
-// what the Go validator actually enforces. It is intentionally lightweight.
+// TestSchemaMatchesValidator guards drift between the published JSON schema and what the Go validator actually enforces.
 func TestSchemaMatchesValidator(t *testing.T) {
 	raw, err := os.ReadFile(schemaPath)
 	if err != nil {
@@ -391,10 +387,7 @@ func toStringSet(v any) map[string]bool {
 	return out
 }
 
-// FuzzLoad fuzzes the parse+validate path. Properties asserted:
-//   - Load never panics on arbitrary input.
-//   - When Load returns a nil error, the resulting Config must satisfy every
-//     required-field invariant (never nil err AND a missing required field).
+// FuzzLoad fuzzes the parse+validate path.
 func FuzzLoad(f *testing.F) {
 	seeds := []string{
 		validYAML,
@@ -468,9 +461,7 @@ targets:
 	})
 }
 
-// source.detect was parsed, validated, tested — and read by nothing. An operator
-// who pinned it had configured a security control that did not exist. Load must
-// now reject a value the enforcement layer cannot honour.
+// source.detect was parsed, validated, tested — and read by nothing.
 func TestLoadRejectsAnUnusableSourceDetect(t *testing.T) {
 	dir := t.TempDir()
 	write := func(detect string) string {
@@ -495,8 +486,7 @@ func TestLoadRejectsAnUnusableSourceDetect(t *testing.T) {
 	}
 }
 
-// And the parsed value must be reachable, or the enforcement layer has nothing
-// to enforce.
+// And the parsed value must be reachable, or the enforcement layer has nothing to enforce.
 func TestSourceSelectorIsExposed(t *testing.T) {
 	c := &Config{Version: 1, Source: Source{Detect: "aws-eks-irsa"}}
 	sel, err := c.SourceSelector()
@@ -508,9 +498,7 @@ func TestSourceSelectorIsExposed(t *testing.T) {
 	}
 }
 
-// A field belonging to another cloud is now a config error rather than a
-// silently ignored key. Dropping it is how a target ends up pointing somewhere
-// the operator did not intend.
+// A field belonging to another cloud is now a config error rather than a silently ignored key.
 func TestConfigRejectsForeignCloudFields(t *testing.T) {
 	dir := t.TempDir()
 	load := func(body string) error {

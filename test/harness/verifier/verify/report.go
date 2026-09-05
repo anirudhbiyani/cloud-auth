@@ -30,8 +30,6 @@ const (
 )
 
 // ProbeStatus is the outcome of the optional post-exchange credential probe.
-// A probe never fails a case by itself (unless -probe-strict): it is corroborating
-// evidence, and the harness must not go red because a probe is unimplemented.
 type ProbeStatus string
 
 const (
@@ -48,7 +46,6 @@ const (
 )
 
 // Identity is the non-secret metadata proving *which* identity was exchanged.
-// Everything here is safe to log; credential material never appears.
 type Identity struct {
 	Issuer               string `json:"issuer,omitempty"`
 	Subject              string `json:"subject,omitempty"`
@@ -82,8 +79,7 @@ type CaseResult struct {
 	DurationMS      int64  `json:"duration_ms"`
 	Error           string `json:"error,omitempty"`
 	MatchedSentinel string `json:"matched_sentinel,omitempty"`
-	// Note carries non-fatal context, e.g. the guidance text that accompanied
-	// an expected sentinel failure.
+	// Note carries non-fatal context, e.g. the guidance text that accompanied an expected sentinel failure.
 	Note     string      `json:"note,omitempty"`
 	Identity Identity    `json:"identity"`
 	Probe    ProbeResult `json:"probe"`
@@ -125,8 +121,7 @@ type Report struct {
 	CredentialsNot string       `json:"credentials_note"`
 }
 
-// credentialsNote states, in the artifact itself, the security property the
-// harness contract requires of this output.
+// credentialsNote states, in the artifact itself, the security property the harness contract requires of this output.
 const credentialsNote = "no credential, token, or assertion values appear in this report; identity metadata only"
 
 // BuildReport assembles the report from finished case results.
@@ -187,8 +182,7 @@ func (r Report) ExitCode() int {
 	return ExitOK
 }
 
-// WriteJSON renders the machine-readable report. The rendered bytes get a final
-// scrub pass so a future field cannot leak by being forgotten at build time.
+// WriteJSON renders the machine-readable report.
 func (r Report) WriteJSON(w io.Writer, s *Scrubber) error {
 	b, err := json.MarshalIndent(r, "", "  ")
 	if err != nil {
@@ -283,8 +277,7 @@ func orNone(s string) string {
 	return s
 }
 
-// errSummary flattens an error into a single bounded line, so one enormous STS
-// body cannot drown the report.
+// errSummary flattens an error into a single bounded line, so one enormous STS body cannot drown the report.
 func errSummary(err error) string {
 	if err == nil {
 		return ""

@@ -10,10 +10,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/internal/jwt"
 )
 
-// Round-trip: the policy this package GENERATES, read back through the parser
-// it also owns, into the detector that judges it. Testing the generator alone
-// would prove the JSON is shaped right and nothing about whether the shape is
-// the one STS reads.
+// Round-trip: the policy this package GENERATES, read back through the parser it also owns, into the detector that judges it.
 
 func idpRoleSpec(require bool) *core.AWSRoleTrustOIDCSpec {
 	return &core.AWSRoleTrustOIDCSpec{
@@ -42,15 +39,13 @@ func TestBuildTrustPolicyEmitsTheCondition(t *testing.T) {
 	if !strings.Contains(string(encoded), core.IdPAuthorizedRoleConditionKey) {
 		t.Fatalf("the condition is absent:\n%s", encoded)
 	}
-	// A Bool condition, not a String one: the key answers "did the IdP
-	// authorize this role", and the comparison against the claim is STS's.
+	// A Bool condition, not a String one: the key answers "did the IdP authorize this role", and the comparison against the claim is STS's.
 	if !strings.Contains(string(encoded), `"Bool":{"`+core.IdPAuthorizedRoleConditionKey+`":"true"}`) {
 		t.Errorf("the condition is not a Bool:\n%s", encoded)
 	}
 }
 
-// Off by default. Turning it on for an issuer that does not emit the claim locks
-// every workload out of the role, so nobody should get it by omission.
+// Off by default.
 func TestBuildTrustPolicyOmitsTheConditionByDefault(t *testing.T) {
 	doc, err := buildTrustPolicy(
 		"arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com",
@@ -64,8 +59,7 @@ func TestBuildTrustPolicyOmitsTheConditionByDefault(t *testing.T) {
 	}
 }
 
-// The generated policy, read back, must reach the detector — a generator and a
-// parser that disagree produce a policy nothing can explain.
+// The generated policy, read back, must reach the detector — a generator and a parser that disagree produce a policy nothing can explain.
 func TestIdPAuthorizedRoleRoundTrip(t *testing.T) {
 	doc, err := buildTrustPolicy(
 		"arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com",

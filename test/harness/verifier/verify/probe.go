@@ -20,32 +20,24 @@ import (
 
 // Probe names used in targets.json.
 const (
-	// ProbeSTSGetCallerIdentity proves AWS credentials work by calling
-	// sts:GetCallerIdentity with them and reporting the resolved ARN.
+	// ProbeSTSGetCallerIdentity proves AWS credentials work by calling sts:GetCallerIdentity with them and reporting the resolved ARN.
 	ProbeSTSGetCallerIdentity = "sts-get-caller-identity"
 )
 
 // probeSTSEndpoint is the global STS endpoint the AWS probe signs against.
 const probeSTSEndpoint = "https://sts.amazonaws.com/"
 
-// probeHTTPTimeout bounds a probe's own network call, independently of the case
-// timeout, so a slow probe degrades to a soft failure instead of eating the
-// case's budget.
+// probeHTTPTimeout bounds a probe's own network call, independently of the case timeout, so a slow probe degrades to a soft failure instead of eating the case's budget.
 const probeHTTPTimeout = 15 * time.Second
 
-// DefaultProbes is the registry the verifier binary ships with. A case naming a
-// probe that is absent here gets a clearly-labelled "unimplemented" soft result
-// — the case itself still passes or fails on the credentials alone. Add probes
-// by extending this map; nothing else needs to change.
+// DefaultProbes is the registry the verifier binary ships with.
 func DefaultProbes() map[string]Probe {
 	return map[string]Probe{
 		ProbeSTSGetCallerIdentity: STSGetCallerIdentityProbe(nil),
 	}
 }
 
-// STSGetCallerIdentityProbe returns a probe that signs a GetCallerIdentity call
-// with the exchanged credentials. It reports only the identity STS resolves
-// (ARN, account, user id) — never the credentials used to sign.
+// STSGetCallerIdentityProbe returns a probe that signs a GetCallerIdentity call with the exchanged credentials.
 func STSGetCallerIdentityProbe(client *http.Client) Probe {
 	if client == nil {
 		client = &http.Client{Timeout: probeHTTPTimeout}
@@ -78,8 +70,7 @@ func STSGetCallerIdentityProbe(client *http.Client) Probe {
 		defer func() { _ = resp.Body.Close() }()
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 		if resp.StatusCode != http.StatusOK {
-			// The body is an STS error document; it can echo request detail, so
-			// it is summarized and (like everything else) scrubbed downstream.
+			// The body is an STS error document; it can echo request detail, so it is summarized and (like everything else) scrubbed downstream.
 			return "", fmt.Errorf("sts:GetCallerIdentity returned %d: %s", resp.StatusCode, string(raw))
 		}
 		var out struct {

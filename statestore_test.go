@@ -5,11 +5,7 @@ import (
 	"testing"
 )
 
-// A malformed s3:// location must be refused, not fallen through to a file
-// path. NewFileStateStore given "s3://nobucket" creates a file named "s3:" in
-// the working directory and reports an empty store — so a typo in a SHARED
-// state location silently becomes a private empty one, and two operators each
-// conclude the other created nothing.
+// A malformed s3:// location must be refused, not fallen through to a file path.
 func TestMalformedS3LocationIsRefused(t *testing.T) {
 	for _, location := range []string{
 		"s3://nobucket",

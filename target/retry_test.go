@@ -11,8 +11,7 @@ import (
 	"time"
 )
 
-// 429 used to be a permanent failure, so a brief rate limit surfaced as
-// something that looked like a trust misconfiguration.
+// 429 used to be a permanent failure, so a brief rate limit surfaced as something that looked like a trust misconfiguration.
 func TestExchangeRetries429(t *testing.T) {
 	var attempts int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -38,8 +37,7 @@ func TestExchangeRetries429(t *testing.T) {
 	}
 }
 
-// AWS also throttles with a 400 and a code in the body, which no status-code
-// rule can see.
+// AWS also throttles with a 400 and a code in the body, which no status-code rule can see.
 func TestExchangeRetriesThrottlingCodeInA400(t *testing.T) {
 	var attempts int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -62,8 +60,7 @@ func TestExchangeRetriesThrottlingCodeInA400(t *testing.T) {
 	}
 }
 
-// A genuine 4xx must still fail immediately. Retrying a rejected trust turns a
-// clear misconfiguration into a slow one.
+// A genuine 4xx must still fail immediately.
 func TestExchangeDoesNotRetryRealClientErrors(t *testing.T) {
 	var attempts int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -114,9 +111,7 @@ func TestRetryAfterIsHonoured(t *testing.T) {
 	}
 }
 
-// Full jitter: the wait must vary, and stay inside the window. The old schedule
-// was backoff*attempt with no jitter, so a fleet retried in lockstep and
-// recreated the burst that throttled it.
+// Full jitter: the wait must vary, and stay inside the window.
 func TestBackoffIsJitteredAndCapped(t *testing.T) {
 	const base = 100 * time.Millisecond
 	seen := map[time.Duration]bool{}
@@ -195,9 +190,7 @@ func TestRetryRespectsContextCancellation(t *testing.T) {
 	}
 }
 
-// A newly created federated identity credential legitimately fails for a few
-// minutes while Entra replicates it. That is the one Azure 4xx worth retrying,
-// and the exception must not widen to the rejection that looks just like it.
+// A newly created federated identity credential legitimately fails for a few minutes while Entra replicates it.
 func TestRetryablePropagationVersusWrongSubject(t *testing.T) {
 	entra := func(description string) error {
 		return &httpError{

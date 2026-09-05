@@ -1,6 +1,4 @@
-// This file holds the control-plane subcommands — setup, validate, delete,
-// list, describe, providers — and run(), the single argv dispatcher for every
-// subcommand. The runtime (data-plane) handlers live in runtime.go.
+// This file holds the control-plane subcommands — setup, validate, delete, list, describe, providers — and run(), the single argv dispatcher for every subcommand.
 
 package main
 
@@ -350,12 +348,7 @@ type setupOpts struct {
 	targetCloud  string
 }
 
-// newFlagSet returns a FlagSet that reports errors instead of exiting and stays
-// quiet, because this CLI prints its own usage. Every subcommand parser is
-// built on it, which is also what makes `--flag=value` work uniformly — the
-// hand-rolled parsers it replaced compared each argument to the flag name
-// exactly, so only the space-separated form was accepted here while `exec` and
-// `doctor` already took both.
+// newFlagSet returns a FlagSet that reports errors instead of exiting and stays quiet, because this CLI prints its own usage.
 func newFlagSet(name string) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -363,9 +356,7 @@ func newFlagSet(name string) *flag.FlagSet {
 	return fs
 }
 
-// parseFlags applies args and rejects leftovers. These subcommands take options
-// only; a bare word is a mistyped flag or a stray shell expansion, and accepting
-// it silently is how the wrong mechanism gets built.
+// parseFlags applies args and rejects leftovers.
 func parseFlags(fs *flag.FlagSet, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -380,11 +371,7 @@ func parseSetupOpts(args []string) (*setupOpts, error) {
 	opts := &setupOpts{}
 	fs := newFlagSet("setup")
 
-	// No audience default here: this parser is shared by every mechanism type,
-	// and "sts.amazonaws.com" is only ever right for AWS. Defaulted globally, a
-	// GCP workload identity provider was created accepting the one audience
-	// every GitHub Actions run can request. Per-type defaults live in the
-	// build*Spec functions.
+	// No audience default here: this parser is shared by every mechanism type, and "sts.amazonaws.com" is only ever right for AWS.
 	fs.StringVar(&opts.specFile, "f", "", "mechanism spec file")
 	fs.StringVar(&opts.specFile, "file", "", "mechanism spec file")
 	fs.BoolVar(&opts.dryRun, "dry-run", false, "report the plan without changing anything")
@@ -513,11 +500,7 @@ func buildAWSSpec(opts *setupOpts, source core.Cloud) (*core.AWSRoleTrustOIDCSpe
 		RequireIdPAuthorizedRole: opts.requireIdPAuthorizedRole,
 	}
 
-	// A wildcard in the subject switches the IAM operator to one that HONOURS
-	// it. That is the right behaviour — StringEquals would compare the "*"
-	// literally and the trust would match nothing — but it happened silently,
-	// so a wildcard both widened the trust and quietly upgraded the operator
-	// that makes the widening real. Say so.
+	// A wildcard in the subject switches the IAM operator to one that HONOURS it.
 	if strings.Contains(opts.subject, "*") {
 		spec.SubjectCondition = "StringLike"
 		fmt.Fprintf(os.Stderr,
@@ -804,10 +787,7 @@ func cmdSetup(ctx context.Context, args []string) error {
 		"target", spec.TargetProvider(),
 		"dry_run", opts.dryRun)
 
-	// Setup creates or updates a trust relationship, so it is audited whatever
-	// the outcome. A dry run is recorded too: it reads live state to build the
-	// plan, and "who looked" is worth as much as "who changed" when
-	// reconstructing what happened.
+	// Setup creates or updates a trust relationship, so it is audited whatever the outcome.
 	aud := newAuditor(audit.OpSetup).with(func(e *audit.Event) {
 		e.MechanismType = string(spec.Type())
 		e.TargetCloud = string(spec.TargetProvider())
@@ -815,13 +795,7 @@ func cmdSetup(ctx context.Context, args []string) error {
 		e.DryRun = opts.dryRun
 	})
 
-	// Score the subject BEFORE the API call, so a broad trust is something an
-	// operator declines rather than something they discover afterwards.
-	//
-	// The gate was previously only `validateSubjectScope`, which tests exact
-	// membership in {"*", "?*", "*:*", "**"} — so `--subject "repo:org/repo:*"`,
-	// the value this project's own README used to suggest, passed with no
-	// warning at all.
+	// Score the subject BEFORE the API call, so a broad trust is something an operator declines rather than something they discover afterwards.
 	if err := warnSubjectBreadth(spec, opts); err != nil {
 		return aud.finish(err)
 	}
@@ -859,10 +833,7 @@ func cmdSetup(ctx context.Context, args []string) error {
 		if len(outputs.Instructions) > 0 {
 			fmt.Println("\nInstructions:")
 			for _, inst := range outputs.Instructions {
-				// Warnings go to stderr. "Setup Complete" above is on stdout, and a
-				// partial success buried underneath it reads as a clean run — in a
-				// pipeline that captures only stderr, or only greps for errors, the
-				// warning would vanish entirely.
+				// Warnings go to stderr.
 				if strings.HasPrefix(inst, "WARNING") {
 					fmt.Fprintf(os.Stderr, "  - %s\n", inst)
 					continue
@@ -889,9 +860,7 @@ func parseValidateOpts(args []string) (*validateOpts, error) {
 	fs.StringVar(&opts.refID, "ref", "", "mechanism reference id")
 	fs.BoolVar(&opts.includeTokenTest, "include-token-test", false,
 		"mint a real token against the mechanism")
-	// Parsed by hand rather than with DurationVar: flag replaces
-	// time.ParseDuration's message with a bare "parse error", which does not
-	// tell an operator that "soon" needed to be "90s".
+	// Parsed by hand rather than with DurationVar: flag replaces time.ParseDuration's message with a bare "parse error", which does not tell an operator that "soon" needed to be "90s".
 	timeout := fs.String("timeout", "30s", "per-run timeout")
 	fs.StringVar(&opts.statePath, "state", core.DefaultStateStorePath(), "state store path")
 	fs.BoolVar(&opts.verbose, "verbose", false, "verbose logging")
@@ -958,7 +927,6 @@ func cmdValidate(ctx context.Context, args []string) error {
 		report.Summary.SkippedChecks)
 
 	// An empty report is vacuously "valid": nothing failed because nothing ran.
-	// Never let that read as a clean bill of health.
 	if !report.HasChecks() {
 		fmt.Printf("\n⚠ NO CHECKS RAN — this mechanism was NOT verified. \"Valid: true\"\n" +
 			"  above only means nothing failed, and nothing was tested. Treat this as\n" +
@@ -966,9 +934,7 @@ func cmdValidate(ctx context.Context, args []string) error {
 		return errValidationFailed(fmt.Errorf("mechanism %s was not verified: no checks ran", ref.ID))
 	}
 
-	// "Valid" only means nothing failed. If a security-relevant check never ran,
-	// say so plainly — otherwise a mechanism whose trust policy was never
-	// inspected reads as fully verified.
+	// "Valid" only means nothing failed.
 	if !report.IsComplete() {
 		fmt.Printf("\n⚠ INCOMPLETE: %d security-relevant check(s) did not run — this mechanism\n"+
 			"  is NOT fully verified. \"Valid: true\" here means \"nothing failed\", not\n"+
@@ -989,8 +955,7 @@ func cmdValidate(ctx context.Context, args []string) error {
 		if check.Message != "" {
 			fmt.Printf("  %s\n", check.Message)
 		}
-		// Show remediation for skipped checks too: an unrun check is precisely
-		// where the operator needs to know what to do manually.
+		// Show remediation for skipped checks too: an unrun check is precisely where the operator needs to know what to do manually.
 		if check.Remediation != "" &&
 			(check.Status == core.CheckStatusFailed || check.Status == core.CheckStatusSkipped) {
 			fmt.Printf("  Remediation: %s\n", check.Remediation)
@@ -1058,8 +1023,7 @@ func cmdDelete(ctx context.Context, args []string) error {
 		fmt.Fprintf(os.Stderr, "About to delete mechanism: %s\n", ref.ID)
 		fmt.Fprintf(os.Stderr, "Type: %s, Provider: %s\n", ref.Type, ref.Provider)
 		fmt.Fprintf(os.Stderr, "Resources: %v\n", ref.ResourceIDs)
-		// The prompt goes to stderr, or `delete > log.txt` hides the question
-		// while the process sits waiting for an answer nobody can see.
+		// The prompt goes to stderr, or `delete > log.txt` hides the question while the process sits waiting for an answer nobody can see.
 		fmt.Fprint(os.Stderr, "\nAre you sure? [y/N]: ")
 
 		var response string
@@ -1086,8 +1050,7 @@ func cmdDelete(ctx context.Context, args []string) error {
 	log.Info("deleting mechanism",
 		"id", ref.ID, "type", ref.Type, "provider", ref.Provider, "dry_run", opts.dryRun)
 
-	// Delete destroys a trust relationship. If any operation in this tool
-	// deserves a record, it is this one.
+	// Delete destroys a trust relationship.
 	aud := newAuditor(audit.OpDelete).with(func(e *audit.Event) {
 		e.MechanismID = ref.ID
 		e.MechanismType = string(ref.Type)
@@ -1160,10 +1123,7 @@ func cmdList(ctx context.Context, args []string) error {
 		return fmt.Errorf("failed to list mechanisms: %w", err)
 	}
 
-	// The empty case is handled INSIDE the switch, not before it. Returning early
-	// meant `list --output json` printed the prose "No mechanisms found" whenever
-	// there was nothing to list, so the one case a script is most likely to hit
-	// was the one case that did not emit JSON.
+	// The empty case is handled INSIDE the switch, not before it.
 	switch opts.output {
 	case "json":
 		if refs == nil {
@@ -1275,11 +1235,6 @@ func cmdProviders(_ context.Context, _ []string) error {
 }
 
 // Build metadata, set by goreleaser's ldflags at release time.
-//
-// The defaults are what a `go build` or `go install` from source produces, and
-// they say so rather than naming a version number nobody set. The previous
-// value was a hardcoded "0.2.0" printed by every binary ever built, which meant
-// a bug report's version line was worth nothing.
 var (
 	version   = "dev"
 	commit    = "none"
@@ -1298,12 +1253,6 @@ func cmdVersion() error {
 // Helper functions
 
 // loadSpec reads a mechanism spec from a JSON or YAML file.
-//
-// One decoder handles both, because YAML is a superset of JSON — the previous
-// json.Unmarshal-only implementation rejected every YAML file with "invalid
-// character 'y' in literal true" while the help text advertised "Spec file
-// (YAML or JSON)". The spec structs carry matching json and yaml tags, so the
-// yaml decoder reads either shape.
 func loadSpec(path string) (core.MechanismSpec, error) {
 	// #nosec G304 -- spec path comes from the operator's own --file flag.
 	data, err := os.ReadFile(path)
@@ -1318,10 +1267,7 @@ func loadSpec(path string) (core.MechanismSpec, error) {
 
 	mechType, ok := raw["type"].(string)
 	if !ok {
-		// The other file this CLI reads is a federation config, which has
-		// `version` and `targets` and no `type`. Saying so saves the round trip
-		// through "spec must include 'type' field" for what is really the wrong
-		// flag.
+		// The other file this CLI reads is a federation config, which has `version` and `targets` and no `type`.
 		if _, isConfig := raw["targets"]; isConfig {
 			return nil, fmt.Errorf("%s looks like a federation config, not a mechanism spec: "+
 				"it has `targets` but no `type`. Use --config with doctor/exchange/exec, or "+
@@ -1359,9 +1305,7 @@ func loadSpec(path string) (core.MechanismSpec, error) {
 			return nil, fmt.Errorf("failed to parse K8sServiceAccountFederationSpec from %s: %w", path, err)
 		}
 		spec = &s
-	// vault.VaultBrokerSpec has existed all along; loadSpec simply never knew
-	// about it, so examples/vault-jwt-auth.json — shipped documentation — could
-	// not be loaded by the tool it documents.
+	// vault.VaultBrokerSpec has existed all along; loadSpec simply never knew about it, so examples/vault-jwt-auth.json — shipped documentation — could not be loaded by the tool it documents.
 	case vault.MechanismVaultBroker:
 		var s vault.VaultBrokerSpec
 		if err := yaml.Unmarshal(data, &s); err != nil {
@@ -1383,11 +1327,6 @@ func truncate(s string, maxLen int) string {
 }
 
 // subjectOf returns the subject a spec pins, where it has one.
-//
-// Only the specs that carry a single subject condition are scored. A GCP pool
-// provider constrains identities through a CEL attribute condition, which is a
-// different shape and needs its own analysis rather than a string score
-// pretending to be one.
 func subjectOf(spec core.MechanismSpec) (string, bool) {
 	switch s := spec.(type) {
 	case *core.AWSRoleTrustOIDCSpec:
@@ -1399,12 +1338,7 @@ func subjectOf(spec core.MechanismSpec) (string, bool) {
 	}
 }
 
-// warnSubjectBreadth reports how much the spec's subject admits, and refuses
-// the widest without a recorded reason.
-//
-// Warnings go to stderr so `setup` output stays pipeable, and the refusal is an
-// error rather than a prompt: setup runs unattended in CI far more often than
-// it runs under a human.
+// warnSubjectBreadth reports how much the spec's subject admits, and refuses the widest without a recorded reason.
 func warnSubjectBreadth(spec core.MechanismSpec, opts *setupOpts) error {
 	subject, scorable := subjectOf(spec)
 	if !scorable {
@@ -1416,10 +1350,7 @@ func warnSubjectBreadth(spec core.MechanismSpec, opts *setupOpts) error {
 		return nil
 	}
 
-	// A subject that pins nothing at all is already refused by the spec's own
-	// validation, with the --allow-unscoped-subject escape hatch and its
-	// required justification. Refusing again here would report one problem
-	// twice and describe the override inaccurately.
+	// A subject that pins nothing at all is already refused by the spec's own validation, with the --allow-unscoped-subject escape hatch and its required justification.
 	if a.NeedsJustification() && !opts.allowUnscopedSubject {
 		return fmt.Errorf("subject %q is %s breadth: it admits %s\n"+
 			"  %s\n"+

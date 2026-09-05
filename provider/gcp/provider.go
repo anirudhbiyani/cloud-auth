@@ -22,28 +22,16 @@ type Provider struct {
 	wifClient WorkloadIdentityClient
 	stsClient STSClient
 
-	// resolveFailed records that Application Default Credentials could not be
-	// resolved, so the next call reports the original cause instead of silently
-	// retrying a lookup that will fail the same way.
+	// resolveFailed records that Application Default Credentials could not be resolved, so the next call reports the original cause instead of silently retrying a lookup that will fail the same way.
 	resolveFailed error
 }
 
 // resolve lazily builds the REST clients from Application Default Credentials.
-//
-// Lazily, because init() registers this Provider into the global registry at
-// import time, long before anyone has asked to talk to GCP. Building eagerly
-// would make every import of this package depend on resolvable credentials, and
-// would surface a credential problem as an import-time failure rather than at
-// the operation that needed it. Injected clients always win.
 func (p *Provider) resolve(ctx context.Context, needWIF, needIAM bool) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Resolve only what is actually missing for THIS call. Requiring all three
-	// clients before skipping resolution meant a caller who injected the two it
-	// needed still reached for ambient credentials to fill the third — so
-	// whether the call worked depended on the host, which is how the rollback
-	// tests passed on one CI runner and failed on another.
+	// Resolve only what is actually missing for THIS call.
 	if (!needWIF || p.wifClient != nil) && (!needIAM || p.iamClient != nil) {
 		return nil
 	}
@@ -135,7 +123,6 @@ type AzureFederatedTokenInput struct {
 // ExchangeTokenInput contains parameters for STS token exchange.
 type ExchangeTokenInput struct {
 	// Audience is the full resource name of the Workload Identity Pool provider.
-	// Format: //iam.googleapis.com/projects/{project_number}/locations/global/workloadIdentityPools/{pool_id}/providers/{provider_id}
 	Audience string
 	// GrantType is the grant type for token exchange (usually "urn:ietf:params:oauth:grant-type:token-exchange").
 	GrantType string
@@ -144,8 +131,6 @@ type ExchangeTokenInput struct {
 	// SubjectToken is the external identity token (JWT, AWS signature, etc.).
 	SubjectToken string
 	// SubjectTokenType is the type of the subject token.
-	// For OIDC: "urn:ietf:params:oauth:token-type:jwt"
-	// For AWS: "urn:ietf:params:aws:token-type:aws4_request"
 	SubjectTokenType string
 	// Scope is the OAuth scope to request.
 	Scope string
@@ -193,9 +178,7 @@ type IAMClient interface {
 type WorkloadIdentityClient interface {
 	// Pool operations
 	GetWorkloadIdentityPool(ctx context.Context, name string) (*WorkloadIdentityPool, error)
-	// ListWorkloadIdentityPools enumerates the pools under a parent
-	// ("projects/<id>/locations/global"). `audit` needs pools this tool did not
-	// create, since the pre-existing ones are the population worth inspecting.
+	// ListWorkloadIdentityPools enumerates the pools under a parent ("projects/<id>/locations/global").
 	ListWorkloadIdentityPools(ctx context.Context, parent string) ([]*WorkloadIdentityPool, error)
 	// ListWorkloadIdentityPoolProviders enumerates the providers in one pool.
 	ListWorkloadIdentityPoolProviders(ctx context.Context, parent string) ([]*WorkloadIdentityPoolProvider, error)
@@ -335,12 +318,6 @@ func (p *Provider) HasCapability(cap core.Capability) bool {
 }
 
 // requireClients reports whether this provider can talk to GCP at all.
-//
-// resolve() builds the REST clients from Application Default Credentials on
-// first use, so reaching one of these errors now means ADC could not be
-// resolved — not that the feature is unimplemented, which is what it used to
-// mean. The cause from resolve is attached so the operator sees which step of
-// credential discovery failed.
 func (p *Provider) requireClients(ctx context.Context, needWIF, needIAM bool) error {
 	if err := p.resolve(ctx, needWIF, needIAM); err != nil {
 		return core.ErrValidation("could not reach GCP: no usable credentials").
@@ -376,8 +353,7 @@ func (p *Provider) Setup(ctx context.Context, spec core.MechanismSpec, opts core
 }
 
 func (p *Provider) setupWorkloadIdentityPool(ctx context.Context, spec *core.GCPWorkloadIdentityPoolSpec, opts core.SetupOptions) (*core.Outputs, error) {
-	// A dry run plans without touching GCP, so it must not require credentials:
-	// planning is exactly what someone does before they have them.
+	// A dry run plans without touching GCP, so it must not require credentials: planning is exactly what someone does before they have them.
 	if !opts.DryRun {
 		if err := p.requireClients(ctx, true, true); err != nil {
 			return nil, err
@@ -390,16 +366,10 @@ func (p *Provider) setupWorkloadIdentityPool(ctx context.Context, spec *core.GCP
 		spec.ProjectNumber, spec.PoolID)
 	providerName := fmt.Sprintf("%s/providers/%s", poolName, spec.ProviderID)
 
-	// createdPool records that THIS run created the pool. Only that justifies
-	// deleting it again.
+	// createdPool records that THIS run created the pool.
 	createdPool := false
 
 	// Step 1: Create or verify pool.
-	//
-	// "exists" and "could not tell" are different answers, and conflating them is
-	// how the rollback below became destructive: a permission or network failure
-	// on this Get read as "does not exist", so a later failure rolled back by
-	// deleting a pool this run never created.
 	poolExists, poolKnown := false, false
 	if p.wifClient != nil {
 		_, err := p.wifClient.GetWorkloadIdentityPool(ctx, poolName)
@@ -409,8 +379,7 @@ func (p *Provider) setupWorkloadIdentityPool(ctx context.Context, spec *core.GCP
 		case isNotFoundError(err):
 			poolExists, poolKnown = false, true
 		default:
-			// Unknown. Proceed — Create will fail cleanly with AlreadyExists if it
-			// does exist — but never roll it back.
+			// Unknown.
 			poolExists, poolKnown = false, false
 		}
 	}
@@ -494,11 +463,7 @@ func (p *Provider) setupWorkloadIdentityPool(ctx context.Context, spec *core.GCP
 
 			_, err := p.wifClient.CreateWorkloadIdentityPoolProvider(ctx, poolName, spec.ProviderID, providerConfig)
 			if err != nil {
-				// Roll the pool back only if THIS run created it. The old
-				// condition was `!poolExists`, which was also true when the
-				// existence probe merely failed — so a transient error on the Get
-				// plus a provider-create failure deleted a pre-existing
-				// production pool, and every identity federating through it.
+				// Roll the pool back only if THIS run created it.
 				failure := core.ErrPermission("failed to create workload identity provider").
 					WithCause(err).WithProvider(core.GCP)
 				if createdPool {
@@ -577,9 +542,7 @@ func (p *Provider) setupWorkloadIdentityPool(ctx context.Context, spec *core.GCP
 			return nil, core.ErrPermission("failed to get service account IAM policy").WithCause(err)
 		}
 
-		// Add workload identity user binding, scoped as narrowly as the spec
-		// allows. The whole-pool form would let every identity that can federate
-		// through any provider in this pool impersonate the service account.
+		// Add workload identity user binding, scoped as narrowly as the spec allows.
 		principalSet := spec.ImpersonationPrincipal(poolName)
 
 		// Check if binding already exists
@@ -621,9 +584,7 @@ func (p *Provider) setupWorkloadIdentityPool(ctx context.Context, spec *core.GCP
 		"project_number":        spec.ProjectNumber,
 	}
 
-	// Record what the trust was SUPPOSED to be so a later Validate can compare the
-	// live provider against the original intent (a widened attribute condition or a
-	// repointed issuer is otherwise undetectable). All public values.
+	// Record what the trust was SUPPOSED to be so a later Validate can compare the live provider against the original intent (a widened attribute condition or a repointed issuer is otherwise undetectable).
 	if spec.OIDCIssuerURL != "" {
 		resourceIDs["expected_issuer"] = spec.OIDCIssuerURL
 	}
@@ -696,9 +657,7 @@ func (p *Provider) Validate(ctx context.Context, ref core.MechanismRef, opts cor
 			})
 		}
 
-		// Compare the live pool provider against the recorded intent. Also
-		// catches an absent attribute condition, which leaves the pool open to
-		// every identity the issuer can mint.
+		// Compare the live pool provider against the recorded intent.
 		expIssuer := ref.ResourceIDs["expected_issuer"]
 		expAudience := ref.ResourceIDs["expected_audience"]
 		expSubject := firstCELLiteral(ref.ResourceIDs["expected_attribute_condition"])
@@ -707,11 +666,7 @@ func (p *Provider) Validate(ctx context.Context, ref core.MechanismRef, opts cor
 				expIssuer, expAudience, expSubject,
 				core.WithTrustPolicySource(p)))
 
-			// Breadth is scored unconditionally, unlike the match check above:
-			// it needs no recorded intent, only the live policy. A mechanism
-			// created before cloud-auth persisted its intent still has subjects
-			// worth grading, and that is exactly the pre-existing population
-			// most likely to carry an over-broad one.
+			// Breadth is scored unconditionally, unlike the match check above: it needs no recorded intent, only the live policy.
 			validators = append(validators, core.NewSubjectBreadthValidator(p))
 		}
 
@@ -771,15 +726,7 @@ func (p *Provider) deleteWorkloadIdentityPool(ctx context.Context, ref core.Mech
 	return nil
 }
 
-// GenerateAWSRoleAssumptionToken creates an OIDC identity token that can be used
-// to assume an AWS IAM role via AssumeRoleWithWebIdentity.
-//
-// This enables GCP workloads to authenticate to AWS without using long-lived credentials.
-// The returned token is a JWT signed by Google that AWS can validate.
-//
-// Prerequisites:
-//   - AWS IAM role must trust the Google OIDC issuer (https://accounts.google.com)
-//   - The service account must have the iam.serviceAccounts.signJwt permission
+// GenerateAWSRoleAssumptionToken creates an OIDC identity token that can be used to assume an AWS IAM role via AssumeRoleWithWebIdentity.
 func (p *Provider) GenerateAWSRoleAssumptionToken(ctx context.Context, input *AWSRoleAssumptionInput) (*CrossCloudTokenOutput, error) {
 	if p.stsClient == nil {
 		return nil, core.ErrValidation("GCP STS client not configured").
@@ -813,9 +760,7 @@ func (p *Provider) GenerateAWSRoleAssumptionToken(ctx context.Context, input *AW
 			WithResource("service-account", input.ServiceAccountEmail)
 	}
 
-	// Read the real expiry rather than assuming an hour. The comment here used to
-	// say "parse the JWT to get expiration" directly above a hardcoded guess; an
-	// optimistic guess means a caller caches past the token's actual life.
+	// Read the real expiry rather than assuming an hour.
 	expiresAt, err := tokenExpiry(idTokenOutput.Token)
 	if err != nil {
 		return nil, core.ErrInternal("generated identity token has no usable expiry").WithCause(err)
@@ -830,16 +775,7 @@ func (p *Provider) GenerateAWSRoleAssumptionToken(ctx context.Context, input *AW
 	}, nil
 }
 
-// GenerateAzureFederatedToken creates an OIDC identity token that can be used
-// to authenticate with Azure AD via federated credentials.
-//
-// This enables GCP workloads to authenticate to Azure without using long-lived credentials.
-// The returned token is a JWT signed by Google that Azure AD can validate.
-//
-// Prerequisites:
-//   - Azure AD app/managed identity must have a federated credential configured
-//   - The federated credential must trust the Google OIDC issuer (https://accounts.google.com)
-//   - The subject claim must match the service account's unique ID
+// GenerateAzureFederatedToken creates an OIDC identity token that can be used to authenticate with Azure AD via federated credentials.
 func (p *Provider) GenerateAzureFederatedToken(ctx context.Context, input *AzureFederatedTokenInput) (*CrossCloudTokenOutput, error) {
 	if p.stsClient == nil {
 		return nil, core.ErrValidation("GCP STS client not configured").
@@ -879,9 +815,7 @@ func (p *Provider) GenerateAzureFederatedToken(ctx context.Context, input *Azure
 			WithResource("service-account", input.ServiceAccountEmail)
 	}
 
-	// Read the real expiry rather than assuming an hour. The comment here used to
-	// say "parse the JWT to get expiration" directly above a hardcoded guess; an
-	// optimistic guess means a caller caches past the token's actual life.
+	// Read the real expiry rather than assuming an hour.
 	expiresAt, err := tokenExpiry(idTokenOutput.Token)
 	if err != nil {
 		return nil, core.ErrInternal("generated identity token has no usable expiry").WithCause(err)
@@ -897,10 +831,6 @@ func (p *Provider) GenerateAzureFederatedToken(ctx context.Context, input *Azure
 }
 
 // tokenExpiry reads the exp claim from a minted identity token.
-//
-// The signature is not verified here and does not need to be: Google just minted
-// this token for us and the consumer will verify it. We only need to know how
-// long it is good for, so the cache does not outlive it.
 func tokenExpiry(token string) (time.Time, error) {
 	claims, err := jwt.ParseUnverified(token)
 	if err != nil {
@@ -914,15 +844,7 @@ func tokenExpiry(token string) (time.Time, error) {
 
 // Helper functions
 
-// buildCredentialsConfig renders an external_account credential file, the shape
-// GOOGLE_APPLICATION_CREDENTIALS expects.
-//
-// Two bugs here previously. It returned fmt.Sprintf("%v", map) — Go's map
-// printing, not JSON, in randomised key order — while being documented and
-// surfaced as a usable credential file. And the AWS credential_source used bare
-// IMDSv1 URLs with no imdsv2_session_token_url, which fails outright on an
-// IMDSv2-only instance and contradicts internal/imds, whose package doc explains
-// why v1 is never used.
+// buildCredentialsConfig renders an external_account credential file, the shape GOOGLE_APPLICATION_CREDENTIALS expects.
 func buildCredentialsConfig(spec *core.GCPWorkloadIdentityPoolSpec) (string, error) {
 	type awsSource struct {
 		EnvironmentID               string `json:"environment_id"`
@@ -963,8 +885,7 @@ func buildCredentialsConfig(spec *core.GCPWorkloadIdentityPoolSpec) (string, err
 			EnvironmentID: "aws1",
 			RegionURL:     "http://169.254.169.254/latest/meta-data/placement/availability-zone",
 			URL:           "http://169.254.169.254/latest/meta-data/iam/security-credentials",
-			// Without this, the Google client uses IMDSv1 and fails on any
-			// instance configured for IMDSv2 only.
+			// Without this, the Google client uses IMDSv1 and fails on any instance configured for IMDSv2 only.
 			IMDSv2SessionTokenURL:       "http://169.254.169.254/latest/api/token",
 			RegionalCredVerificationURL: "https://sts.{region}.amazonaws.com?Action=GetCallerIdentity&Version=2011-06-15",
 		}
@@ -979,16 +900,7 @@ func buildCredentialsConfig(spec *core.GCPWorkloadIdentityPoolSpec) (string, err
 	return string(out), nil
 }
 
-// isNotFoundError reports whether err means "the resource is absent", as opposed
-// to "we could not tell" — a distinction Setup's create-or-update decision and
-// the rollback both depend on.
-//
-// The typed check comes first. The substring fallback remains because this
-// package's clients are interfaces with no typed errors of their own: unlike AWS,
-// there is no NoSuchEntityException to match on, so a real implementation's
-// errors arrive already stringified. That is a gap in the client interface rather
-// than something this function can fix, and it is why the typed check is tried
-// first and the string match is last.
+// isNotFoundError reports whether err means "the resource is absent", as opposed to "we could not tell" — a distinction Setup's create-or-update decision and the rollback both depend on.
 func isNotFoundError(err error) bool {
 	if err == nil {
 		return false
@@ -1096,11 +1008,7 @@ func (v *serviceAccountExistsValidator) Validate(ctx context.Context, ref core.M
 }
 
 func init() {
-	// Register with default registry
-	// Panic rather than discard: Register fails only on a duplicate name, which
-	// is a programming error, and the alternative is a provider that silently
-	// does not exist. Every command that reaches for it would then report
-	// "provider not found" and send the reader looking in the wrong place.
+	// Register with default registry Panic rather than discard: Register fails only on a duplicate name, which is a programming error, and the alternative is a provider that silently does not exist.
 	if err := core.Register(New()); err != nil {
 		panic("cloud-auth/provider/gcp: registering the GCP provider: " + err.Error())
 	}

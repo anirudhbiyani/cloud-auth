@@ -8,11 +8,9 @@ import (
 	"time"
 )
 
-// STS and IAM Credentials operations: exchanging an external proof for a
-// federated token, and minting tokens as a service account.
+// STS and IAM Credentials operations: exchanging an external proof for a federated token, and minting tokens as a service account.
 
-// errorsAs is errors.As, wrapped so the other files in this package can use it
-// without each importing errors for one call.
+// errorsAs is errors.As, wrapped so the other files in this package can use it without each importing errors for one call.
 func errorsAs(err error, target any) bool { return errors.As(err, target) }
 
 // ExchangeToken trades an external identity token for a federated access token.
@@ -48,8 +46,7 @@ func (c *restClient) ExchangeToken(ctx context.Context, input *ExchangeTokenInpu
 		TokenType       string `json:"token_type"`
 		ExpiresIn       int    `json:"expires_in"`
 	}
-	// The STS token endpoint is unauthenticated — the subject token IS the
-	// credential — so this deliberately bypasses c.do and its bearer header.
+	// The STS token endpoint is unauthenticated — the subject token IS the credential — so this deliberately bypasses c.do and its bearer header.
 	if err := c.postUnauthenticated(ctx, c.stsURL+"/token", body, &out); err != nil {
 		return nil, err
 	}
@@ -104,8 +101,7 @@ func (c *restClient) GenerateIDToken(ctx context.Context, input *GenerateIDToken
 		return nil, fmt.Errorf("gcp: service account email is required")
 	}
 	if input.Audience == "" {
-		// An ID token with no audience is a bearer proof no recipient can
-		// verify was meant for them.
+		// An ID token with no audience is a bearer proof no recipient can verify was meant for them.
 		return nil, fmt.Errorf("gcp: audience is required for an identity token")
 	}
 

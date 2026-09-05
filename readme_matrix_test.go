@@ -7,16 +7,9 @@ import (
 	"testing"
 )
 
-// The Runtime Federation Matrix in the README claimed three federation paths the
-// code deliberately refuses on security grounds — including Azure managed
-// identity, where the refusal exists because forwarding an Entra access token to
-// a third-party STS discloses a working Azure credential and still fails.
-//
-// A ✅ against a refusal is worse than a missing row: it tells the reader the
-// security control is a bug. This test pins the matrix to the code.
+// The Runtime Federation Matrix in the README claimed three federation paths the code deliberately refuses on security grounds — including Azure managed identity, where the refusal exists because forwarding an Entra access token to a third-party STS discloses a working Azure credential and still fails.
 
-// sourceRuntimes is the federatable/non-federatable split, read from the source
-// providers. Keep in step with source/aws.go, source/azure.go, source/gcp.go.
+// sourceRuntimes is the federatable/non-federatable split, read from the source providers.
 var sourceRuntimes = map[string]bool{
 	// AWS — source/aws.go:134,139
 	"ec2": true, "ecs": true, "lambda": true, "eks-irsa": true,
@@ -94,16 +87,11 @@ func TestREADMERuntimeMatrixMatchesTheCode(t *testing.T) {
 	}
 }
 
-// Only AWS has a client that reaches its cloud. The control-plane matrix must not
-// promise the other four.
+// Only AWS has a client that reaches its cloud.
 func TestREADMEControlPlaneMatrixDoesNotOverstate(t *testing.T) {
 	section := readmeSection(t, "### 🌐 Multi-Cloud Support")
 
-	// Providers that still have no concrete client. Remove a name from this list
-	// only in the same commit that adds its client.
-	//
-	// Empty: every remaining provider is wired. The loop stays because the next
-	// provider added will start out unwired, and this is where it goes.
+	// Providers that still have no concrete client.
 	for _, provider := range []string{} {
 		t.Run(provider, func(t *testing.T) {
 			var row string
@@ -116,8 +104,7 @@ func TestREADMEControlPlaneMatrixDoesNotOverstate(t *testing.T) {
 			if row == "" {
 				t.Fatalf("no %s row in the control-plane matrix", provider)
 			}
-			// The dry-run column legitimately carries a ✅; the lifecycle
-			// columns must not, because there is no client behind them.
+			// The dry-run column legitimately carries a ✅; the lifecycle columns must not, because there is no client behind them.
 			cols := strings.Split(row, "|")
 			for i, header := range []string{"Setup", "Validate", "Delete"} {
 				cell := strings.TrimSpace(cols[2+i])
@@ -130,8 +117,7 @@ func TestREADMEControlPlaneMatrixDoesNotOverstate(t *testing.T) {
 	}
 }
 
-// The converse: a provider that HAS a client must not still be marked plan-only,
-// or the README understates what works and nobody uses it.
+// The converse: a provider that HAS a client must not still be marked plan-only, or the README understates what works and nobody uses it.
 func TestREADMEControlPlaneMatrixCreditsWiredProviders(t *testing.T) {
 	section := readmeSection(t, "### 🌐 Multi-Cloud Support")
 
@@ -154,11 +140,7 @@ func TestREADMEControlPlaneMatrixCreditsWiredProviders(t *testing.T) {
 	}
 }
 
-// A wildcard subject in the headline examples is the first thing a new user
-// copies, and nothing at setup warns about it today.
-//
-// Only fenced code blocks are checked. Prose is allowed — and required — to name
-// the pattern in order to warn about it.
+// A wildcard subject in the headline examples is the first thing a new user copies, and nothing at setup warns about it today.
 func TestREADMEExamplesPinTheSubject(t *testing.T) {
 	raw, err := os.ReadFile("README.md")
 	if err != nil {

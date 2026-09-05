@@ -18,25 +18,16 @@ type Provider struct {
 	armClient   ARMClient
 	tokenClient TokenClient
 
-	// resolveFailed caches a credential-resolution failure so the second call
-	// reports the original cause rather than silently retrying a lookup that
-	// will fail the same way.
+	// resolveFailed caches a credential-resolution failure so the second call reports the original cause rather than silently retrying a lookup that will fail the same way.
 	resolveFailed error
 }
 
 // resolve lazily builds the Graph and ARM clients from DefaultAzureCredential.
-//
-// Lazily, because init() registers this Provider into the global registry at
-// import time, long before anyone has asked to talk to Azure. Building eagerly
-// would make every import of this package depend on resolvable credentials.
-// Injected clients always win.
 func (p *Provider) resolve(ctx context.Context, needGraph, needARM bool) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Resolve only what THIS call needs. Requiring all three before skipping
-	// meant a caller who injected the two it uses still reached for ambient
-	// credentials to fill the third, making the outcome depend on the host.
+	// Resolve only what THIS call needs.
 	if (!needGraph || p.graphClient != nil) && (!needARM || p.armClient != nil) {
 		return nil
 	}
@@ -137,7 +128,6 @@ type ExchangeTokenInput struct {
 	// FederatedToken is the external identity token (JWT) from the federated IdP.
 	FederatedToken string
 	// Scope is the resource/scope to request access to.
-	// e.g., "https://management.azure.com/.default" or "https://graph.microsoft.com/.default"
 	Scope string
 	// ClientAssertion is an alternative to FederatedToken for client credential flow.
 	ClientAssertion string
@@ -189,9 +179,6 @@ type ARMClient interface {
 	ListRoleAssignments(ctx context.Context, scope, principalID string) ([]*RoleAssignment, error)
 
 	// Enumeration, for `cloud-auth audit`.
-	//
-	// ARM has no tenant-wide list of user-assigned identities — they are
-	// subscription-scoped — so a subscription has to be named.
 	ListManagedIdentities(ctx context.Context, subscriptionID string) ([]*ManagedIdentity, error)
 	// ListManagedIdentityFederatedCredentials lists one identity's credentials.
 	ListManagedIdentityFederatedCredentials(ctx context.Context, subscriptionID, resourceGroup, identityName string) ([]*FederatedIdentityCredential, error)
@@ -309,11 +296,6 @@ func (p *Provider) HasCapability(cap core.Capability) bool {
 }
 
 // requireClients reports whether this provider can talk to Azure at all.
-//
-// The clients are injected, so an unconfigured Provider is the one init()
-// registers. Setup's nil-check only covered the create-application branch: the
-// path that fetched an existing application by ID, and the federated-credential
-// call after it, dereferenced the nil field and panicked.
 func (p *Provider) requireClients(ctx context.Context, needGraph, needARM bool) error {
 	if err := p.resolve(ctx, needGraph, needARM); err != nil {
 		return core.ErrValidation("could not reach Azure: no usable credentials").
@@ -375,11 +357,7 @@ func (p *Provider) setupAppRegistrationFederated(ctx context.Context, spec *core
 	// Step 1: Get or create application
 	if spec.ApplicationID != "" {
 		if p.graphClient == nil {
-			// The previous fallback assigned spec.ApplicationID to BOTH ids. In
-			// Graph those are different identifiers — appId is the client id,
-			// id is the object id — and every federated-credential call needs the
-			// object id. Guessing one from the other targeted the wrong resource,
-			// so resolve it or say we cannot.
+			// The previous fallback assigned spec.ApplicationID to BOTH ids.
 			return nil, core.ErrValidation("cannot resolve the application's object id without a Graph client").
 				WithProvider(core.Azure).
 				WithResource("application", spec.ApplicationID).
@@ -488,12 +466,6 @@ func (p *Provider) setupAppRegistrationFederated(ctx context.Context, spec *core
 	}
 
 	// Step 4: Create role assignments if specified.
-	//
-	// Failures are collected rather than printed: the identity exists and can
-	// authenticate, but without these it has none of the permissions the spec
-	// asked for, which surfaces later as a confusing authorization error far from
-	// its cause. Reported through Outputs.Instructions so the caller learns about
-	// it without losing the resource identifiers it needs to finish or clean up.
 	var roleAssignmentErrs []error
 	for _, ra := range spec.RoleAssignments {
 		action := core.PlannedAction{
@@ -546,12 +518,7 @@ func (p *Provider) setupAppRegistrationFederated(ctx context.Context, spec *core
 	}, nil
 }
 
-// roleAssignmentWarnings renders collected role-assignment failures as
-// caller-visible instructions.
-//
-// Not returned as an error: the federated credential itself was created, and
-// failing the whole call would discard the resource identifiers the caller needs
-// either to finish the job by hand or to clean up.
+// roleAssignmentWarnings renders collected role-assignment failures as caller-visible instructions.
 func roleAssignmentWarnings(errs []error) []string {
 	if len(errs) == 0 {
 		return nil
@@ -656,8 +623,7 @@ func (p *Provider) setupManagedIdentityFederated(ctx context.Context, spec *core
 		resourceIDs["federated_credential_id"] = cred.ID
 	}
 
-	// Step 3: Create role assignments
-	// Collected, not printed — see roleAssignmentWarnings.
+	// Step 3: Create role assignments Collected, not printed — see roleAssignmentWarnings.
 	var roleAssignmentErrs []error
 	for _, ra := range spec.RoleAssignments {
 		action := core.PlannedAction{
@@ -735,9 +701,7 @@ func (p *Provider) Validate(ctx context.Context, ref core.MechanismRef, opts cor
 			})
 		}
 
-		// Compare the live federated identity credential against the recorded
-		// intent. Entra's matching is case-sensitive and exact, so a case-only
-		// drift is reported explicitly rather than as a generic mismatch.
+		// Compare the live federated identity credential against the recorded intent.
 		expIssuer := ref.ResourceIDs["expected_issuer"]
 		expSubject := ref.ResourceIDs["expected_subject"]
 		expAudience := ref.ResourceIDs["expected_audience"]
@@ -746,11 +710,7 @@ func (p *Provider) Validate(ctx context.Context, ref core.MechanismRef, opts cor
 				expIssuer, expAudience, expSubject,
 				core.WithTrustPolicySource(p)))
 
-			// Breadth is scored unconditionally, unlike the match check above:
-			// it needs no recorded intent, only the live policy. A mechanism
-			// created before cloud-auth persisted its intent still has subjects
-			// worth grading, and that is exactly the pre-existing population
-			// most likely to carry an over-broad one.
+			// Breadth is scored unconditionally, unlike the match check above: it needs no recorded intent, only the live policy.
 			validators = append(validators, core.NewSubjectBreadthValidator(p))
 		}
 	}
@@ -820,20 +780,9 @@ func (p *Provider) Delete(ctx context.Context, ref core.MechanismRef, opts core.
 	return nil
 }
 
-// GenerateAWSRoleAssumptionToken creates an OIDC identity token that can be used
-// to assume an AWS IAM role via AssumeRoleWithWebIdentity.
-//
-// This enables Azure workloads to authenticate to AWS without using long-lived credentials.
-// The token is obtained from Azure AD and can be validated by AWS.
-//
-// Prerequisites:
-//   - AWS IAM role must trust the Azure AD OIDC issuer
-//     (https://login.microsoftonline.com/{tenant_id}/v2.0 or https://sts.windows.net/{tenant_id}/)
-//   - The Azure AD app must be configured with the correct audience for AWS
+// GenerateAWSRoleAssumptionToken creates an OIDC identity token that can be used to assume an AWS IAM role via AssumeRoleWithWebIdentity.
 func (p *Provider) GenerateAWSRoleAssumptionToken(ctx context.Context, input *AWSRoleAssumptionInput) (*CrossCloudTokenOutput, error) {
-	// Checked before the client, because the field validation below
-	// dereferences it: a nil input is a caller bug, but panicking takes the
-	// process down instead of returning the error the caller can act on.
+	// Checked before the client, because the field validation below dereferences it: a nil input is a caller bug, but panicking takes the process down instead of returning the error the caller can act on.
 	if input == nil {
 		return nil, core.ErrValidation("input is required").WithProvider(core.Azure)
 	}
@@ -854,8 +803,7 @@ func (p *Provider) GenerateAWSRoleAssumptionToken(ctx context.Context, input *AW
 		return nil, core.ErrValidation("RoleARN is required").WithProvider(core.Azure)
 	}
 
-	// For AWS, we need to get a token with AWS STS as the audience
-	// AWS expects the audience to be "sts.amazonaws.com"
+	// For AWS, we need to get a token with AWS STS as the audience AWS expects the audience to be "sts.amazonaws.com"
 	audience := "sts.amazonaws.com"
 
 	var token string
@@ -878,9 +826,7 @@ func (p *Provider) GenerateAWSRoleAssumptionToken(ctx context.Context, input *AW
 		token = miTokenOutput.AccessToken
 		expiresAt = miTokenOutput.ExpiresOn
 	} else {
-		// For app registrations, we would need to use a different flow
-		// Since we don't have the app secret, we need to be running in a context
-		// where we can get an identity token (e.g., Azure Functions, AKS with workload identity)
+		// For app registrations, we would need to use a different flow Since we don't have the app secret, we need to be running in a context where we can get an identity token (e.g., Azure Functions, AKS with workload identity)
 		return nil, core.ErrValidation("App registration token generation requires running in an Azure environment with workload identity").
 			WithProvider(core.Azure).
 			WithDetail("hint", "Set UseManagedIdentity=true when running on Azure, or use workload identity federation")
@@ -895,19 +841,9 @@ func (p *Provider) GenerateAWSRoleAssumptionToken(ctx context.Context, input *AW
 	}, nil
 }
 
-// GenerateGCPWorkloadIdentityToken creates an OIDC identity token that can be used
-// with GCP Workload Identity Federation.
-//
-// This enables Azure workloads to authenticate to GCP without using long-lived credentials.
-// The token is obtained from Azure AD and can be validated by GCP.
-//
-// Prerequisites:
-//   - GCP Workload Identity Pool must have a provider configured to trust Azure AD
-//   - The OIDC provider should be configured with issuer: https://login.microsoftonline.com/{tenant_id}/v2.0
+// GenerateGCPWorkloadIdentityToken creates an OIDC identity token that can be used with GCP Workload Identity Federation.
 func (p *Provider) GenerateGCPWorkloadIdentityToken(ctx context.Context, input *GCPWorkloadIdentityInput) (*CrossCloudTokenOutput, error) {
-	// Checked before the client, because the field validation below
-	// dereferences it: a nil input is a caller bug, but panicking takes the
-	// process down instead of returning the error the caller can act on.
+	// Checked before the client, because the field validation below dereferences it: a nil input is a caller bug, but panicking takes the process down instead of returning the error the caller can act on.
 	if input == nil {
 		return nil, core.ErrValidation("input is required").WithProvider(core.Azure)
 	}
@@ -975,13 +911,7 @@ func (p *Provider) GenerateGCPWorkloadIdentityToken(ctx context.Context, input *
 
 // Helper functions
 
-// isNotFoundError reports whether err means "the resource is absent", as opposed
-// to "we could not tell" — a distinction Setup's create-or-update decision and
-// the delete path both depend on. A denied read is NOT evidence of absence.
-//
-// Both checks are typed. There is deliberately no substring fallback: the client
-// in this package returns *apiError carrying Graph's own code, so absence never
-// has to be recovered by matching English.
+// isNotFoundError reports whether err means "the resource is absent", as opposed to "we could not tell" — a distinction Setup's create-or-update decision and the delete path both depend on.
 func isNotFoundError(err error) bool {
 	if err == nil {
 		return false
@@ -1015,11 +945,7 @@ func (v *appExistsValidator) Validate(ctx context.Context, ref core.MechanismRef
 		check.Remediation = "Create the application or run setup again"
 		return check
 	}
-	// A nil result with a NIL error is a real answer shape — a 200 with an
-	// empty body, or a client returning a zero value — and dereferencing it
-	// panics inside a validator, which is the one place that must not: a
-	// validate run over several mechanisms would take the whole command down
-	// rather than report one bad check. provider/gcp guards this; this did not.
+	// A nil result with a NIL error is a real answer shape — a 200 with an empty body, or a client returning a zero value — and dereferencing it panics inside a validator, which is the one place that must not: a validate run over several mechanisms would take the whole command down rather than report one bad check.
 	if app == nil {
 		check.Status = core.CheckStatusSkipped
 		check.Message = "the application was NOT verified: the Graph client returned no " +
@@ -1112,11 +1038,7 @@ func (v *managedIdentityExistsValidator) Validate(ctx context.Context, ref core.
 }
 
 func init() {
-	// Register with default registry
-	// Panic rather than discard: Register fails only on a duplicate name, which
-	// is a programming error, and the alternative is a provider that silently
-	// does not exist. Every command that reaches for it would then report
-	// "provider not found" and send the reader looking in the wrong place.
+	// Register with default registry Panic rather than discard: Register fails only on a duplicate name, which is a programming error, and the alternative is a provider that silently does not exist.
 	if err := core.Register(New()); err != nil {
 		panic("cloud-auth/provider/azure: registering the Azure provider: " + err.Error())
 	}

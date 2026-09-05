@@ -6,12 +6,7 @@ import (
 	"testing"
 )
 
-// This package is a security control with five regexes, and it had no direct
-// tests — only indirect coverage through target/redaction_test.go and the
-// verifier. Both halves of its contract matter and pull against each other: it
-// must remove credential material, and it must leave identity metadata readable,
-// because that is what makes an error actionable. A redactor that eats the role
-// ARN has traded a leak for an unusable message.
+// This package is a security control with five regexes, and it had no direct tests — only indirect coverage through target/redaction_test.go and the verifier.
 
 func TestStringRedactsCredentialShapes(t *testing.T) {
 	for _, tc := range []struct {
@@ -78,9 +73,7 @@ func TestStringRedactsCredentialShapes(t *testing.T) {
 	}
 }
 
-// The half that is easy to get wrong. Every value here is identity metadata that
-// an operator needs in order to act on the error, and each is shaped enough like
-// a secret that a slightly greedier pattern would swallow it.
+// The half that is easy to get wrong.
 func TestStringPreservesIdentityMetadata(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -142,9 +135,7 @@ func TestTruncate(t *testing.T) {
 	}
 }
 
-// Body is redaction then a length cap, in that order. The order matters: capping
-// first could cut a secret in half and leave the front of it in the output,
-// below the length its pattern needs to match.
+// Body is redaction then a length cap, in that order.
 func TestBodyRedactsBeforeTruncating(t *testing.T) {
 	const secret = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJhIn0.c2lnbmF0dXJlLW1hdGVyaWFsLWhlcmU"
 	out := Body("upstream said: "+secret+" and then some more text", 40)
@@ -172,8 +163,7 @@ func TestScrubberRedactsRegisteredLiterals(t *testing.T) {
 	}
 }
 
-// Registering a very short "secret" would turn redaction into a censor that
-// mangles ordinary words.
+// Registering a very short "secret" would turn redaction into a censor that mangles ordinary words.
 func TestScrubberIgnoresShortSecrets(t *testing.T) {
 	s := NewScrubber()
 	s.AddSecret("abc")
@@ -185,8 +175,7 @@ func TestScrubberIgnoresShortSecrets(t *testing.T) {
 	}
 }
 
-// Longest-first ordering: a secret that contains another must be redacted whole,
-// or the outer one is left as [REDACTED]-plus-its-own-tail.
+// Longest-first ordering: a secret that contains another must be redacted whole, or the outer one is left as [REDACTED]-plus-its-own-tail.
 func TestScrubberRedactsOverlappingSecretsWhole(t *testing.T) {
 	s := NewScrubber()
 	s.AddSecret("inner-secret-value")
@@ -237,12 +226,7 @@ func TestScrubBytes(t *testing.T) {
 	}
 }
 
-// The doc comment says safe for concurrent use, so that has to be true. It was
-// not: Scrub copied the slice HEADER and released the lock, then ranged over the
-// same backing array that AddSecret sorts in place. Under -race this is a
-// straightforward report; in production it is worse than a crash, because
-// re-ordering the array mid-iteration can move a literal past the cursor and a
-// registered secret then reaches the output unredacted.
+// The doc comment says safe for concurrent use, so that has to be true.
 func TestScrubberIsConcurrencySafe(t *testing.T) {
 	s := NewScrubber()
 	var wg sync.WaitGroup
@@ -260,13 +244,8 @@ func TestScrubberIsConcurrencySafe(t *testing.T) {
 	wg.Wait()
 }
 
-// The package doc says it has no dependencies, deliberately, because it is
-// imported by the packages that format errors — and it must never be the reason
-// one of them gains a dependency edge. test/architecture enforces this too; this
-// is the local statement of the same rule.
+// The package doc says it has no dependencies, deliberately, because it is imported by the packages that format errors — and it must never be the reason one of them gains a dependency edge.
 func TestNoDependencies(t *testing.T) {
-	// If this file's own imports ever need a first-party package, that is the
-	// signal. Nothing to assert at runtime beyond the fact that this package
-	// compiles with only the standard library.
+	// If this file's own imports ever need a first-party package, that is the signal.
 	t.Log("internal/redact imports only regexp, sort, strings and sync")
 }

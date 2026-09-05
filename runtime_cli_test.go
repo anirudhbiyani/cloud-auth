@@ -14,14 +14,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// These tests exist because `cloud-auth doctor` — the tool's most common
-// invocation — shipped a segfault. core.Target is an interface, targetFlags
-// returned an untyped nil when --to was absent, and cmdDoctor called
-// target.Cloud() on it. A nil interface has no method table.
-//
-// The root package had no test for cmdDoctor, cmdExchange, cmdExec or
-// resolveRuntimeConfig at all, which is why nothing caught it. The matrix below
-// is the flag/config grid those four functions actually have to survive.
+// These tests exist because `cloud-auth doctor` — the tool's most common invocation — shipped a segfault.
 
 // writeConfig writes a minimal valid federation config and returns its path.
 func writeConfig(t *testing.T) string {
@@ -39,8 +32,7 @@ targets:
 	return path
 }
 
-// resolveRuntimeConfig is where the config-driven flow panicked: it reached
-// flagTarget.Cloud() holding nil whenever --config was given without --to.
+// resolveRuntimeConfig is where the config-driven flow panicked: it reached flagTarget.Cloud() holding nil whenever --config was given without --to.
 func TestResolveRuntimeConfigMatrix(t *testing.T) {
 	cfg := writeConfig(t)
 	flagAWS := core.AWSTarget{RoleARN: "arn:aws:iam::999999999999:role/from-flag"}
@@ -100,9 +92,7 @@ func TestResolveRuntimeConfigMatrix(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			target, _, err := resolveRuntimeConfig(tc.flagTarget, tc.configPath, tc.targetName)
 
-			// The contract that stops the panic: a target is returned on every
-			// path, including every error path, so the caller can inspect it
-			// before deciding whether the error mattered.
+			// The contract that stops the panic: a target is returned on every path, including every error path, so the caller can inspect it before deciding whether the error mattered.
 			if target == nil {
 				t.Fatal("resolveRuntimeConfig returned a nil core.Target; any method call on it panics")
 			}
@@ -127,9 +117,7 @@ func TestResolveRuntimeConfigMatrix(t *testing.T) {
 	}
 }
 
-// The fix is at the source: targetFlags must never hand back an untyped nil,
-// whatever the caller passed. Guarding the consumers instead would leave the
-// next consumer to rediscover this.
+// The fix is at the source: targetFlags must never hand back an untyped nil, whatever the caller passed.
 func TestTargetFlagsNeverReturnsNilTarget(t *testing.T) {
 	for _, args := range [][]string{
 		{},
@@ -169,17 +157,14 @@ func TestNoTargetRefusesValidation(t *testing.T) {
 	}
 }
 
-// The reported crash, end to end: `cloud-auth doctor` with no arguments. It is a
-// detection-only report and must exit cleanly whether or not this machine is on
-// a supported cloud.
+// The reported crash, end to end: `cloud-auth doctor` with no arguments.
 func TestDoctorWithNoArgumentsDoesNotPanic(t *testing.T) {
 	if err := cmdDoctor(context.Background(), nil); err != nil {
 		t.Fatalf("cmdDoctor with no arguments: %v", err)
 	}
 }
 
-// The commands that genuinely require a target must say so, before any network
-// call and without dereferencing a nil interface.
+// The commands that genuinely require a target must say so, before any network call and without dereferencing a nil interface.
 func TestRuntimeCommandsRefuseAMissingTarget(t *testing.T) {
 	ctx := context.Background()
 	cfg := writeConfig(t)
@@ -212,8 +197,7 @@ func TestRuntimeCommandsRefuseAMissingTarget(t *testing.T) {
 	}
 }
 
-// One layer down: preflight is a plain struct built by hand, so an unset target
-// field must not panic the pure diagnosis path either.
+// One layer down: preflight is a plain struct built by hand, so an unset target field must not panic the pure diagnosis path either.
 func TestDiagnoseToleratesAnUnsetTarget(t *testing.T) {
 	p := preflight{
 		runtime:   &core.Runtime{Cloud: core.AWS, SubRuntime: "ec2", Federatable: true},
@@ -227,8 +211,7 @@ func TestDiagnoseToleratesAnUnsetTarget(t *testing.T) {
 	}
 }
 
-// newTestFlagSet returns a flag set that reports parse errors instead of calling
-// os.Exit, which the production ExitOnError sets would do inside a test binary.
+// newTestFlagSet returns a flag set that reports parse errors instead of calling os.Exit, which the production ExitOnError sets would do inside a test binary.
 func newTestFlagSet(t *testing.T) *flag.FlagSet {
 	t.Helper()
 	fs := flag.NewFlagSet(t.Name(), flag.ContinueOnError)

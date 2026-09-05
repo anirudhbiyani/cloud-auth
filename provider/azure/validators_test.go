@@ -9,10 +9,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// The three existence validators had no tests. They decide whether `validate`
-// reports a mechanism as sound, so a validator that passes wrongly is worse
-// than no validator: it turns "unverified" into "verified", which is precisely
-// the vacuous pass this project's own nopanic tests guard against elsewhere.
+// The three existence validators had no tests.
 
 type validatorGraph struct {
 	GraphClient
@@ -65,8 +62,7 @@ func TestAppExistsValidator(t *testing.T) {
 		if check.Status != core.CheckStatusFailed {
 			t.Fatalf("status = %v, want failed", check.Status)
 		}
-		// Critical, and the severity is what decides whether the report is
-		// invalid: only Error and above count.
+		// Critical, and the severity is what decides whether the report is invalid: only Error and above count.
 		if check.Severity != core.SeverityCritical {
 			t.Errorf("severity = %v, want critical — a missing application means nothing "+
 				"can authenticate", check.Severity)
@@ -95,8 +91,7 @@ func TestFederatedCredentialExistsValidator(t *testing.T) {
 		if check.Status != core.CheckStatusPassed {
 			t.Fatalf("status = %v", check.Status)
 		}
-		// The issuer and subject go into evidence, which is what makes a
-		// passing check reviewable rather than merely green.
+		// The issuer and subject go into evidence, which is what makes a passing check reviewable rather than merely green.
 		if check.Evidence["issuer"] == nil || check.Evidence["subject"] == nil {
 			t.Errorf("evidence = %v, want the issuer and subject recorded", check.Evidence)
 		}
@@ -145,8 +140,7 @@ func TestManagedIdentityExistsValidator(t *testing.T) {
 	})
 }
 
-// Every validator must identify itself, or a report's checks cannot be told
-// apart and --format json is unparseable by check.
+// Every validator must identify itself, or a report's checks cannot be told apart and --format json is unparseable by check.
 func TestValidatorIdentityIsPopulated(t *testing.T) {
 	validators := []core.Validator{
 		&appExistsValidator{client: validatorGraph{}},
@@ -165,8 +159,7 @@ func TestValidatorIdentityIsPopulated(t *testing.T) {
 		}
 		seen[v.ID()] = true
 
-		// And the check it produces must carry that identity, not just the
-		// validator.
+		// And the check it produces must carry that identity, not just the validator.
 		check := v.Validate(context.Background(), core.MechanismRef{ID: "r"})
 		if check.ID != v.ID() {
 			t.Errorf("%T produced a check with id %q, want %q", v, check.ID, v.ID())
@@ -174,8 +167,7 @@ func TestValidatorIdentityIsPopulated(t *testing.T) {
 	}
 }
 
-// Capabilities is what `cloud-auth providers` prints and what the registry
-// filters on, so an empty or inconsistent set makes the provider invisible.
+// Capabilities is what `cloud-auth providers` prints and what the registry filters on, so an empty or inconsistent set makes the provider invisible.
 func TestCapabilities(t *testing.T) {
 	p := New()
 	caps := p.Capabilities()
@@ -195,8 +187,7 @@ func TestCapabilities(t *testing.T) {
 		t.Error("HasCapability returned true for a capability that does not exist")
 	}
 
-	// Every declared capability must answer true, or the two disagree about
-	// the same provider.
+	// Every declared capability must answer true, or the two disagree about the same provider.
 	for _, c := range caps {
 		if !p.HasCapability(c) {
 			t.Errorf("Capabilities lists %v but HasCapability says false", c)
@@ -204,8 +195,7 @@ func TestCapabilities(t *testing.T) {
 	}
 }
 
-// Same-cloud token generation is out of scope by design — the PRD lists it as a
-// non-goal — and the refusal must say so rather than fail obscurely.
+// Same-cloud token generation is out of scope by design — the PRD lists it as a non-goal — and the refusal must say so rather than fail obscurely.
 func TestSameCloudTokenGenerationIsRefused(t *testing.T) {
 	p := New()
 	ctx := context.Background()
@@ -230,14 +220,7 @@ func TestSameCloudTokenGenerationIsRefused(t *testing.T) {
 	}
 }
 
-// A client returning a nil object with a NIL error is a real answer shape — a
-// 200 with an empty body, or a client returning a zero value — and every one of
-// these validators dereferenced it. That panics inside a validator, which is
-// the one place it must not: a validate over several mechanisms would take the
-// whole command down rather than report one bad check.
-//
-// Skipped rather than passed, and skipped rather than failed: nothing was
-// verified, and "we could not tell" is neither "it is there" nor "it is gone".
+// A client returning a nil object with a NIL error is a real answer shape — a 200 with an empty body, or a client returning a zero value — and every one of these validators dereferenced it.
 func TestValidatorsSurviveANilResultWithNoError(t *testing.T) {
 	ref := core.MechanismRef{ID: "r"}
 
@@ -266,9 +249,6 @@ func TestValidatorsSurviveANilResultWithNoError(t *testing.T) {
 }
 
 // Validate assembles the validator set from what the ref actually records.
-// The assembly is the logic worth pinning: a ref missing its expected_* keys
-// must not silently drop the trust-match check and still report a green run —
-// that is the vacuous pass this project treats as worse than no check at all.
 func TestValidateBuildsItsChecksFromTheRef(t *testing.T) {
 	p := New(
 		WithGraphClient(validatorGraph{
@@ -286,8 +266,7 @@ func TestValidateBuildsItsChecksFromTheRef(t *testing.T) {
 		{
 			name: "application only",
 			ids:  map[string]string{"app_object_id": "obj-1"},
-			// No credential id recorded, so no credential check — and the report
-			// must not imply the credential was verified.
+			// No credential id recorded, so no credential check — and the report must not imply the credential was verified.
 			names: []string{"Application Exists"},
 		},
 		{
@@ -314,8 +293,7 @@ func TestValidateBuildsItsChecksFromTheRef(t *testing.T) {
 			names: []string{"Application Exists", "Trust Policy Match", "Subject Breadth"},
 		},
 		{
-			// A type this provider does not own contributes no validators. An
-			// empty report is honest; a passed one would not be.
+			// A type this provider does not own contributes no validators.
 			name:  "unknown mechanism type",
 			ids:   map[string]string{"app_object_id": "obj-1"},
 			names: nil,

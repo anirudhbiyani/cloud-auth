@@ -20,10 +20,7 @@ import (
 // DefaultAzureIMDSURL is the Azure Instance Metadata Service base.
 const DefaultAzureIMDSURL = "http://169.254.169.254"
 
-// Azure is the Source Identity Provider for Azure VMs/VMSS and AKS Workload
-// Identity. On AKS Workload Identity it uses the projected OIDC token (the
-// portable, cross-cloud-federatable proof); on a VM it uses the Entra token
-// from IMDS.
+// Azure is the Source Identity Provider for Azure VMs/VMSS and AKS Workload Identity.
 type Azure struct {
 	imdsURL    string
 	httpClient *http.Client
@@ -39,10 +36,7 @@ func WithAzureIMDSURL(u string) AzureOption          { return func(a *Azure) { a
 func WithAzureHTTPClient(h *http.Client) AzureOption { return func(a *Azure) { a.httpClient = h } }
 func WithAzureEnv(f func(string) string) AzureOption { return func(a *Azure) { a.getenv = f } }
 
-// WithAzureK8sTokenClient injects a Kubernetes TokenRequest client used by the
-// AKS Workload Identity mint path to dynamically re-mint a projected token for a
-// requested audience. When unset, the client is derived from the in-cluster
-// environment.
+// WithAzureK8sTokenClient injects a Kubernetes TokenRequest client used by the AKS Workload Identity mint path to dynamically re-mint a projected token for a requested audience.
 func WithAzureK8sTokenClient(c k8sTokenMinter) AzureOption {
 	return func(a *Azure) { a.k8sClient = c }
 }
@@ -61,16 +55,12 @@ func NewAzure(opts ...AzureOption) *Azure {
 	return a
 }
 
-// usesWorkloadIdentity reports whether the AKS Workload Identity projected
-// token is available (the preferred cross-cloud source path).
+// usesWorkloadIdentity reports whether the AKS Workload Identity projected token is available (the preferred cross-cloud source path).
 func (a *Azure) usesWorkloadIdentity() bool {
 	return a.getenv("AZURE_FEDERATED_TOKEN_FILE") != ""
 }
 
-// managedIdentitySubRuntime reports the App Service / Container Apps sub-runtime
-// when the managed-identity token endpoint (IDENTITY_ENDPOINT + IDENTITY_HEADER)
-// is present, or "" otherwise. Container Apps and App Service both expose that
-// endpoint instead of IMDS.
+// managedIdentitySubRuntime reports the App Service / Container Apps sub-runtime when the managed-identity token endpoint (IDENTITY_ENDPOINT + IDENTITY_HEADER) is present, or "" otherwise.
 func (a *Azure) managedIdentitySubRuntime() string {
 	if a.getenv("IDENTITY_ENDPOINT") == "" || a.getenv("IDENTITY_HEADER") == "" {
 		return ""
@@ -107,16 +97,7 @@ func (a *Azure) imdsGet(ctx context.Context, path, rawQuery string) ([]byte, err
 	return body, nil
 }
 
-// localIdentityEndpoint validates IDENTITY_ENDPOINT before the IDENTITY_HEADER
-// secret is sent to it.
-//
-// The variable is a URL taken verbatim from the environment, and the request
-// carries the header secret that authenticates to the local token service.
-// Anything that can influence the environment — a container spec, an operator
-// with a compromised deployment pipeline — could otherwise point it at a remote
-// host and collect both the secret and a managed-identity token on every mint.
-// The real endpoint is always loopback or link-local, so requiring that costs
-// nothing and closes the exfiltration path.
+// localIdentityEndpoint validates IDENTITY_ENDPOINT before the IDENTITY_HEADER secret is sent to it.
 func localIdentityEndpoint(raw string) (string, error) {
 	if strings.TrimSpace(raw) == "" {
 		return "", fmt.Errorf("IDENTITY_ENDPOINT is empty")
@@ -150,11 +131,7 @@ func (a *Azure) Detect(ctx context.Context) (*core.Runtime, error) {
 			Subject:     a.getenv("AZURE_CLIENT_ID"),
 		}, nil
 	}
-	// Managed identity — App Service, Container Apps, a bare VM — vends Entra
-	// ACCESS tokens, which are bearer credentials for a named Azure resource,
-	// not audience-pinned assertions about this workload. They are not a
-	// federation source, and saying so here is what lets `cloud-auth doctor`
-	// tell an operator the truth before they build on it.
+	// Managed identity — App Service, Container Apps, a bare VM — vends Entra ACCESS tokens, which are bearer credentials for a named Azure resource, not audience-pinned assertions about this workload.
 	if sub := a.managedIdentitySubRuntime(); sub != "" {
 		return &core.Runtime{
 			Cloud:       core.Azure,
@@ -166,14 +143,7 @@ func (a *Azure) Detect(ctx context.Context) (*core.Runtime, error) {
 	if _, err := a.imdsGet(ctx, "/metadata/instance", "api-version=2021-02-01"); err != nil {
 		return nil, fmt.Errorf("%w: %v", core.ErrNotThisRuntime, err)
 	}
-	// A scale-set instance reports "vm" too. The collapse is deliberate: the
-	// sub-runtime exists to tell an operator which identity path applies, and
-	// VMSS and a standalone VM share one — IMDS, managed identity, not
-	// federatable. Distinguishing them would add a name to knownSubRuntimes that
-	// source.detect could pin, without changing a single outcome, and every
-	// message here would still have to say the same thing.
-	//
-	// Revisit if VMSS ever gains an identity path a VM does not have.
+	// A scale-set instance reports "vm" too.
 	return &core.Runtime{
 		Cloud:       core.Azure,
 		SubRuntime:  "vm",
@@ -189,12 +159,7 @@ func (a *Azure) Mint(ctx context.Context, audience string) (*core.SourceToken, e
 	if a.usesWorkloadIdentity() {
 		return a.mintFromFile(ctx, audience)
 	}
-	// Everything below this point vends an Entra access token, and an access
-	// token is not a proof of identity that another cloud's STS can verify — it
-	// is a live bearer credential for whatever resource was named in the
-	// request. Handing one to a third-party STS discloses a working Azure
-	// credential and still fails the exchange, because the token's aud is an
-	// Azure resource rather than the target's audience.
+	// Everything below this point vends an Entra access token, and an access token is not a proof of identity that another cloud's STS can verify — it is a live bearer credential for whatever resource was named in the request.
 	if sub := a.managedIdentitySubRuntime(); sub != "" {
 		return nil, fmt.Errorf("%w: Azure managed identity on %s vends Entra access tokens, not "+
 			"audience-pinned assertions; use AKS Workload Identity (AZURE_FEDERATED_TOKEN_FILE) "+
@@ -218,10 +183,7 @@ func (a *Azure) mintFromFile(ctx context.Context, audience string) (*core.Source
 	if claims.HasAudience(audience) {
 		return oidcToken(string(raw), claims, audience), nil
 	}
-	// The projected token's aud is fixed by the AKS Workload Identity webhook
-	// (default api://AzureADTokenExchange). When running in-cluster, mint a fresh
-	// token carrying the requested audience via the Kubernetes TokenRequest API
-	// rather than failing closed.
+	// The projected token's aud is fixed by the AKS Workload Identity webhook (default api://AzureADTokenExchange).
 	if token, available, err := mintDynamicAudienceToken(ctx, a.k8sClient, a.getenv, a.readFile, claims, audience); available {
 		if err != nil {
 			return nil, fmt.Errorf("azure: %w", err)
@@ -237,19 +199,14 @@ func (a *Azure) mintFromFile(ctx context.Context, audience string) (*core.Source
 		claims.Audiences, audience)
 }
 
-// mintFromIdentityEndpoint mints a managed-identity token via the App Service /
-// Container Apps local token endpoint (IDENTITY_ENDPOINT), authenticated with
-// the IDENTITY_HEADER secret rather than the IMDS Metadata header.
+// mintFromIdentityEndpoint mints a managed-identity token via the App Service / Container Apps local token endpoint (IDENTITY_ENDPOINT), authenticated with the IDENTITY_HEADER secret rather than the IMDS Metadata header.
 func (a *Azure) mintFromIdentityEndpoint(ctx context.Context, audience string) (*core.SourceToken, error) {
 	endpoint, err := localIdentityEndpoint(a.getenv("IDENTITY_ENDPOINT"))
 	if err != nil {
 		return nil, fmt.Errorf("azure: %w", err)
 	}
 	q := url.Values{"resource": {audience}, "api-version": {"2019-08-01"}}
-	// Bind the request to the identity Detect reported. Without this, a host with
-	// several user-assigned identities returns whichever one the platform
-	// considers default, so the SDK would report one identity and authenticate
-	// as another.
+	// Bind the request to the identity Detect reported.
 	if id := a.getenv("AZURE_CLIENT_ID"); id != "" {
 		q.Set("client_id", id)
 	}
@@ -279,8 +236,7 @@ func (a *Azure) mintFromIdentityEndpoint(ctx context.Context, audience string) (
 
 func (a *Azure) mintFromIMDS(ctx context.Context, audience string) (*core.SourceToken, error) {
 	q := url.Values{"api-version": {"2018-02-01"}, "resource": {audience}}
-	// Same reason as the identity-endpoint path: name the identity, or a
-	// multi-identity VM silently authenticates as a different one.
+	// Same reason as the identity-endpoint path: name the identity, or a multi-identity VM silently authenticates as a different one.
 	if id := a.getenv("AZURE_CLIENT_ID"); id != "" {
 		q.Set("client_id", id)
 	}

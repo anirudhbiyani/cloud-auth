@@ -7,11 +7,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// The parser matched on the claim suffix "across any operator" and threw the
-// operator away. That collapses two OPPOSITE policies into one representation:
-// "*" under StringLike admits every token the issuer will ever mint, and the
-// same "*" under StringEquals is compared literally, so it admits nothing and
-// the trust is silently dead.
+// The parser matched on the claim suffix "across any operator" and threw the operator away.
 
 type policyIAM struct {
 	IAMClient
@@ -67,8 +63,7 @@ func TestTrustPolicyRetainsTheConditionOperator(t *testing.T) {
 		t.Errorf("audience conditions = %+v, want one StringEquals", auds)
 	}
 
-	// The flattened views stay populated: the existing validators compare
-	// membership and do not care how a value is matched.
+	// The flattened views stay populated: the existing validators compare membership and do not care how a value is matched.
 	if len(tp.Subjects) != 1 || tp.Subjects[0] != "repo:myorg/myrepo:*" {
 		t.Errorf("Subjects = %v", tp.Subjects)
 	}
@@ -77,8 +72,7 @@ func TestTrustPolicyRetainsTheConditionOperator(t *testing.T) {
 	}
 }
 
-// The two policies this test compares differ ONLY in the operator, and mean
-// opposite things. Before the parser retained it they were indistinguishable.
+// The two policies this test compares differ ONLY in the operator, and mean opposite things.
 func TestOppositePoliciesAreDistinguishable(t *testing.T) {
 	policy := func(operator string) string {
 		return `{"Version":"2012-10-17","Statement":[{
@@ -127,8 +121,7 @@ func TestOppositePoliciesAreDistinguishable(t *testing.T) {
 	}
 }
 
-// Iteration over the operator map is random, so a diff that reorders itself
-// between runs would be unreadable.
+// Iteration over the operator map is random, so a diff that reorders itself between runs would be unreadable.
 func TestConditionOrderIsStable(t *testing.T) {
 	const doc = `{"Version":"2012-10-17","Statement":[{
 	  "Effect":"Allow",
@@ -156,8 +149,7 @@ func TestConditionOrderIsStable(t *testing.T) {
 	}
 }
 
-// A Deny does not grant trust, and folding one into the allowed set would
-// report a restriction as a permission.
+// A Deny does not grant trust, and folding one into the allowed set would report a restriction as a permission.
 func TestDenyStatementsAreIgnored(t *testing.T) {
 	const doc = `{"Version":"2012-10-17","Statement":[
 	  {"Effect":"Allow",

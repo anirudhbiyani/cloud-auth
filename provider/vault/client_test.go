@@ -13,10 +13,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// A fake Vault speaking the real API shapes: the /v1 prefix, the X-Vault-Token
-// header, the {"data": ...} envelope on reads and the {"errors": [...]} envelope
-// on failures. The paths are the point — several of them differ from the obvious
-// guess in ways that produce a 404 on a mount that exists.
+// A fake Vault speaking the real API shapes: the /v1 prefix, the X-Vault-Token header, the {"data": ...} envelope on reads and the {"errors": [...]} envelope on failures.
 
 type fakeVaultServer struct {
 	t      *testing.T
@@ -100,9 +97,7 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-// The endpoints Vault actually serves, several of which are not the obvious
-// guess. Getting one wrong is a 404 that reads like a missing mount rather than
-// a wrong URL, which is a bad hour for whoever is debugging it.
+// The endpoints Vault actually serves, several of which are not the obvious guess.
 func TestRequestPaths(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -205,8 +200,7 @@ func TestRequestPaths(t *testing.T) {
 	}
 }
 
-// The credential endpoints are separate for a reason: creds and sts issue
-// different credential kinds, and assumed_role needs the sts one.
+// The credential endpoints are separate for a reason: creds and sts issue different credential kinds, and assumed_role needs the sts one.
 func TestAWSCredentialEndpoints(t *testing.T) {
 	f := newFakeVaultServer(t)
 	f.respond(func(_ *recordedRequest, w http.ResponseWriter) {
@@ -247,9 +241,7 @@ func TestAWSCredentialEndpoints(t *testing.T) {
 	}
 }
 
-// Every request must carry the token, and the Enterprise namespace when one is
-// configured. A missing namespace header on Enterprise resolves the path in the
-// root namespace, which either 404s or — worse — hits a different real mount.
+// Every request must carry the token, and the Enterprise namespace when one is configured.
 func TestHeaders(t *testing.T) {
 	f := newFakeVaultServer(t)
 	c := f.client(t, WithNamespace("team-a"))
@@ -277,8 +269,7 @@ func TestNoNamespaceHeaderWhenUnset(t *testing.T) {
 	}
 }
 
-// Vault answers a missing path with 404 and an EMPTY errors array, and a denied
-// one with 403. Conflating them is how a create-or-update decision goes wrong.
+// Vault answers a missing path with 404 and an EMPTY errors array, and a denied one with 403. Conflating them is how a create-or-update decision goes wrong.
 func TestErrorClassification(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
@@ -324,8 +315,7 @@ func TestErrorClassification(t *testing.T) {
 	}
 }
 
-// Vault echoes request material into some errors, and a token in one is a live
-// credential.
+// Vault echoes request material into some errors, and a token in one is a live credential.
 func TestErrorBodyIsRedacted(t *testing.T) {
 	const token = "hvs.CAESIJlonGSecretTokenMaterialThatIsLongEnoughToLookLikeACredential1234"
 	f := newFakeVaultServer(t)
@@ -348,8 +338,7 @@ func TestErrorBodyIsRedacted(t *testing.T) {
 	}
 }
 
-// A successful write answers 204 with no body. That is success, not a decode
-// failure.
+// A successful write answers 204 with no body.
 func TestEmptyResponseIsNotAnError(t *testing.T) {
 	f := newFakeVaultServer(t)
 	f.respond(func(_ *recordedRequest, w http.ResponseWriter) {
@@ -360,8 +349,7 @@ func TestEmptyResponseIsNotAnError(t *testing.T) {
 	}
 }
 
-// Token creation reads the auth block, not data. Reading the wrong one returns
-// an empty token and no error, which fails much later and somewhere else.
+// Token creation reads the auth block, not data.
 func TestCreateTokenReadsTheAuthBlock(t *testing.T) {
 	f := newFakeVaultServer(t)
 	f.respond(func(_ *recordedRequest, w http.ResponseWriter) {
@@ -388,8 +376,7 @@ func TestCreateTokenReadsTheAuthBlock(t *testing.T) {
 	}
 }
 
-// A response with no auth block must be an error, not a TokenResponse holding
-// an empty string that fails at the point of use.
+// A response with no auth block must be an error, not a TokenResponse holding an empty string that fails at the point of use.
 func TestCreateTokenRejectsAMissingAuthBlock(t *testing.T) {
 	f := newFakeVaultServer(t)
 	f.respond(func(_ *recordedRequest, w http.ResponseWriter) {
@@ -400,9 +387,7 @@ func TestCreateTokenRejectsAMissingAuthBlock(t *testing.T) {
 	}
 }
 
-// VAULT_ADDR and VAULT_TOKEN are the documented configuration and there is no
-// discovery chain behind them. Guessing an address would mean sending a token
-// somewhere the operator did not name.
+// VAULT_ADDR and VAULT_TOKEN are the documented configuration and there is no discovery chain behind them.
 func TestNewClientRequiresAddressAndToken(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -424,8 +409,7 @@ func TestNewClientRequiresAddressAndToken(t *testing.T) {
 	}
 }
 
-// Without configuration the provider must say so, and must not claim the feature
-// is unimplemented — which is what "client not configured" used to mean.
+// Without configuration the provider must say so, and must not claim the feature is unimplemented — which is what "client not configured" used to mean.
 func TestRequireClientReportsConfigurationFailure(t *testing.T) {
 	p := New()
 	p.resolveFailed = errors.New("vault: VAULT_ADDR is not set")

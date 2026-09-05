@@ -7,13 +7,7 @@ import (
 	"testing"
 )
 
-// A validation failure is deliberately a different exit code from an operational
-// one, so a pipeline can tell "the trust is misconfigured" from "the run itself
-// broke" without parsing stderr.
-//
-// That promise used to be kept by calling os.Exit(2) inside cmdValidate, which
-// skipped every deferred cleanup on the way out and made the function impossible
-// to test: invoking it from a test killed the test binary rather than returning.
+// A validation failure is deliberately a different exit code from an operational one, so a pipeline can tell "the trust is misconfigured" from "the run itself broke" without parsing stderr.
 
 func TestValidationFailureIsDistinguishable(t *testing.T) {
 	for _, tc := range []struct {
@@ -52,8 +46,7 @@ func TestValidationFailureIsDistinguishable(t *testing.T) {
 				t.Fatalf("errors.As = %v, want %v (exit code would be %d, want %d)",
 					got, tc.wantIsVF, exitCodeFor(got), exitCodeFor(tc.wantIsVF))
 			}
-			// The cause must survive: a caller reading stderr still needs to know
-			// what failed, not just that something did.
+			// The cause must survive: a caller reading stderr still needs to know what failed, not just that something did.
 			if tc.wantSubstr != "" {
 				if msg := tc.err.Error(); !strings.Contains(msg, tc.wantSubstr) {
 					t.Errorf("message %q lost the cause %q", msg, tc.wantSubstr)

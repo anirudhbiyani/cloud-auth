@@ -21,16 +21,6 @@ import (
 )
 
 // This file is the concrete client behind provider/gcp's three interfaces.
-// Without it the provider could plan what it would do and never do it: every
-// non-dry-run setup, validate and delete stopped at "client not configured".
-//
-// It speaks the IAM v1, STS and IAM Credentials REST APIs directly rather than
-// through google.golang.org/api. Those are plain JSON endpoints, the surface
-// used here is nine calls wide, and the generated client would pull a large
-// dependency tree in for it. Application Default Credentials is the one part
-// NOT hand-rolled — service-account key signing, the refresh-token flow, the
-// metadata server and impersonation chains are a credential path, and
-// x/oauth2/google (already a dependency of this module) implements it correctly.
 
 const (
 	// iamEndpoint serves workload identity pools, providers and service accounts.
@@ -46,53 +36,30 @@ const (
 	// requestTimeout bounds a single API call.
 	requestTimeout = 30 * time.Second
 	// operationTimeout bounds the wait for a long-running operation to finish.
-	// Pool and provider creation are LROs; they normally settle in seconds.
 	operationTimeout = 2 * time.Minute
 	// operationPollInterval is how often a pending operation is re-read.
 	operationPollInterval = time.Second
 
-	// errorBodyLimit caps an upstream error body kept for diagnostics. Matches
-	// target/te.go's cap: an error is a diagnostic, not a transcript.
+	// errorBodyLimit caps an upstream error body kept for diagnostics.
 	errorBodyLimit = 512
 )
 
-// GCP's documented limits on a workload identity pool provider. Checked before
-// the call rather than after the rejection: the API's own message names a number
-// without saying which of your mappings pushed you past it.
+// GCP's documented limits on a workload identity pool provider.
 const (
 	// maxAttributeMappings is the ceiling on custom attribute mappings.
 	maxAttributeMappings = 50
 	// maxAttributeMappingBytes is the ceiling on the total mapping expression.
 	maxAttributeMappingBytes = 8192
 	// GCP's per-project, per-minute rate quotas.
-	//
-	// Unlike the size limits above, a rate cannot be checked before a single
-	// call — one request is never over a per-minute quota. What CAN be done is
-	// pace a burst so it does not provoke one, and name the quota when the API
-	// says no, because "RESOURCE_EXHAUSTED" alone sends an operator to look at
-	// storage.
-	//
-	// wifWritesPerMinute governs pool and provider mutations. 60/minute is one
-	// per second, which a loop creating providers reaches immediately.
 	wifWritesPerMinute = 60
-	// stsExchangesPerMinute governs token exchanges. Documented for the error
-	// message; the exchange path is the data plane's, and te.go already backs
-	// off on 429.
+	// stsExchangesPerMinute governs token exchanges.
 	stsExchangesPerMinute = 6000
 
-	// maxMappedSubjectBytes is the ceiling on the resolved google.subject. It
-	// cannot be checked statically — the value is produced at exchange time by a
-	// CEL expression over a token this code has not seen — but a literal mapping
-	// can be, and GitHub's immutable subject claims made overflow materially
-	// more likely.
+	// maxMappedSubjectBytes is the ceiling on the resolved google.subject.
 	maxMappedSubjectBytes = 127
 )
 
 // apiError is a GCP API failure with its status preserved.
-//
-// isNotFoundError's doc comment records that this package's clients had no typed
-// errors, so absence had to be recovered by string matching. This closes that:
-// NotFound() is exact, and the category flows into core.CategoryOf.
 type apiError struct {
 	StatusCode int
 	Status     string // GCP's canonical code, e.g. "NOT_FOUND", "ALREADY_EXISTS"
@@ -114,24 +81,17 @@ func (e *apiError) statusName() string {
 	return http.StatusText(e.StatusCode)
 }
 
-// NotFound reports absence. isNotFoundError checks for this interface before it
-// falls back to matching strings.
+// NotFound reports absence.
 func (e *apiError) NotFound() bool {
 	return e.StatusCode == http.StatusNotFound || e.Status == "NOT_FOUND"
 }
 
 // RateLimited reports whether a per-project quota was exceeded.
-//
-// GCP answers with 429 and RESOURCE_EXHAUSTED, which is also what it says when a
-// storage or CPU quota is exhausted — so the message this produces names the
-// quota that actually applies, rather than leaving the operator to guess which
-// of their limits they hit.
 func (e *apiError) RateLimited() bool {
 	return e.StatusCode == http.StatusTooManyRequests || e.Status == "RESOURCE_EXHAUSTED"
 }
 
-// AlreadyExists reports that the resource is already there, which Setup treats
-// as success rather than failure when it was creating idempotently.
+// AlreadyExists reports that the resource is already there, which Setup treats as success rather than failure when it was creating idempotently.
 func (e *apiError) AlreadyExists() bool {
 	return e.StatusCode == http.StatusConflict || e.Status == "ALREADY_EXISTS"
 }
@@ -148,8 +108,7 @@ type restClient struct {
 	http   *http.Client
 	tokens oauth2.TokenSource
 
-	// Endpoints are fields rather than constants so tests can point them at an
-	// httptest server. Nothing outside this package sets them.
+	// Endpoints are fields rather than constants so tests can point them at an httptest server.
 	iamURL         string
 	stsURL         string
 	credentialsURL string
@@ -157,17 +116,13 @@ type restClient struct {
 	// pollInterval is the LRO poll cadence, shortened by tests.
 	pollInterval time.Duration
 
-	// writeMu and lastWrite pace workload-identity mutations against the
-	// 60-per-minute project quota. A setup creating a pool and a provider is
-	// two writes; a loop over repositories is many, and hitting the quota
-	// mid-loop leaves a half-built pool behind.
+	// writeMu and lastWrite pace workload-identity mutations against the 60-per-minute project quota.
 	writeMu   sync.Mutex
 	lastWrite time.Time
 	// writeInterval is the minimum gap between mutations.
 	writeInterval time.Duration
 
-	// now and sleep are injectable so pacing can be tested without spending
-	// real seconds.
+	// now and sleep are injectable so pacing can be tested without spending real seconds.
 	now   func() time.Time
 	sleep func(context.Context, time.Duration) error
 }
@@ -192,14 +147,10 @@ func WithEndpoints(iam, sts, credentials string) ClientOption {
 	}
 }
 
-// NewClients resolves Application Default Credentials and returns clients for
-// the IAM, Workload Identity and STS surfaces.
+// NewClients resolves Application Default Credentials and returns clients for the IAM, Workload Identity and STS surfaces.
 func NewClients(ctx context.Context, opts ...ClientOption) (*Clients, error) {
 	c := &restClient{
-		// Proxy-respecting and redirect-refusing: these are ordinary internet
-		// calls a corporate egress proxy legitimately handles, but a redirect
-		// from an admin endpoint carrying a bearer token is not something to
-		// follow.
+		// Proxy-respecting and redirect-refusing: these are ordinary internet calls a corporate egress proxy legitimately handles, but a redirect from an admin endpoint carrying a bearer token is not something to follow.
 		http:           httpx.NewSTSClient(requestTimeout),
 		iamURL:         iamEndpoint,
 		stsURL:         stsEndpoint,
@@ -256,10 +207,6 @@ func (c *restClient) paceWrite(ctx context.Context) (release func(), err error) 
 }
 
 // do performs one authenticated JSON call and decodes the result into out.
-//
-// out may be nil for calls whose body is not needed. A non-2xx is turned into
-// *apiError with GCP's canonical status preserved, so callers can ask NotFound()
-// rather than grep the message.
 func (c *restClient) do(ctx context.Context, method, endpoint string, body, out any, resource string) error {
 	var reader io.Reader
 	if body != nil {
@@ -290,8 +237,7 @@ func (c *restClient) do(ctx context.Context, method, endpoint string, body, out 
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	// Cap the read: an error body is diagnostics, not a payload, and a
-	// misdirected endpoint should not be able to stream into memory.
+	// Cap the read: an error body is diagnostics, not a payload, and a misdirected endpoint should not be able to stream into memory.
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return fmt.Errorf("gcp: reading response: %w", err)
@@ -310,10 +256,6 @@ func (c *restClient) do(ctx context.Context, method, endpoint string, body, out 
 }
 
 // postUnauthenticated posts JSON without a bearer header.
-//
-// The STS token endpoint takes no caller credential: the subject token in the
-// body IS the proof. Sending an unrelated ADC bearer alongside it would attach a
-// second, more privileged identity to a request that does not need one.
 func (c *restClient) postUnauthenticated(ctx context.Context, endpoint string, body, out any) error {
 	encoded, err := json.Marshal(body)
 	if err != nil {
@@ -337,8 +279,7 @@ func (c *restClient) postUnauthenticated(ctx context.Context, endpoint string, b
 		return fmt.Errorf("gcp: reading response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		// The request body carried an assertion, and STS error bodies echo parts
-		// of it back. Scrub before this reaches a log.
+		// The request body carried an assertion, and STS error bodies echo parts of it back.
 		return parseAPIError(resp.StatusCode, []byte(redact.Body(string(raw), errorBodyLimit)), "")
 	}
 	if out == nil || len(raw) == 0 {
@@ -350,8 +291,7 @@ func (c *restClient) postUnauthenticated(ctx context.Context, endpoint string, b
 	return nil
 }
 
-// redactedPath keeps the host and path for diagnostics and drops the query,
-// which on these APIs carries resource ids supplied by the operator.
+// redactedPath keeps the host and path for diagnostics and drops the query, which on these APIs carries resource ids supplied by the operator.
 func redactedPath(endpoint string) string {
 	u, err := url.Parse(endpoint)
 	if err != nil {
@@ -360,8 +300,7 @@ func redactedPath(endpoint string) string {
 	return u.Scheme + "://" + u.Host + u.Path
 }
 
-// parseAPIError turns a non-2xx body into *apiError, falling back to the status
-// line when the body is not the shape GCP documents.
+// parseAPIError turns a non-2xx body into *apiError, falling back to the status line when the body is not the shape GCP documents.
 func parseAPIError(status int, raw []byte, resource string) error {
 	var envelope struct {
 		Error struct {
@@ -384,10 +323,6 @@ func parseAPIError(status int, raw []byte, resource string) error {
 }
 
 // annotateQuota names the quota behind a RESOURCE_EXHAUSTED answer.
-//
-// GCP uses one code for every exhausted quota, so the raw error sends an
-// operator to check storage or CPU. Which quota applies is decided by the
-// endpoint, which this layer knows and the caller does not.
 func annotateQuota(err error, endpoint string) error {
 	var apiErr *apiError
 	if !errors.As(err, &apiErr) || !apiErr.RateLimited() {
@@ -404,14 +339,12 @@ func annotateQuota(err error, endpoint string) error {
 	return apiErr
 }
 
-// operation is the long-running-operation envelope the IAM API returns for pool
-// and provider mutations.
+// operation is the long-running-operation envelope the IAM API returns for pool and provider mutations.
 type operation struct {
 	Name  string          `json:"name"`
 	Done  bool            `json:"done"`
 	Error *operationError `json:"error,omitempty"`
-	// Response is the created resource once Done. Left raw so each caller
-	// decodes its own type.
+	// Response is the created resource once Done.
 	Response json.RawMessage `json:"response,omitempty"`
 }
 
@@ -422,16 +355,9 @@ type operationError struct {
 }
 
 // await polls a long-running operation to completion and decodes its response.
-//
-// Returning as soon as the API accepts the request would be wrong here: Setup's
-// next step binds IAM to the pool it just asked for, and a pool that is still
-// being created is not yet a valid principal set. The failure would surface as a
-// confusing permission error one call later.
 func (c *restClient) await(ctx context.Context, op *operation, out any) error {
 	deadline := time.Now().Add(operationTimeout)
-	// Poll the name from the FIRST response throughout. A poll response is only
-	// ever the same operation, so following a name out of a later body would let
-	// one malformed or truncated reply redirect the wait somewhere else.
+	// Poll the name from the FIRST response throughout.
 	name := op.Name
 	for {
 		if op.Done {

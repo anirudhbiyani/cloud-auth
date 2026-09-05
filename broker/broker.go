@@ -1,7 +1,4 @@
-// Package broker orchestrates a single cross-cloud exchange: detect the local
-// runtime, mint an audience-pinned source proof, and exchange it at the target
-// STS. It is the shared core behind `cloud-auth exchange`, `cloud-auth doctor`, and the
-// SDK adapters.
+// Package broker orchestrates a single cross-cloud exchange: detect the local runtime, mint an audience-pinned source proof, and exchange it at the target STS.
 package broker
 
 import (
@@ -30,8 +27,7 @@ func WithExchangerFor(f func(core.Cloud) (core.Exchanger, error)) Option {
 	return func(b *Broker) { b.exchangerFor = f }
 }
 
-// New builds a Broker with the default registry (AWS→GCP→Azure) and the default
-// exchanger dispatcher.
+// New builds a Broker with the default registry (AWS→GCP→Azure) and the default exchanger dispatcher.
 func New(opts ...Option) *Broker {
 	b := &Broker{registry: source.Default(), exchangerFor: target.For}
 	for _, o := range opts {
@@ -40,9 +36,7 @@ func New(opts ...Option) *Broker {
 	return b
 }
 
-// Exchange detects the runtime, mints a proof pinned to target.Audience, and
-// exchanges it. It fails closed when the audience is missing. It returns the
-// detected Runtime alongside the credentials for diagnostics.
+// Exchange detects the runtime, mints a proof pinned to target.Audience, and exchanges it.
 func (b *Broker) Exchange(ctx context.Context, target core.Target) (*core.Credentials, *core.Runtime, error) {
 	if target == nil {
 		return nil, nil, fmt.Errorf("cloud-auth: a target is required")

@@ -7,8 +7,7 @@ import (
 
 // The detectors. Each answers one question an AccessDenied does not.
 
-// githubIssuer is GitHub Actions' single global OIDC issuer, shared by every
-// tenant on the platform.
+// githubIssuer is GitHub Actions' single global OIDC issuer, shared by every tenant on the platform.
 const githubIssuer = "token.actions.githubusercontent.com"
 
 // maxMappedSubjectBytes is GCP's hard limit on a mapped google.subject.
@@ -17,13 +16,7 @@ const maxMappedSubjectBytes = 127
 // isGitHubSubject reports whether a value looks like a GitHub Actions `sub`.
 func isGitHubSubject(v string) bool { return strings.HasPrefix(v, "repo:") }
 
-// immutableSubject reports whether a GitHub subject uses the immutable form,
-// where the org and repo carry their numeric ids.
-//
-// GitHub enforced immutable subject claims on 15 July 2026 for new repositories
-// and for any repository that is renamed or transferred. The delimiter changed
-// from "-" to "@" on 10 June, so a policy written against the pre-migration
-// spelling is wrong too.
+// immutableSubject reports whether a GitHub subject uses the immutable form, where the org and repo carry their numeric ids.
 func immutableSubject(v string) bool {
 	if !isGitHubSubject(v) {
 		return false
@@ -35,12 +28,7 @@ func immutableSubject(v string) bool {
 	return strings.Contains(repoPart, "@")
 }
 
-// detectImmutableSubjectMismatch catches a policy written against the legacy
-// GitHub subject while the token presents the immutable form, or the reverse.
-//
-// This is the failure that arrives without warning: nothing changes in the
-// workflow, someone renames the repository, and every deploy starts failing
-// with AccessDenied.
+// detectImmutableSubjectMismatch catches a policy written against the legacy GitHub subject while the token presents the immutable form, or the reverse.
 func detectImmutableSubjectMismatch(in ExplainInput) []Finding {
 	presented := presentedSubject(in)
 	if !isGitHubSubject(presented) {
@@ -79,14 +67,7 @@ func detectImmutableSubjectMismatch(in ExplainInput) []Finding {
 	return out
 }
 
-// detectEnvironmentOverridesBranch catches the positional-concatenation trap in
-// GitHub's subject.
-//
-// `sub` is a concatenation, not a set of fields: adding `environment:
-// production` to a job REPLACES the `ref:refs/heads/…` segment rather than
-// adding to it. A policy pinned to a branch therefore stops matching the moment
-// someone adds an environment to the workflow, and nothing in the workflow diff
-// looks related to authentication.
+// detectEnvironmentOverridesBranch catches the positional-concatenation trap in GitHub's subject.
 func detectEnvironmentOverridesBranch(in ExplainInput) []Finding {
 	presented := presentedSubject(in)
 	if !isGitHubSubject(presented) {
@@ -123,16 +104,7 @@ func detectEnvironmentOverridesBranch(in ExplainInput) []Finding {
 	return out
 }
 
-// detectExactOperatorWithWildcard catches a wildcard under an operator that does
-// not expand it.
-//
-// A "*" under StringEquals is compared literally, so the condition admits only
-// a token whose claim is the two characters "repo:org/repo:*" — which nothing
-// ever mints. The trust is not too wide; it is silently dead, and the resulting
-// AccessDenied looks identical to a wrong subject.
-//
-// This detector is the reason the trust-policy parser had to stop discarding
-// the operator.
+// detectExactOperatorWithWildcard catches a wildcard under an operator that does not expand it.
 func detectExactOperatorWithWildcard(in ExplainInput) []Finding {
 	var out []Finding
 	for _, cond := range in.Trust.Conditions {
@@ -178,11 +150,6 @@ func presentedFor(in ExplainInput, claim string) string {
 }
 
 // detectCaseOnlyMismatch catches values that differ only in case.
-//
-// Entra matches issuer, subject and audience case-sensitively, and a
-// case-only difference is close to invisible in a diff read by a human at
-// 2am. doctor already reports this for the audience; here it covers the
-// subject and issuer too.
 func detectCaseOnlyMismatch(in ExplainInput) []Finding {
 	var out []Finding
 
@@ -214,12 +181,7 @@ func detectCaseOnlyMismatch(in ExplainInput) []Finding {
 	return out
 }
 
-// detectOversizedMappedSubject catches a subject that will not fit GCP's
-// google.subject.
-//
-// The limit is 127 bytes and it is hard. GitHub's immutable subjects are
-// materially longer than the legacy ones — the numeric ids are pure additions —
-// so a mapping that fit last month can stop fitting after a migration.
+// detectOversizedMappedSubject catches a subject that will not fit GCP's google.subject.
 func detectOversizedMappedSubject(in ExplainInput) []Finding {
 	if in.Target == nil || in.Target.Cloud() != GCP {
 		return nil
@@ -238,12 +200,7 @@ func detectOversizedMappedSubject(in ExplainInput) []Finding {
 		withDiff("sub", presented, fmt.Sprintf("(at most %d bytes)", maxMappedSubjectBytes))}
 }
 
-// detectForkPullRequestExposure catches a trailing wildcard that admits
-// pull_request runs.
-//
-// "repo:org/repo:*" matches "repo:org/repo:pull_request", which a fork's pull
-// request reaches. Anyone who can open a PR against the repository can then run
-// with these credentials.
+// detectForkPullRequestExposure catches a trailing wildcard that admits pull_request runs.
 func detectForkPullRequestExposure(in ExplainInput) []Finding {
 	var out []Finding
 	for _, cond := range in.Trust.SubjectConditions() {
@@ -264,12 +221,7 @@ func detectForkPullRequestExposure(in ExplainInput) []Finding {
 	return out
 }
 
-// detectIssuerMismatch separates "no IdP registered" from "registered, but the
-// issuer string differs".
-//
-// Both surface as the same AccessDenied today, and they need opposite fixes:
-// one is a missing resource, the other a typo — very often a trailing slash, or
-// the https:// scheme where the provider stores a bare host.
+// detectIssuerMismatch separates "no IdP registered" from "registered, but the issuer string differs".
 func detectIssuerMismatch(in ExplainInput) []Finding {
 	if in.Token == nil || in.Token.Issuer == "" {
 		return nil
@@ -300,8 +252,7 @@ func detectIssuerMismatch(in ExplainInput) []Finding {
 			"AccessDenied, and they need opposite fixes", in.Token.Issuer)).
 		withDiff("iss", in.Token.Issuer, in.Trust.Issuer)
 
-	// Trailing slash and scheme are the two that waste the most time, because
-	// the strings look identical at a glance.
+	// Trailing slash and scheme are the two that waste the most time, because the strings look identical at a glance.
 	if strings.TrimSuffix(presented, "/") == strings.TrimSuffix(configured, "/") {
 		finding.Summary = "the issuer differs only by a trailing slash"
 		finding.Fix = "remove or add the trailing slash so the two match exactly"
@@ -309,21 +260,13 @@ func detectIssuerMismatch(in ExplainInput) []Finding {
 	return []Finding{finding}
 }
 
-// normalizeIssuer strips the scheme, which providers store inconsistently: AWS
-// registers a bare host, most tokens carry https://.
+// normalizeIssuer strips the scheme, which providers store inconsistently: AWS registers a bare host, most tokens carry https://.
 func normalizeIssuer(v string) string {
 	v = strings.TrimPrefix(v, "https://")
 	return strings.TrimPrefix(v, "http://")
 }
 
-// detectIdPAuthorizedRoleMismatch catches a trust policy demanding
-// sts:RoleAuthorizedByIdp against a token whose issuer did not authorize this
-// role.
-//
-// STS evaluates that condition BEFORE the trust policy, so when it fails
-// nothing else about the policy is even consulted — every other claim can match
-// perfectly and the exchange is still refused. Nothing in the resulting error
-// says which of the two happened.
+// detectIdPAuthorizedRoleMismatch catches a trust policy demanding sts:RoleAuthorizedByIdp against a token whose issuer did not authorize this role.
 func detectIdPAuthorizedRoleMismatch(in ExplainInput) []Finding {
 	var required bool
 	for _, c := range in.Trust.Conditions {

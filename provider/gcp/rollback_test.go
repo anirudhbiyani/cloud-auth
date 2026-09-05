@@ -9,13 +9,9 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// recordingWIF answers existence probes however the test wants and records
-// every destructive call.
+// recordingWIF answers existence probes however the test wants and records every destructive call.
 type recordingWIF struct {
-	// WorkloadIdentityClient is embedded so this fake keeps compiling when the
-	// interface gains a method it does not care about — this file is about
-	// rollback, not enumeration, and an unimplemented method it never calls
-	// should not make it a compile error.
+	// WorkloadIdentityClient is embedded so this fake keeps compiling when the interface gains a method it does not care about — this file is about rollback, not enumeration, and an unimplemented method it never calls should not make it a compile error.
 	WorkloadIdentityClient
 
 	poolGetErr     error
@@ -43,8 +39,7 @@ func (r *recordingWIF) CreateWorkloadIdentityPoolProvider(context.Context, strin
 }
 func (r *recordingWIF) DeleteWorkloadIdentityPoolProvider(context.Context, string) error { return nil }
 
-// setupIAM covers the two policy calls Setup makes. It embeds IAMClient so it
-// satisfies the interface without restating methods this test never reaches.
+// setupIAM covers the two policy calls Setup makes.
 type setupIAM struct {
 	IAMClient
 	policy *IAMPolicy
@@ -68,15 +63,6 @@ func scopedSpec() *core.GCPWorkloadIdentityPoolSpec {
 }
 
 // A pool that already existed must survive a later failure.
-//
-// Note what this does NOT claim. The original code guarded the rollback with
-// `!poolExists`, which was also false when the existence probe merely failed —
-// but reaching the rollback required the pool CREATE to succeed first, and GCP
-// refuses to create a pool that already exists. So the delete was only ever
-// reachable when this run had created the pool. Tracking that explicitly is
-// defence in depth against a plausible future edit (an idempotency improvement
-// that continues past AlreadyExists would have made it destructive), not the
-// repair of a live bug.
 func TestRollbackLeavesAPreexistingPool(t *testing.T) {
 	wif := &recordingWIF{
 		// The pool is visible, so this run does not create it.
@@ -97,9 +83,7 @@ func TestRollbackLeavesAPreexistingPool(t *testing.T) {
 	}
 }
 
-// A rollback that itself fails must say so. The original discarded the delete
-// error with `_ =`, so a failed cleanup silently orphaned a pool that nothing
-// afterwards knew about.
+// A rollback that itself fails must say so.
 func TestFailedRollbackReportsTheOrphan(t *testing.T) {
 	notFound := errors.New("404 not found")
 	wif := &recordingWIF{
@@ -123,9 +107,7 @@ func TestFailedRollbackReportsTheOrphan(t *testing.T) {
 	}
 }
 
-// The legitimate case: the probe says clearly that the pool was absent, this run
-// created it, and then the provider create failed — so the pool it created is
-// its to clean up.
+// The legitimate case: the probe says clearly that the pool was absent, this run created it, and then the provider create failed — so the pool it created is its to clean up.
 func TestRollbackRemovesAPoolItDidCreate(t *testing.T) {
 	notFound := errors.New("404 not found")
 	wif := &recordingWIF{

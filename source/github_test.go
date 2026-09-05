@@ -13,9 +13,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// `cloud-auth exchange` inside a GitHub Actions runner probed AWS, GCP and
-// Azure metadata, failed all three, and reported "no supported runtime
-// detected" — for the use case the README opens with.
+// `cloud-auth exchange` inside a GitHub Actions runner probed AWS, GCP and Azure metadata, failed all three, and reported "no supported runtime detected" — for the use case the README opens with.
 
 // githubJWT builds a token carrying the given audience and subject.
 func githubJWT(aud, sub string) string {
@@ -78,9 +76,7 @@ func TestGitHubDetect(t *testing.T) {
 		if rt.Cloud != core.GitHubOIDC {
 			t.Errorf("Cloud = %q, want %q", rt.Cloud, core.GitHubOIDC)
 		}
-		// "actions", not "github-actions": source.detect splits cloud from
-		// sub-runtime on "-", so the config value is "github-actions" and
-		// naming the sub-runtime that would make it "github-github-actions".
+		// "actions", not "github-actions": source.detect splits cloud from sub-runtime on "-", so the config value is "github-actions" and naming the sub-runtime that would make it "github-github-actions".
 		if rt.SubRuntime != "actions" {
 			t.Errorf("SubRuntime = %q, want actions", rt.SubRuntime)
 		}
@@ -93,9 +89,7 @@ func TestGitHubDetect(t *testing.T) {
 	})
 
 	t.Run("environment replaces ref, it does not join it", func(t *testing.T) {
-		// GitHub's sub is a positional concatenation. Reconstructing it as
-		// repo:…:ref:…:environment:… would show an operator a subject that no
-		// token ever carries.
+		// GitHub's sub is a positional concatenation.
 		g := NewGitHub(WithGitHubEnv(envFunc(runnerEnv("https://runner.example/token",
 			map[string]string{"GITHUB_ENVIRONMENT": "production"}))))
 		rt, err := g.Detect(context.Background())
@@ -130,9 +124,7 @@ func TestGitHubDetect(t *testing.T) {
 		}
 	})
 
-	// GITHUB_ACTIONS alone must not claim the runtime: it is set in every
-	// workflow, including ones without id-token:write, and detecting on it
-	// turns "permission not granted" into "detection succeeded, mint failed".
+	// GITHUB_ACTIONS alone must not claim the runtime: it is set in every workflow, including ones without id-token:write, and detecting on it turns "permission not granted" into "detection succeeded, mint failed".
 	t.Run("only one of the two variables", func(t *testing.T) {
 		g := NewGitHub(WithGitHubEnv(envFunc(map[string]string{
 			"ACTIONS_ID_TOKEN_REQUEST_URL": "https://runner.example/token",
@@ -169,8 +161,7 @@ func TestGitHubMint(t *testing.T) {
 	if r.gotAuth != "Bearer runner-bearer-token" {
 		t.Errorf("Authorization = %q", r.gotAuth)
 	}
-	// The runner supplies a URL with its own query attached; the audience is
-	// appended, not substituted for it.
+	// The runner supplies a URL with its own query attached; the audience is appended, not substituted for it.
 	if !strings.Contains(r.gotQuery, "audience=sts.amazonaws.com") {
 		t.Errorf("query = %q, want the audience in it", r.gotQuery)
 	}
@@ -179,9 +170,7 @@ func TestGitHubMint(t *testing.T) {
 	}
 }
 
-// Fail closed. A token bound to a different audience is a proof for somebody
-// else, and transmitting it is a disclosure whether or not the exchange
-// succeeds — the same rule target/te.go enforces on the way out.
+// Fail closed.
 func TestGitHubMintRefusesAnAudienceMismatch(t *testing.T) {
 	r := newRunnerEndpoint(t, githubJWT("api://AzureADTokenExchange", "repo:myorg/myrepo:ref:refs/heads/main"))
 	g := NewGitHub(
@@ -198,8 +187,7 @@ func TestGitHubMintRefusesAnAudienceMismatch(t *testing.T) {
 	}
 }
 
-// An unparseable token is one whose audience cannot be checked, and handing it
-// onward unchecked defeats the check entirely.
+// An unparseable token is one whose audience cannot be checked, and handing it onward unchecked defeats the check entirely.
 func TestGitHubMintFailsClosedOnAnUnreadableToken(t *testing.T) {
 	r := newRunnerEndpoint(t, "not-a-jwt")
 	g := NewGitHub(
@@ -247,10 +235,7 @@ func TestGitHubMintRequiresAnAudience(t *testing.T) {
 	}
 }
 
-// GitHub is probed FIRST. Its detection is two environment reads, while the
-// cloud probes reach for a metadata endpoint — and a hosted runner IS a virtual
-// machine in somebody's cloud, so probing IMDS first spends a timeout on every
-// exchange before reaching the answer that was in the environment all along.
+// GitHub is probed FIRST.
 func TestGitHubIsProbedFirst(t *testing.T) {
 	r := Default()
 	if len(r.providers) == 0 {
@@ -261,8 +246,7 @@ func TestGitHubIsProbedFirst(t *testing.T) {
 	}
 }
 
-// source.detect must be able to name it, or an operator cannot pin the runtime
-// most workloads actually run in.
+// source.detect must be able to name it, or an operator cannot pin the runtime most workloads actually run in.
 func TestSourceDetectAcceptsGitHub(t *testing.T) {
 	for _, in := range []string{"github", "github-actions", "github_oidc"} {
 		t.Run(in, func(t *testing.T) {
@@ -288,18 +272,14 @@ func TestSourceDetectAcceptsGitHub(t *testing.T) {
 	})
 }
 
-// "You are on this platform and it is switched off" is a different answer from
-// "you are not here", and it was being discarded: every provider's reason looked
-// alike to the registry's probe loop, so the most actionable one in the tree
-// came out as "no supported runtime detected".
+// "You are on this platform and it is switched off" is a different answer from "you are not here", and it was being discarded: every provider's reason looked alike to the registry's probe loop, so the most actionable one in the tree came out as "no supported runtime detected".
 func TestRegistryPreservesTheNotConfiguredReason(t *testing.T) {
 	inActionsWithoutPermission := envFunc(map[string]string{
 		"GITHUB_ACTIONS":    "true",
 		"GITHUB_REPOSITORY": "myorg/myrepo",
 	})
 
-	// Only the GitHub provider, so nothing else can detect and the fallback
-	// message is what gets returned.
+	// Only the GitHub provider, so nothing else can detect and the fallback message is what gets returned.
 	r := NewRegistry(NewGitHub(WithGitHubEnv(inActionsWithoutPermission)))
 	_, _, err := r.Detect(context.Background())
 	if err == nil {
@@ -308,8 +288,7 @@ func TestRegistryPreservesTheNotConfiguredReason(t *testing.T) {
 	if !errors.Is(err, core.ErrRuntimeNotConfigured) {
 		t.Errorf("error does not carry ErrRuntimeNotConfigured: %v", err)
 	}
-	// It still wraps ErrNotThisRuntime, so the probe loop keeps going: the same
-	// host may legitimately have another identity.
+	// It still wraps ErrNotThisRuntime, so the probe loop keeps going: the same host may legitimately have another identity.
 	if !errors.Is(err, core.ErrNotThisRuntime) {
 		t.Errorf("ErrRuntimeNotConfigured must wrap ErrNotThisRuntime, or probing stops: %v", err)
 	}
@@ -318,8 +297,7 @@ func TestRegistryPreservesTheNotConfiguredReason(t *testing.T) {
 	}
 }
 
-// A provider that genuinely detects still wins; the preserved reason is a
-// fallback, not a short circuit.
+// A provider that genuinely detects still wins; the preserved reason is a fallback, not a short circuit.
 func TestNotConfiguredDoesNotPreemptARealDetection(t *testing.T) {
 	r := newRunnerEndpoint(t, githubJWT("sts.amazonaws.com", "repo:o/r:ref:refs/heads/main"))
 

@@ -10,10 +10,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// GitHub runs ONE issuer across every account and permits namespace reuse:
-// delete an org, someone re-registers the name, mints a token whose sub is
-// character-for-character identical, and assumes a role still sitting there
-// trusting it. One API call, and no mainstream scanner makes it.
+// GitHub runs ONE issuer across every account and permits namespace reuse: delete an org, someone re-registers the name, mints a token whose sub is character-for-character identical, and assumes a role still sitting there trusting it.
 
 func newGitHubAPI(t *testing.T, status map[string]int) *httptest.Server {
 	t.Helper()
@@ -56,21 +53,17 @@ func TestGitHubNamespaceResolve(t *testing.T) {
 			want: core.NamespaceUnregistered, detailHas: "anyone can register it",
 		},
 		{
-			// Without knowing which orgs are ours, "it exists" says nothing
-			// about who controls it — and claiming it is fine would be the
-			// dangerous half of the guess.
+			// Without knowing which orgs are ours, "it exists" says nothing about who controls it — and claiming it is fine would be the dangerous half of the guess.
 			name: "exists, ownership not checked", namespace: "myorg/myrepo",
 			want: core.NamespaceUnknown, detailHas: "--github-owner",
 		},
 		{
-			// A private repo of somebody else's is indistinguishable from a
-			// nonexistent one without access, so this must read as neither.
+			// A private repo of somebody else's is indistinguishable from a nonexistent one without access, so this must read as neither.
 			name: "forbidden is not absence", namespace: "private/hidden", owners: []string{"myorg"},
 			want: core.NamespaceUnknown, detailHas: "GITHUB_TOKEN",
 		},
 		{
-			// The numeric ids are what make an immutable subject immutable:
-			// there is nothing to re-register.
+			// The numeric ids are what make an immutable subject immutable: there is nothing to re-register.
 			name: "immutable subject", namespace: "myorg@123456/myrepo@456789", owners: []string{"myorg"},
 			want: core.NamespaceUnknown, detailHas: "immutable",
 		},
@@ -145,8 +138,7 @@ func TestGitHubResolverIssuer(t *testing.T) {
 	}
 }
 
-// A transport failure is an error, not an answer. Reporting a network problem
-// as "unregistered" would flag every live namespace as claimable.
+// A transport failure is an error, not an answer.
 func TestGitHubResolverTransportFailureIsAnError(t *testing.T) {
 	r := NewGitHubNamespaceResolver(
 		WithGitHubAPI("http://127.0.0.1:1"),

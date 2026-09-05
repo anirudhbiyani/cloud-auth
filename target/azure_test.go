@@ -61,8 +61,7 @@ func TestAzureRejectsSigV4WithBridgeGuidance(t *testing.T) {
 		t.Fatalf("err = %v, want ErrNoFirstClassPath", err)
 	}
 	msg := strings.ToLower(err.Error())
-	// Cognito is no longer the advice: AWS vends a real OIDC JWT via
-	// sts:GetWebIdentityToken once outbound identity federation is enabled.
+	// Cognito is no longer the advice: AWS vends a real OIDC JWT via sts:GetWebIdentityToken once outbound identity federation is enabled.
 	for _, want := range []string{"outbound identity federation", "getwebidentitytoken", "irsa", "oidc"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("gap message should mention %q bridge option; got %q", want, err.Error())

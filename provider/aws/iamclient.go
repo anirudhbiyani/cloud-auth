@@ -13,22 +13,15 @@ import (
 	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
 )
 
-// IAM's own bounds for a role's maximum session duration. Mirrors the range
-// core.AWSRoleTrustOIDCSpec validates, so a library caller bypassing the spec
-// gets the same answer the CLI would give.
+// IAM's own bounds for a role's maximum session duration.
 const (
 	iamMinSessionDuration = 3600
 	iamMaxSessionDuration = 43200
 )
 
-// This file is the concrete IAMClient: the bridge between the provider's
-// cloud-neutral interface and the real AWS IAM API. Without it the control
-// plane could describe what it would do but never do it — Setup failed with
-// "AWS IAM client not configured" because nothing ever supplied a client.
+// This file is the concrete IAMClient: the bridge between the provider's cloud-neutral interface and the real AWS IAM API.
 
-// iamAPI is the subset of *iam.Client the wrapper uses. Depending on an
-// interface rather than the concrete client keeps pagination, decoding and
-// error-mapping testable without AWS credentials.
+// iamAPI is the subset of *iam.Client the wrapper uses.
 type iamAPI interface {
 	GetRole(context.Context, *iam.GetRoleInput, ...func(*iam.Options)) (*iam.GetRoleOutput, error)
 	CreateRole(context.Context, *iam.CreateRoleInput, ...func(*iam.Options)) (*iam.CreateRoleOutput, error)
@@ -56,26 +49,12 @@ type realIAMClient struct{ api iamAPI }
 // compile-time proof the wrapper satisfies the provider's interface.
 var _ IAMClient = (*realIAMClient)(nil)
 
-// credentialResolveTimeout bounds how long the SDK's default chain may spend
-// looking for credentials.
-//
-// The chain ends at EC2 IMDS, and off-EC2 that endpoint is a link-local address
-// nothing answers. With the SDK's own retries that took roughly two minutes to
-// give up, which a CLI user reads as a hang rather than "no credentials here" —
-// including on `setup --dry-run`, which should not need credentials at all.
+// credentialResolveTimeout bounds how long the SDK's default chain may spend looking for credentials.
 const credentialResolveTimeout = 10 * time.Second
 
-// NewIAMClient builds an IAMClient from the ambient AWS configuration
-// (environment, shared config/credentials, SSO, instance role — whatever the
-// SDK's default chain resolves).
-//
-// Note which identity that is: whatever the ambient chain happens to resolve,
-// which on a host with AWS_ACCESS_KEY_ID set is not the instance role. Callers
-// that need a specific identity should pass config options rather than relying
-// on the default.
+// NewIAMClient builds an IAMClient from the ambient AWS configuration (environment, shared config/credentials, SSO, instance role — whatever the SDK's default chain resolves).
 func NewIAMClient(ctx context.Context, optFns ...func(*awsconfig.LoadOptions) error) (IAMClient, error) {
-	// Bound the credential lookup, but keep the returned client tied to the
-	// caller's context for actual API calls.
+	// Bound the credential lookup, but keep the returned client tied to the caller's context for actual API calls.
 	loadCtx, cancel := context.WithTimeout(ctx, credentialResolveTimeout)
 	defer cancel()
 
@@ -92,9 +71,7 @@ func NewIAMClient(ctx context.Context, optFns ...func(*awsconfig.LoadOptions) er
 	return &realIAMClient{api: iam.NewFromConfig(cfg)}, nil
 }
 
-// IsNotFound reports whether an error is IAM's "no such entity". Setup branches
-// on this to decide between creating and updating, so it must be distinguishable
-// from a permission or network failure.
+// IsNotFound reports whether an error is IAM's "no such entity".
 func IsNotFound(err error) bool {
 	var nse *iamtypes.NoSuchEntityException
 	return errors.As(err, &nse)
@@ -134,8 +111,7 @@ func (c *realIAMClient) GetRole(ctx context.Context, roleName string) (*Role, er
 	}
 	r := out.Role
 
-	// IAM returns the assume-role policy percent-encoded; decode it so callers
-	// (and the trust-policy validator) get parseable JSON.
+	// IAM returns the assume-role policy percent-encoded; decode it so callers (and the trust-policy validator) get parseable JSON.
 	doc := aws.ToString(r.AssumeRolePolicyDocument)
 	if decoded, derr := url.QueryUnescape(doc); derr == nil {
 		doc = decoded
@@ -161,10 +137,7 @@ func (c *realIAMClient) CreateRole(ctx context.Context, in *CreateRoleInput) (*R
 		req.Description = aws.String(in.Description)
 	}
 	if in.MaxSessionDuration > 0 {
-		// Reject rather than convert. int -> int32 truncation turns 2^32+3600
-		// into 3600: a silently shortened session that still looks valid to
-		// every caller. Spec-driven callers are already bounds-checked in
-		// core, but CreateRoleInput is exported and this is the last gate.
+		// Reject rather than convert.
 		if in.MaxSessionDuration < iamMinSessionDuration || in.MaxSessionDuration > iamMaxSessionDuration {
 			return nil, fmt.Errorf("aws: MaxSessionDuration %d out of range (%d-%d seconds)",
 				in.MaxSessionDuration, iamMinSessionDuration, iamMaxSessionDuration)
@@ -250,8 +223,7 @@ func (c *realIAMClient) DeleteRolePolicy(ctx context.Context, roleName, policyNa
 	return err
 }
 
-// ListAttachedRolePolicies walks every page: a truncated first page would make a
-// drift check report attached policies as missing.
+// ListAttachedRolePolicies walks every page: a truncated first page would make a drift check report attached policies as missing.
 func (c *realIAMClient) ListAttachedRolePolicies(ctx context.Context, roleName string) ([]string, error) {
 	var (
 		arns   []string
@@ -347,11 +319,6 @@ func (c *realIAMClient) ListOpenIDConnectProviders(ctx context.Context) ([]strin
 }
 
 // ListRoles enumerates every role in the account.
-//
-// IAM's ListRoles returns each role's AssumeRolePolicyDocument inline, so this
-// is one paginated call rather than a GetRole per role — which matters on an
-// account with thousands of them, and matters more because IAM's rate limits
-// are not generous.
 func (c *realIAMClient) ListRoles(ctx context.Context) ([]*Role, error) {
 	var out []*Role
 	paginator := iam.NewListRolesPaginator(c.api, &iam.ListRolesInput{})

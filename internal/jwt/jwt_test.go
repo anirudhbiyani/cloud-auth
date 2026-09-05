@@ -82,10 +82,7 @@ func TestParseUnverifiedAudienceStringSetsSlice(t *testing.T) {
 	}
 }
 
-// The aud claim's shapes. A JWT may encode it as a string or an array, and both
-// are normalized — but the shapes that are NEITHER decide whether a token reads
-// as "audience absent" or as "audience present and wrong", which
-// checkAudienceBinding treats very differently.
+// The aud claim's shapes.
 func TestAudienceShapes(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -96,14 +93,11 @@ func TestAudienceShapes(t *testing.T) {
 		{"a single string", "sts.amazonaws.com", []string{"sts.amazonaws.com"}, "sts.amazonaws.com"},
 		{"an array", []string{"a", "b"}, []string{"a", "b"}, "a"},
 		{"an empty array", []string{}, []string{}, ""},
-		// Not an audience of any kind. Reading a number as one would give the
-		// token an audience it does not have.
+		// Not an audience of any kind.
 		{"a number", 42, nil, ""},
 		{"an object", map[string]any{"a": "b"}, nil, ""},
 		{"an array of numbers", []int{1, 2}, nil, ""},
-		// null is absence, for the same reason it is in StringOrSliceClaim:
-		// encoding/json treats it as a no-op, so without an explicit check it
-		// would silently become one audience that is the empty string.
+		// null is absence, for the same reason it is in StringOrSliceClaim: encoding/json treats it as a no-op, so without an explicit check it would silently become one audience that is the empty string.
 		{"null", nil, nil, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -124,9 +118,7 @@ func TestAudienceShapes(t *testing.T) {
 			if c.Audience != tc.wantOne {
 				t.Errorf("Audience = %q, want %q", c.Audience, tc.wantOne)
 			}
-			// Whatever the shape, an audience nobody put in the token must not
-			// come back out — this is the check every exchanger relies on
-			// before transmitting a proof.
+			// Whatever the shape, an audience nobody put in the token must not come back out — this is the check every exchanger relies on before transmitting a proof.
 			if c.HasAudience("some-other-party") {
 				t.Error("HasAudience returned true for an audience not in the token")
 			}
@@ -148,9 +140,7 @@ func TestAudienceAbsent(t *testing.T) {
 	}
 }
 
-// exp is optional, and a token without one must parse with a zero expiry rather
-// than fail — core.Credentials treats a zero expiry as already expired, which
-// is the safe reading, and that decision belongs there rather than here.
+// exp is optional, and a token without one must parse with a zero expiry rather than fail — core.Credentials treats a zero expiry as already expired, which is the safe reading, and that decision belongs there rather than here.
 func TestExpiryIsOptional(t *testing.T) {
 	c, err := ParseUnverified(makeJWT(t, map[string]any{"iss": "https://x", "sub": "s"}))
 	if err != nil {
@@ -174,11 +164,6 @@ func TestExpiryIsOptional(t *testing.T) {
 }
 
 // A payload that decodes from base64 but is not a JSON object.
-//
-// The distinct error matters: "not base64" points at a mangled token — a
-// truncated copy-paste, a wrongly-encoded segment — while "not JSON" points at
-// something that decoded fine and is not a JWT payload at all, which is usually
-// a token from a different system entirely.
 func TestParseUnverifiedRejectsNonJSONPayload(t *testing.T) {
 	enc := base64.RawURLEncoding.EncodeToString
 	header := enc([]byte(`{"alg":"RS256"}`))

@@ -11,8 +11,6 @@ import (
 )
 
 // The token endpoint echoes the assertion back inside its error description.
-// Entra and Google both do variants of this, and the resulting error string
-// travels all the way into the audit record the CLI writes to stderr.
 const echoingErrorBody = `{"error":"invalid_client","error_description":"AADSTS700027: ` +
 	`client assertion eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJyZXBvOm9yZy9yZXBvIn0.NOTAREALSIGNATURE ` +
 	`failed signature validation."}`
@@ -43,8 +41,7 @@ func TestExchangeErrorsDoNotEchoTheAssertion(t *testing.T) {
 	if !strings.Contains(msg, "[REDACTED]") {
 		t.Errorf("error should show a redaction marker:\n  %s", msg)
 	}
-	// The diagnosis must survive redaction, or we have traded a leak for an
-	// unusable error.
+	// The diagnosis must survive redaction, or we have traded a leak for an unusable error.
 	for _, want := range []string{"AADSTS700027", "invalid_client", "400"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error dropped %q, which is what makes it actionable:\n  %s", want, msg)

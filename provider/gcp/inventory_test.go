@@ -9,10 +9,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// `audit` covered one of the four clouds cloud-auth supports. A GCP workload
-// identity pool provider is where the attribute condition lives, so it is the
-// unit worth inventorying — the pool is a trust boundary with no conditions of
-// its own.
+// `audit` covered one of the four clouds cloud-auth supports.
 
 type listingWIF struct {
 	WorkloadIdentityClient
@@ -51,9 +48,7 @@ func TestGCPListTrustRecords(t *testing.T) {
 					},
 				},
 				{
-					// An aws-type provider trusts an ACCOUNT, verified by a
-					// SigV4 GetCallerIdentity call. There is no OIDC issuer,
-					// and inventing one would be wrong.
+					// An aws-type provider trusts an ACCOUNT, verified by a SigV4 GetCallerIdentity call.
 					Name: testPool + "/providers/aws", State: "ACTIVE",
 					AttributeCondition: `assertion.account == "123456789012"`,
 					AWS:                &AWSProviderConfig{AccountID: "123456789012"},
@@ -82,9 +77,7 @@ func TestGCPListTrustRecords(t *testing.T) {
 	if !strings.Contains(gh.SubjectCondition, "repo:myorg/myrepo") {
 		t.Errorf("SubjectCondition = %q, want the subject out of the CEL condition", gh.SubjectCondition)
 	}
-	// CEL, not a made-up IAM operator: recording "StringEquals" would let the
-	// wildcard-under-exact-operator detector reason about an expression
-	// language it knows nothing about.
+	// CEL, not a made-up IAM operator: recording "StringEquals" would let the wildcard-under-exact-operator detector reason about an expression language it knows nothing about.
 	if gh.Operator != "CEL" {
 		t.Errorf("Operator = %q, want CEL", gh.Operator)
 	}
@@ -98,9 +91,7 @@ func TestGCPListTrustRecords(t *testing.T) {
 	}
 }
 
-// A provider with no attribute condition admits every identity its issuer will
-// mint. The inventory must say so in the same terms the validator does, or the
-// two disagree about the same resource.
+// A provider with no attribute condition admits every identity its issuer will mint.
 func TestGCPMissingAttributeConditionScoresCritical(t *testing.T) {
 	t.Setenv(inventoryProjectEnv, "my-project")
 
@@ -126,9 +117,7 @@ func TestGCPMissingAttributeConditionScoresCritical(t *testing.T) {
 	}
 }
 
-// GCP keeps a deleted pool listed for 30 days. Reporting one as a live trust
-// puts a row in the audit nobody can act on — the resource is gone and only its
-// name is reserved.
+// GCP keeps a deleted pool listed for 30 days.
 func TestGCPSkipsSoftDeletedPools(t *testing.T) {
 	t.Setenv(inventoryProjectEnv, "my-project")
 
@@ -156,9 +145,7 @@ func TestGCPSkipsSoftDeletedPools(t *testing.T) {
 	}
 }
 
-// One unreadable pool must not abort the project, and must be recorded as a gap
-// rather than skipped: a pool nobody can read is missing information, not an
-// absence of trust.
+// One unreadable pool must not abort the project, and must be recorded as a gap rather than skipped: a pool nobody can read is missing information, not an absence of trust.
 func TestGCPUnreadablePoolIsRecordedAsUnknown(t *testing.T) {
 	t.Setenv(inventoryProjectEnv, "my-project")
 
@@ -192,8 +179,7 @@ func TestGCPUnreadablePoolIsRecordedAsUnknown(t *testing.T) {
 	}
 }
 
-// A pool is project-scoped and GCP has no tenant-wide listing, so there is no
-// project to infer — saying which variable to set beats a confusing 404.
+// A pool is project-scoped and GCP has no tenant-wide listing, so there is no project to infer — saying which variable to set beats a confusing 404.
 func TestGCPInventoryNeedsAProject(t *testing.T) {
 	t.Setenv(inventoryProjectEnv, "")
 	_, err := New(WithWorkloadIdentityClient(&listingWIF{})).ListTrustRecords(context.Background())

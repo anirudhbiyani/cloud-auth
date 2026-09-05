@@ -11,8 +11,7 @@ import (
 	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
 )
 
-// fakeIAMAPI stands in for *iam.Client so the wrapper's own logic — URL
-// decoding, pagination, not-found mapping — is testable without AWS.
+// fakeIAMAPI stands in for *iam.Client so the wrapper's own logic — URL decoding, pagination, not-found mapping — is testable without AWS.
 type fakeIAMAPI struct {
 	iamAPI
 	getRole      func(context.Context, *iam.GetRoleInput) (*iam.GetRoleOutput, error)
@@ -38,8 +37,7 @@ func (f *fakeIAMAPI) CreateRole(ctx context.Context, in *iam.CreateRoleInput, _ 
 	return f.createRole(ctx, in)
 }
 
-// IAM returns the assume-role policy URL-ENCODED. Handing that to the trust
-// parser verbatim would fail to unmarshal, so the wrapper must decode it.
+// IAM returns the assume-role policy URL-ENCODED.
 func TestGetRoleDecodesURLEncodedPolicy(t *testing.T) {
 	const policy = `{"Version":"2012-10-17","Statement":[{"Effect":"Allow"}]}`
 	c := &realIAMClient{api: &fakeIAMAPI{
@@ -64,8 +62,7 @@ func TestGetRoleDecodesURLEncodedPolicy(t *testing.T) {
 	}
 }
 
-// A missing role must be reported as "not found" rather than a raw SDK error,
-// because Setup branches on it to decide create-vs-update.
+// A missing role must be reported as "not found" rather than a raw SDK error, because Setup branches on it to decide create-vs-update.
 func TestGetRoleNotFoundIsDistinguishable(t *testing.T) {
 	c := &realIAMClient{api: &fakeIAMAPI{
 		getRole: func(context.Context, *iam.GetRoleInput) (*iam.GetRoleOutput, error) {
@@ -81,8 +78,7 @@ func TestGetRoleNotFoundIsDistinguishable(t *testing.T) {
 	}
 }
 
-// IAM paginates. Returning only the first page would make a drift check report
-// policies as missing when they are merely on page two.
+// IAM paginates.
 func TestListAttachedRolePoliciesPaginates(t *testing.T) {
 	calls := 0
 	c := &realIAMClient{api: &fakeIAMAPI{
@@ -167,9 +163,7 @@ func TestIsNotFoundIgnoresOtherErrors(t *testing.T) {
 	}
 }
 
-// The provider is registered at package init, long before credentials matter,
-// so the client must be built lazily — and an injected fake must always win so
-// tests never touch AWS.
+// The provider is registered at package init, long before credentials matter, so the client must be built lazily — and an injected fake must always win so tests never touch AWS.
 func TestProviderIAMPrefersInjectedClient(t *testing.T) {
 	injected := &stubIAM{}
 	p := New(WithIAMClient(injected))
@@ -198,9 +192,7 @@ func TestProviderIAMBuildsLazilyWhenAbsent(t *testing.T) {
 	}
 }
 
-// int -> int32 truncation would turn 2^32+3600 into a role that looks like it
-// has a valid 1-hour session and silently does not have what was asked for.
-// The conversion must refuse the input rather than reinterpret it.
+// int -> int32 truncation would turn 2^32+3600 into a role that looks like it has a valid 1-hour session and silently does not have what was asked for.
 func TestCreateRoleRejectsOutOfRangeSessionDuration(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

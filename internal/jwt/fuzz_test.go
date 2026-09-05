@@ -7,9 +7,7 @@ import (
 	"testing"
 )
 
-// ParseUnverified reads attacker-adjacent input: a token from a file whose path
-// comes from the environment. It must never panic, and it must never report an
-// audience or expiry the payload does not contain.
+// ParseUnverified reads attacker-adjacent input: a token from a file whose path comes from the environment.
 func FuzzParseUnverified(f *testing.F) {
 	seg := func(v any) string {
 		b, _ := json.Marshal(v)

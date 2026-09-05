@@ -1,7 +1,4 @@
-// Package adapters wraps cloud-auth's mint→exchange flow in each cloud SDK's
-// native credential interface, so a workload drops cloud-auth straight into its
-// existing SDK config with no glue code. Each adapter caches credentials in
-// memory and refreshes them before expiry.
+// Package adapters wraps cloud-auth's mint→exchange flow in each cloud SDK's native credential interface, so a workload drops cloud-auth straight into its existing SDK config with no glue code.
 package adapters
 
 import (
@@ -35,9 +32,7 @@ func resolve(opts []Option) options {
 	return o
 }
 
-// newCache builds a credential cache whose fetch mints a source proof and
-// exchanges it at the target. This is the single mint→exchange pipeline every
-// adapter shares.
+// newCache builds a credential cache whose fetch mints a source proof and exchanges it at the target.
 func newCache(src core.SourceProvider, ex core.Exchanger, target core.Target, o options) *cache.Cache {
 	fetch := func(ctx context.Context) (*core.Credentials, error) {
 		tok, err := src.Mint(ctx, target.Audience())

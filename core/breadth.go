@@ -8,18 +8,6 @@ import (
 )
 
 // Subject breadth scoring.
-//
-// This is deliberately NOT a widening of isUnscoped, which answers a different
-// and narrower question: "does this pattern pin nothing at all". That question
-// has one correct answer, it is enforced by FuzzIsUnscoped — anything pinning a
-// real character is scoped — and the create-or-refuse gate depends on it.
-//
-// The question an operator actually has is "how much does this admit", and it
-// is not a boolean. "repo:org/*" pins real characters, so it is scoped by that
-// definition, and it also admits every repository in the organisation including
-// ones created next year. Both statements are true. Conflating them into one
-// predicate is what made `--subject "repo:myorg/myrepo:*"` — the value the
-// README told people to type — sail through with no warning at all.
 
 // Breadth is how much a subject pattern admits.
 type Breadth int
@@ -27,17 +15,13 @@ type Breadth int
 const (
 	// BreadthExact admits one workload. No wildcards.
 	BreadthExact Breadth = iota
-	// BreadthInfo has an interior wildcard: narrower than it looks, but worth
-	// seeing.
+	// BreadthInfo has an interior wildcard: narrower than it looks, but worth seeing.
 	BreadthInfo
-	// BreadthMedium admits every ref, tag and event of one repository —
-	// including pull_request, which a fork reaches.
+	// BreadthMedium admits every ref, tag and event of one repository — including pull_request, which a fork reaches.
 	BreadthMedium
-	// BreadthHigh admits every repository in an organisation, or every
-	// ServiceAccount in a cluster, including ones that do not exist yet.
+	// BreadthHigh admits every repository in an organisation, or every ServiceAccount in a cluster, including ones that do not exist yet.
 	BreadthHigh
-	// BreadthCritical admits any tenant of the issuer. On a shared global
-	// issuer that is every user of the platform.
+	// BreadthCritical admits any tenant of the issuer.
 	BreadthCritical
 )
 
@@ -70,15 +54,10 @@ type BreadthAssessment struct {
 	Advice string `json:"advice,omitempty"`
 }
 
-// NeedsJustification reports whether a subject is broad enough that creating it
-// should be a deliberate, recorded act rather than a default.
+// NeedsJustification reports whether a subject is broad enough that creating it should be a deliberate, recorded act rather than a default.
 func (a BreadthAssessment) NeedsJustification() bool { return a.Breadth >= BreadthCritical }
 
 // ScoreSubject grades how much a subject pattern admits.
-//
-// An empty subject is Critical: a trust that pins only the audience is
-// assumable by every workload the issuer serves, and for the common issuers the
-// audience is a freely-requestable constant.
 func ScoreSubject(subject string) BreadthAssessment {
 	trimmed := strings.TrimSpace(subject)
 
@@ -92,8 +71,7 @@ func ScoreSubject(subject string) BreadthAssessment {
 		}
 	}
 
-	// Pins nothing at all. isUnscoped is the authority on this case, so the
-	// scorer defers to it rather than restating the rule and drifting from it.
+	// Pins nothing at all.
 	if isUnscoped(trimmed) {
 		return BreadthAssessment{
 			Subject: subject, Breadth: BreadthCritical, BreadthText: BreadthCritical.String(),
@@ -111,9 +89,7 @@ func ScoreSubject(subject string) BreadthAssessment {
 
 	segments := strings.Split(trimmed, ":")
 
-	// A wildcard in the FIRST segment of a namespaced subject leaves the tenant
-	// unpinned. On a shared global issuer — GitHub, GitLab, Terraform Cloud all
-	// run one issuer across every tenant — that is every user of the platform.
+	// A wildcard in the FIRST segment of a namespaced subject leaves the tenant unpinned.
 	if len(segments) > 1 && strings.ContainsAny(segments[0], "*?") {
 		return BreadthAssessment{
 			Subject: subject, Breadth: BreadthCritical, BreadthText: BreadthCritical.String(),
@@ -136,9 +112,7 @@ func ScoreSubject(subject string) BreadthAssessment {
 		return a
 	}
 
-	// A trailing ":*" on an otherwise-pinned subject. Narrow by comparison, and
-	// still admits every ref, every tag, and pull_request — which a fork's pull
-	// request reaches.
+	// A trailing ":*" on an otherwise-pinned subject.
 	if strings.HasSuffix(trimmed, ":*") {
 		return BreadthAssessment{
 			Subject: subject, Breadth: BreadthMedium, BreadthText: BreadthMedium.String(),
@@ -156,11 +130,9 @@ func ScoreSubject(subject string) BreadthAssessment {
 	}
 }
 
-// scoreNamespaceWildcard handles a wildcard in a middle segment, which is where
-// "every repo in the org" and "every ServiceAccount in the cluster" live.
+// scoreNamespaceWildcard handles a wildcard in a middle segment, which is where "every repo in the org" and "every ServiceAccount in the cluster" live.
 func scoreNamespaceWildcard(subject string, segments []string) (BreadthAssessment, bool) {
-	// system:serviceaccount:<namespace>:<name> — a wildcard in either position
-	// admits every ServiceAccount in a namespace, or in the whole cluster.
+	// system:serviceaccount:<namespace>:<name> — a wildcard in either position admits every ServiceAccount in a namespace, or in the whole cluster.
 	if len(segments) >= 4 && segments[0] == "system" && segments[1] == "serviceaccount" {
 		nsWild := strings.ContainsAny(segments[2], "*?")
 		nameWild := strings.ContainsAny(segments[3], "*?")
@@ -189,8 +161,7 @@ func scoreNamespaceWildcard(subject string, segments []string) (BreadthAssessmen
 		return BreadthAssessment{}, false
 	}
 
-	// repo:<org>/<repo>:… — a wildcard in the org/repo segment admits every
-	// repository in the organisation.
+	// repo:<org>/<repo>:… — a wildcard in the org/repo segment admits every repository in the organisation.
 	if len(segments) >= 2 && segments[0] == "repo" && strings.ContainsAny(segments[1], "*?") {
 		owner, _, hasSlash := strings.Cut(segments[1], "/")
 		if hasSlash && !strings.ContainsAny(owner, "*?") {
@@ -206,24 +177,10 @@ func scoreNamespaceWildcard(subject string, segments []string) (BreadthAssessmen
 }
 
 // SharedIssuerNote is context worth carrying next to a broad subject.
-//
-// AWS's June 2025 guardrail blocks CREATION of roles that do not evaluate the
-// tenancy claim across 17 shared identity providers. It requires only that
-// `sub` be evaluated, not that it be narrow — "repo:org/*" satisfies it — and it
-// explicitly does not apply to roles that already existed. The pre-guardrail
-// backlog is the population this scoring exists to serve.
 const SharedIssuerNote = "AWS's shared-IdP guardrail requires only that `sub` be EVALUATED, not that " +
 	"it be narrow, and does not apply to roles created before June 2025"
 
-// SubjectBreadthValidator reports how much each subject in the live trust
-// admits.
-//
-// A separate validator rather than an extra condition inside
-// TrustPolicyMatchValidator, because the two answer different questions and
-// carry different severities. That one asks "is the trust still what was
-// configured", and its answer is pass or fail. This one asks "how much does it
-// admit", and folding a medium-breadth finding into a pass/fail check would
-// fail every legitimate `repo:org/repo:*` deployment on a matter of degree.
+// SubjectBreadthValidator reports how much each subject in the live trust admits.
 type SubjectBreadthValidator struct {
 	source TrustPolicySource
 }
@@ -265,10 +222,7 @@ func (v *SubjectBreadthValidator) Validate(ctx context.Context, ref MechanismRef
 	}
 
 	if len(live.Subjects) == 0 {
-		// No condition at all is the widest possible subject, and
-		// TrustPolicyMatchValidator already fails on it — so this reports the
-		// breadth without also failing, rather than double-counting one problem
-		// as two failures.
+		// No condition at all is the widest possible subject, and TrustPolicyMatchValidator already fails on it — so this reports the breadth without also failing, rather than double-counting one problem as two failures.
 		a := ScoreSubject("")
 		check.Severity = SeverityCritical
 		check.Status = CheckStatusFailed
@@ -302,13 +256,6 @@ func (v *SubjectBreadthValidator) Validate(ctx context.Context, ref MechanismRef
 	}
 
 	// The severity, not the status, is what grades this.
-	//
-	// ValidationReport.IsValid already counts a check only when it is Failed
-	// AND its severity is Error or above, so a medium-breadth subject is
-	// reported as a finding without invalidating the report — which is the
-	// behaviour wanted: `repo:org/repo:*` is worth telling someone about, and
-	// failing every deployment that uses it would train people to ignore this
-	// check entirely.
 	check.Severity = severityForBreadth(worst.Breadth)
 	check.Status = CheckStatusFailed
 	check.Message = strings.Join(messages, "; ")

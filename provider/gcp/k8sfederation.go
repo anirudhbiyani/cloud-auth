@@ -8,15 +8,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// A Kubernetes ServiceAccount federated to GCP is a workload identity pool with
-// an OIDC provider: the cluster's projected SA token is an OIDC token, its
-// issuer is the cluster's OIDC issuer, and its sub claim is the fixed string
-// system:serviceaccount:<namespace>:<name>.
-//
-// So this translates and delegates, as provider/aws and provider/azure do. The
-// Outputs and MechanismRef are a GCPWorkloadIdentityPool, deliberately: that is
-// what exists in the project afterwards, and validate and delete branch on
-// ref.Type.
+// A Kubernetes ServiceAccount federated to GCP is a workload identity pool with an OIDC provider: the cluster's projected SA token is an OIDC token, its issuer is the cluster's OIDC issuer, and its sub claim is the fixed string system:serviceaccount:<namespace>:<name>.
 
 // k8sSubjectFormat is the sub claim a projected ServiceAccount token carries.
 const k8sSubjectFormat = "system:serviceaccount:%s:%s"
@@ -30,8 +22,7 @@ func (p *Provider) setupK8sFederation(ctx context.Context, spec *core.K8sService
 	return p.setupWorkloadIdentityPool(ctx, translated, opts)
 }
 
-// k8sToWorkloadIdentitySpec rewrites a K8s federation spec as the workload
-// identity pool it is.
+// k8sToWorkloadIdentitySpec rewrites a K8s federation spec as the workload identity pool it is.
 func k8sToWorkloadIdentitySpec(spec *core.K8sServiceAccountFederationSpec) (*core.GCPWorkloadIdentityPoolSpec, error) {
 	if spec.TargetCloud != core.GCP {
 		return nil, core.ErrValidation(fmt.Sprintf(
@@ -58,13 +49,7 @@ func k8sToWorkloadIdentitySpec(spec *core.K8sServiceAccountFederationSpec) (*cor
 	cfg := spec.GCPConfig
 	subject := fmt.Sprintf(k8sSubjectFormat, spec.Namespace, spec.ServiceAccountName)
 
-	// The attribute condition is what stops the provider accepting every
-	// identity its issuer will mint a token for. Setting it here rather than
-	// leaving it to the operator is the difference between this path being
-	// usable and it being a confused-deputy hole by default — core's own
-	// validation refuses a provider without one, so an unset condition would
-	// simply fail rather than silently widen, but failing an operator who gave
-	// a namespace and a name is not a useful outcome either.
+	// The attribute condition is what stops the provider accepting every identity its issuer will mint a token for.
 	condition := fmt.Sprintf("assertion.sub == %q", subject)
 
 	return &core.GCPWorkloadIdentityPoolSpec{
@@ -76,11 +61,7 @@ func k8sToWorkloadIdentitySpec(spec *core.K8sServiceAccountFederationSpec) (*cor
 		ProviderDisplayName: fmt.Sprintf("%s/%s", spec.Namespace, spec.ServiceAccountName),
 		ProviderType:        "oidc",
 		OIDCIssuerURL:       spec.OIDCIssuerURL,
-		// The projected token's aud, which the AKS/EKS/GKE webhooks default to
-		// the cluster's API server unless asked otherwise. Left to the operator
-		// via the spec rather than guessed: an allowed audience that does not
-		// match what the cluster mints produces a provider that rejects
-		// everything.
+		// The projected token's aud, which the AKS/EKS/GKE webhooks default to the cluster's API server unless asked otherwise.
 		AttributeMapping: map[string]string{
 			"google.subject": "assertion.sub",
 		},
@@ -92,11 +73,7 @@ func k8sToWorkloadIdentitySpec(spec *core.K8sServiceAccountFederationSpec) (*cor
 	}, nil
 }
 
-// k8sPoolID derives a stable pool id, so re-running setup for the same cluster
-// reuses the pool instead of creating another.
-//
-// GCP soft-deletes pools and reserves the id for 30 days, which makes a stable
-// id the difference between an idempotent re-run and a name nobody can reuse.
+// k8sPoolID derives a stable pool id, so re-running setup for the same cluster reuses the pool instead of creating another.
 func k8sPoolID(spec *core.K8sServiceAccountFederationSpec) string {
 	return gcpSafeID("k8s-" + k8sClusterName(spec))
 }
@@ -113,8 +90,7 @@ func k8sClusterName(spec *core.K8sServiceAccountFederationSpec) string {
 	return "cluster"
 }
 
-// gcpSafeID reduces a name to the 4-32 character lowercase form GCP requires
-// for pool and provider ids.
+// gcpSafeID reduces a name to the 4-32 character lowercase form GCP requires for pool and provider ids.
 func gcpSafeID(in string) string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(in) {
@@ -129,8 +105,7 @@ func gcpSafeID(in string) string {
 	if len(id) > 32 {
 		id = strings.Trim(id[:32], "-")
 	}
-	// The floor is real: GCP rejects an id under 4 characters, and a namespace
-	// like "ci" would otherwise produce one.
+	// The floor is real: GCP rejects an id under 4 characters, and a namespace like "ci" would otherwise produce one.
 	for len(id) < 4 {
 		id += "-x"
 	}

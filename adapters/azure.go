@@ -10,8 +10,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/internal/cache"
 )
 
-// AzureProvider satisfies azcore.TokenCredential so it can be passed to any
-// Azure SDK client.
+// AzureProvider satisfies azcore.TokenCredential so it can be passed to any Azure SDK client.
 type AzureProvider struct {
 	cache *cache.Cache
 }
@@ -34,9 +33,4 @@ func (p *AzureProvider) GetToken(ctx context.Context, _ policy.TokenRequestOptio
 }
 
 // Invalidate discards the cached credentials so the next call re-exchanges.
-//
-// Expiry cannot express revocation: a session dropped server-side, or a role
-// whose policy changed, still looks valid locally until it runs out. A caller
-// that has just seen a 403 knows more than the cache does, and this is how it
-// says so.
 func (p *AzureProvider) Invalidate() { p.cache.Invalidate() }
