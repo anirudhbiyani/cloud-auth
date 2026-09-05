@@ -39,9 +39,9 @@ func WithAWSMaxRetries(n int) AWSExchangerOption { return func(e *AWSExchanger) 
 func NewAWSExchanger(opts ...AWSExchangerOption) *AWSExchanger {
 	e := &AWSExchanger{
 		endpoint:   DefaultAWSSTSEndpoint,
-		httpClient: httpx.NewSTSClient(10 * time.Second),
-		maxRetries: 2,
-		backoff:    100 * time.Millisecond,
+		httpClient: httpx.NewSTSClient(defaultExchangeTimeout),
+		maxRetries: defaultMaxRetries,
+		backoff:    defaultBackoff,
 	}
 	for _, o := range opts {
 		o(e)

@@ -114,12 +114,5 @@ func (g *GCP) Mint(ctx context.Context, audience string) (*core.SourceToken, err
 	if err != nil {
 		return nil, fmt.Errorf("gcp: parsing minted token: %w", err)
 	}
-	return &core.SourceToken{
-		Kind:     core.OIDC,
-		Value:    string(body),
-		Issuer:   claims.Issuer,
-		Subject:  claims.Subject,
-		Audience: audience,
-		Expiry:   claims.Expiry,
-	}, nil
+	return oidcToken(string(body), claims, audience), nil
 }

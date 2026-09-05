@@ -32,6 +32,16 @@ const maxErrorBody = 512
 // a caller indefinitely through the exponential schedule.
 const maxBackoff = 5 * time.Second
 
+// Defaults every exchanger starts from. They live here, next to the retry loop
+// that consumes them, because they are one policy rather than four coincidences:
+// a change to how hard cloud-auth leans on a token endpoint should not have to
+// be made in four files and be half-applied.
+const (
+	defaultExchangeTimeout = 10 * time.Second
+	defaultMaxRetries      = 2
+	defaultBackoff         = 100 * time.Millisecond
+)
+
 // httpError carries the status, body and headers of a non-2xx STS response.
 // The headers are kept for Retry-After, which is the only reliable signal for
 // how long a throttled caller should wait.

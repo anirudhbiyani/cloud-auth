@@ -242,13 +242,7 @@ func (v *SubjectBreadthValidator) Description() string {
 // Validate scores every subject in the live trust policy.
 func (v *SubjectBreadthValidator) Validate(ctx context.Context, ref MechanismRef) ValidationCheck {
 	start := time.Now()
-	check := ValidationCheck{
-		ID:          v.ID(),
-		Name:        v.Name(),
-		Description: v.Description(),
-		Severity:    SeverityWarning,
-		Evidence:    map[string]any{},
-	}
+	check := NewCheck(v, SeverityWarning)
 
 	if v.source == nil {
 		check.Status = CheckStatusSkipped

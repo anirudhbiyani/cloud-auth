@@ -897,13 +897,8 @@ func (v *authMethodExistsValidator) Description() string {
 }
 
 func (v *authMethodExistsValidator) Validate(ctx context.Context, ref core.MechanismRef) core.ValidationCheck {
-	check := core.ValidationCheck{
-		ID:          v.ID(),
-		Name:        v.Name(),
-		Description: v.Description(),
-		Severity:    core.SeverityCritical,
-		Evidence:    map[string]interface{}{"path": v.path},
-	}
+	check := core.NewCheck(v, core.SeverityCritical)
+	check.Evidence["path"] = v.path
 
 	authMethod, err := v.client.ReadAuthMethod(ctx, v.path)
 	if err != nil {
@@ -929,16 +924,9 @@ func (v *roleExistsValidator) Name() string        { return "Auth Role Exists" }
 func (v *roleExistsValidator) Description() string { return "Checks if the Vault auth role exists" }
 
 func (v *roleExistsValidator) Validate(ctx context.Context, ref core.MechanismRef) core.ValidationCheck {
-	check := core.ValidationCheck{
-		ID:          v.ID(),
-		Name:        v.Name(),
-		Description: v.Description(),
-		Severity:    core.SeverityCritical,
-		Evidence: map[string]interface{}{
-			"auth_path": v.authPath,
-			"role_name": v.roleName,
-		},
-	}
+	check := core.NewCheck(v, core.SeverityCritical)
+	check.Evidence["auth_path"] = v.authPath
+	check.Evidence["role_name"] = v.roleName
 
 	// Try JWT role first
 	jwtRole, err := v.client.ReadJWTRole(ctx, v.authPath, v.roleName)

@@ -1037,13 +1037,8 @@ func (v *poolExistsValidator) Description() string {
 }
 
 func (v *poolExistsValidator) Validate(ctx context.Context, ref core.MechanismRef) core.ValidationCheck {
-	check := core.ValidationCheck{
-		ID:          v.ID(),
-		Name:        v.Name(),
-		Description: v.Description(),
-		Severity:    core.SeverityCritical,
-		Evidence:    map[string]interface{}{"pool_name": v.name},
-	}
+	check := core.NewCheck(v, core.SeverityCritical)
+	check.Evidence["pool_name"] = v.name
 
 	pool, err := v.client.GetWorkloadIdentityPool(ctx, v.name)
 	if err != nil {
@@ -1071,13 +1066,8 @@ func (v *providerExistsValidator) Description() string {
 }
 
 func (v *providerExistsValidator) Validate(ctx context.Context, ref core.MechanismRef) core.ValidationCheck {
-	check := core.ValidationCheck{
-		ID:          v.ID(),
-		Name:        v.Name(),
-		Description: v.Description(),
-		Severity:    core.SeverityCritical,
-		Evidence:    map[string]interface{}{"provider_name": v.name},
-	}
+	check := core.NewCheck(v, core.SeverityCritical)
+	check.Evidence["provider_name"] = v.name
 
 	provider, err := v.client.GetWorkloadIdentityPoolProvider(ctx, v.name)
 	if err != nil {
@@ -1105,13 +1095,8 @@ func (v *serviceAccountExistsValidator) Description() string {
 }
 
 func (v *serviceAccountExistsValidator) Validate(ctx context.Context, ref core.MechanismRef) core.ValidationCheck {
-	check := core.ValidationCheck{
-		ID:          v.ID(),
-		Name:        v.Name(),
-		Description: v.Description(),
-		Severity:    core.SeverityCritical,
-		Evidence:    map[string]interface{}{"email": v.email},
-	}
+	check := core.NewCheck(v, core.SeverityCritical)
+	check.Evidence["email"] = v.email
 
 	saName := fmt.Sprintf("projects/%s/serviceAccounts/%s", v.projectID, v.email)
 	sa, err := v.client.GetServiceAccount(ctx, saName)

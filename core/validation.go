@@ -370,13 +370,7 @@ func (v *TrustPolicyMatchValidator) Description() string {
 
 func (v *TrustPolicyMatchValidator) Validate(ctx context.Context, ref MechanismRef) ValidationCheck {
 	start := time.Now()
-	check := ValidationCheck{
-		ID:          v.ID(),
-		Name:        v.Name(),
-		Description: v.Description(),
-		Severity:    SeverityError,
-		Evidence:    make(map[string]interface{}),
-	}
+	check := NewCheck(v, SeverityError)
 
 	check.Evidence["expected_issuer"] = v.expectedIssuer
 	check.Evidence["expected_audience"] = v.expectedAudience
@@ -560,13 +554,7 @@ func (v *PermissionsValidator) Description() string {
 
 func (v *PermissionsValidator) Validate(ctx context.Context, ref MechanismRef) ValidationCheck {
 	start := time.Now()
-	check := ValidationCheck{
-		ID:          v.ID(),
-		Name:        v.Name(),
-		Description: v.Description(),
-		Severity:    SeverityError,
-		Evidence:    make(map[string]interface{}),
-	}
+	check := NewCheck(v, SeverityError)
 
 	check.Evidence["required_permissions"] = v.requiredPermissions
 
@@ -613,6 +601,24 @@ func (v *PermissionsValidator) Validate(ctx context.Context, ref MechanismRef) V
 	}
 	check.Duration = time.Since(start)
 	return check
+}
+
+// NewCheck starts a check carrying the validator's own identity, which every
+// implementation was otherwise copying field by field. Evidence is always a
+// usable map, so a caller can assign into it without checking for nil.
+//
+// Status is deliberately left unset rather than defaulted to passed: a
+// validator that returns without deciding has not verified anything, and the
+// zero CheckStatus is none of the four valid values, so nothing reads it as a
+// pass.
+func NewCheck(v Validator, sev Severity) ValidationCheck {
+	return ValidationCheck{
+		ID:          v.ID(),
+		Name:        v.Name(),
+		Description: v.Description(),
+		Severity:    sev,
+		Evidence:    map[string]any{},
+	}
 }
 
 // RunValidation executes a set of validators and returns a report.

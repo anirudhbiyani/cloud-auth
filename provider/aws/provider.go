@@ -1055,13 +1055,8 @@ func (v *roleExistsValidator) Name() string        { return "AWS Role Exists" }
 func (v *roleExistsValidator) Description() string { return "Checks if the IAM role exists" }
 
 func (v *roleExistsValidator) Validate(ctx context.Context, ref core.MechanismRef) core.ValidationCheck {
-	check := core.ValidationCheck{
-		ID:          v.ID(),
-		Name:        v.Name(),
-		Description: v.Description(),
-		Severity:    core.SeverityCritical,
-		Evidence:    map[string]interface{}{"role_name": v.roleName},
-	}
+	check := core.NewCheck(v, core.SeverityCritical)
+	check.Evidence["role_name"] = v.roleName
 
 	role, err := v.client.GetRole(ctx, v.roleName)
 	if err != nil {
@@ -1088,13 +1083,8 @@ func (v *oidcProviderExistsValidator) Description() string {
 }
 
 func (v *oidcProviderExistsValidator) Validate(ctx context.Context, ref core.MechanismRef) core.ValidationCheck {
-	check := core.ValidationCheck{
-		ID:          v.ID(),
-		Name:        v.Name(),
-		Description: v.Description(),
-		Severity:    core.SeverityCritical,
-		Evidence:    map[string]interface{}{"oidc_provider_arn": v.arn},
-	}
+	check := core.NewCheck(v, core.SeverityCritical)
+	check.Evidence["oidc_provider_arn"] = v.arn
 
 	provider, err := v.client.GetOpenIDConnectProvider(ctx, v.arn)
 	if err != nil {
