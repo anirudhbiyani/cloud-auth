@@ -32,13 +32,6 @@ func WithStateStore(s StateStore) ManagerOption {
 	}
 }
 
-// WithValidators sets the validator registry.
-func WithValidators(v *ValidatorRegistry) ManagerOption {
-	return func(m *DefaultManager) {
-		m.validators = v
-	}
-}
-
 // NewManager creates a new DefaultManager with the given options.
 func NewManager(opts ...ManagerOption) *DefaultManager {
 	m := &DefaultManager{

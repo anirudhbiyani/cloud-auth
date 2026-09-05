@@ -23,7 +23,6 @@ const DefaultAzureEndpoint = "https://login.microsoftonline.com"
 // and is rejected with actionable OIDC-bridge guidance.
 type AzureExchanger struct {
 	endpoint   string
-	scope      string
 	httpClient *http.Client
 	maxRetries int
 	backoff    time.Duration
@@ -35,7 +34,6 @@ type AzureExchangerOption func(*AzureExchanger)
 func WithAzureEndpoint(u string) AzureExchangerOption {
 	return func(e *AzureExchanger) { e.endpoint = u }
 }
-func WithAzureScope(s string) AzureExchangerOption { return func(e *AzureExchanger) { e.scope = s } }
 func WithAzureHTTPClient(h *http.Client) AzureExchangerOption {
 	return func(e *AzureExchanger) { e.httpClient = h }
 }
@@ -81,11 +79,10 @@ func (e *AzureExchanger) Exchange(ctx context.Context, tok *core.SourceToken, ta
 	endpoint := strings.TrimRight(e.endpoint, "/") + "/" + url.PathEscape(t.Tenant) + "/oauth2/v2.0/token"
 	// The scope comes from the target, which requires it. The exchanger's own
 	// default was https://management.azure.com/.default — the Azure control
-	// plane — handed to any caller who did not think about it.
+	// plane — handed to any caller who did not think about it. There is
+	// deliberately no exchanger-level override: one caller forgetting to set it
+	// is how that default reached production in the first place.
 	scope := t.Scope
-	if e.scope != "" {
-		scope = e.scope
-	}
 	form := url.Values{
 		"grant_type":            {"client_credentials"},
 		"client_id":             {t.ClientID},

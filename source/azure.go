@@ -38,9 +38,6 @@ type AzureOption func(*Azure)
 func WithAzureIMDSURL(u string) AzureOption          { return func(a *Azure) { a.imdsURL = u } }
 func WithAzureHTTPClient(h *http.Client) AzureOption { return func(a *Azure) { a.httpClient = h } }
 func WithAzureEnv(f func(string) string) AzureOption { return func(a *Azure) { a.getenv = f } }
-func WithAzureFileReader(f func(string) ([]byte, error)) AzureOption {
-	return func(a *Azure) { a.readFile = f }
-}
 
 // WithAzureK8sTokenClient injects a Kubernetes TokenRequest client used by the
 // AKS Workload Identity mint path to dynamically re-mint a projected token for a
