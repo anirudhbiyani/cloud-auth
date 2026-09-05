@@ -702,15 +702,6 @@ func (p *Provider) deleteRoleTrustOIDC(ctx context.Context, ref core.MechanismRe
 //
 // This enables AWS workloads to authenticate to GCP without using long-lived credentials.
 // The returned token is a JSON object containing the signed request that GCP STS can validate.
-//
-// Usage:
-//
-//	token, err := awsProvider.GenerateGCPWorkloadIdentityToken(ctx, &GCPWorkloadIdentityInput{
-//	    ProjectNumber: "123456789012",
-//	    PoolID:        "my-pool",
-//	    ProviderID:    "aws-provider",
-//	})
-//	// Use token.Token with GCP provider's Token() method
 func (p *Provider) GenerateGCPWorkloadIdentityToken(ctx context.Context, input *GCPWorkloadIdentityInput) (*CrossCloudTokenOutput, error) {
 	if p.stsClient == nil {
 		return nil, core.ErrValidation("AWS STS client not configured").

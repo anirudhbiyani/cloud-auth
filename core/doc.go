@@ -94,30 +94,8 @@
 //
 // # Example
 //
-//	spec := &core.AWSRoleTrustOIDCSpec{
-//	    RoleName:        "github-deploy",
-//	    AccountID:       "123456789012",
-//	    OIDCProviderURL: "https://token.actions.githubusercontent.com",
-//	    Audience:        "sts.amazonaws.com",
-//	    Subject:         "repo:myorg/myrepo:ref:refs/heads/main",
-//	    Source:          core.GitHubOIDC,
-//	}
-//
-//	outputs, err := core.Setup(ctx, spec)
-//	if err != nil {
-//	    return err
-//	}
-//
-//	report, err := core.Validate(ctx, outputs.Ref)
-//	if err != nil {
-//	    return err
-//	}
-//	if !report.HasChecks() || !report.IsValid() || !report.IsComplete() {
-//	    for _, c := range report.FailedChecks() {
-//	        log.Printf("failed: %s — %s", c.Name, c.Remediation)
-//	    }
-//	    for _, c := range report.SkippedChecks() {
-//	        log.Printf("NOT VERIFIED: %s — %s", c.Name, c.Remediation)
-//	    }
-//	}
+// See the Example functions below — ExampleSetup walks the full
+// setup-then-validate flow. They live in example_test.go so the compiler checks
+// them; this section used to carry a second, uncompiled copy of the same code,
+// which meant the two could drift and only one of them would ever be noticed.
 package core
