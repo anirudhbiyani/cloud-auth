@@ -689,13 +689,6 @@ func (p *Provider) Delete(ctx context.Context, ref core.MechanismRef, opts core.
 //   - AWS secrets engine must be enabled at the specified path
 //   - A role must be configured with appropriate permissions
 //   - Vault must have AWS credentials configured for the secrets engine
-//
-// Usage:
-//
-//	creds, err := vaultProvider.GenerateAWSCredentials(ctx, &GenerateAWSCredentialsInput{
-//	    SecretsEnginePath: "aws",
-//	    RoleName:          "my-role",
-//	})
 func (p *Provider) GenerateAWSCredentials(ctx context.Context, input *GenerateAWSCredentialsInput) (*CrossCloudTokenOutput, error) {
 	if p.client == nil {
 		return nil, core.ErrValidation("Vault client not configured").
@@ -755,14 +748,6 @@ func (p *Provider) GenerateAWSCredentials(ctx context.Context, input *GenerateAW
 //   - GCP secrets engine must be enabled at the specified path
 //   - A role must be configured with appropriate permissions
 //   - Vault must have a GCP service account configured for the secrets engine
-//
-// Usage:
-//
-//	creds, err := vaultProvider.GenerateGCPCredentials(ctx, &GenerateGCPCredentialsInput{
-//	    SecretsEnginePath: "gcp",
-//	    RoleName:          "my-role",
-//	    KeyType:           "access_token",
-//	})
 func (p *Provider) GenerateGCPCredentials(ctx context.Context, input *GenerateGCPCredentialsInput) (*CrossCloudTokenOutput, error) {
 	if p.client == nil {
 		return nil, core.ErrValidation("Vault client not configured").
@@ -839,13 +824,6 @@ func (p *Provider) GenerateGCPCredentials(ctx context.Context, input *GenerateGC
 //   - Azure secrets engine must be enabled at the specified path
 //   - A role must be configured with appropriate Azure AD permissions
 //   - Vault must have Azure credentials configured for the secrets engine
-//
-// Usage:
-//
-//	creds, err := vaultProvider.GenerateAzureCredentials(ctx, &GenerateAzureCredentialsInput{
-//	    SecretsEnginePath: "azure",
-//	    RoleName:          "my-role",
-//	})
 func (p *Provider) GenerateAzureCredentials(ctx context.Context, input *GenerateAzureCredentialsInput) (*CrossCloudTokenOutput, error) {
 	if p.client == nil {
 		return nil, core.ErrValidation("Vault client not configured").

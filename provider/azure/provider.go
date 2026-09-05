@@ -830,15 +830,6 @@ func (p *Provider) Delete(ctx context.Context, ref core.MechanismRef, opts core.
 //   - AWS IAM role must trust the Azure AD OIDC issuer
 //     (https://login.microsoftonline.com/{tenant_id}/v2.0 or https://sts.windows.net/{tenant_id}/)
 //   - The Azure AD app must be configured with the correct audience for AWS
-//
-// Usage:
-//
-//	token, err := azureProvider.GenerateAWSRoleAssumptionToken(ctx, &AWSRoleAssumptionInput{
-//	    TenantID: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-//	    ClientID: "yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy",
-//	    RoleARN:  "arn:aws:iam::123456789012:role/MyRole",
-//	})
-//	// Use token.Token with AWS provider's Token() method
 func (p *Provider) GenerateAWSRoleAssumptionToken(ctx context.Context, input *AWSRoleAssumptionInput) (*CrossCloudTokenOutput, error) {
 	// Checked before the client, because the field validation below
 	// dereferences it: a nil input is a caller bug, but panicking takes the
@@ -913,17 +904,6 @@ func (p *Provider) GenerateAWSRoleAssumptionToken(ctx context.Context, input *AW
 // Prerequisites:
 //   - GCP Workload Identity Pool must have a provider configured to trust Azure AD
 //   - The OIDC provider should be configured with issuer: https://login.microsoftonline.com/{tenant_id}/v2.0
-//
-// Usage:
-//
-//	token, err := azureProvider.GenerateGCPWorkloadIdentityToken(ctx, &GCPWorkloadIdentityInput{
-//	    TenantID:      "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-//	    ClientID:      "yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy",
-//	    ProjectNumber: "123456789012",
-//	    PoolID:        "my-pool",
-//	    ProviderID:    "azure-provider",
-//	})
-//	// Use token.Token with GCP provider's Token() method
 func (p *Provider) GenerateGCPWorkloadIdentityToken(ctx context.Context, input *GCPWorkloadIdentityInput) (*CrossCloudTokenOutput, error) {
 	// Checked before the client, because the field validation below
 	// dereferences it: a nil input is a caller bug, but panicking takes the
