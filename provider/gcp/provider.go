@@ -780,14 +780,6 @@ func (p *Provider) deleteWorkloadIdentityPool(ctx context.Context, ref core.Mech
 // Prerequisites:
 //   - AWS IAM role must trust the Google OIDC issuer (https://accounts.google.com)
 //   - The service account must have the iam.serviceAccounts.signJwt permission
-//
-// Usage:
-//
-//	token, err := gcpProvider.GenerateAWSRoleAssumptionToken(ctx, &AWSRoleAssumptionInput{
-//	    ServiceAccountEmail: "my-sa@project.iam.gserviceaccount.com",
-//	    RoleARN:             "arn:aws:iam::123456789012:role/MyRole",
-//	})
-//	// Use token.Token with AWS provider's Token() method
 func (p *Provider) GenerateAWSRoleAssumptionToken(ctx context.Context, input *AWSRoleAssumptionInput) (*CrossCloudTokenOutput, error) {
 	if p.stsClient == nil {
 		return nil, core.ErrValidation("GCP STS client not configured").
@@ -848,15 +840,6 @@ func (p *Provider) GenerateAWSRoleAssumptionToken(ctx context.Context, input *AW
 //   - Azure AD app/managed identity must have a federated credential configured
 //   - The federated credential must trust the Google OIDC issuer (https://accounts.google.com)
 //   - The subject claim must match the service account's unique ID
-//
-// Usage:
-//
-//	token, err := gcpProvider.GenerateAzureFederatedToken(ctx, &AzureFederatedTokenInput{
-//	    ServiceAccountEmail: "my-sa@project.iam.gserviceaccount.com",
-//	    TenantID:            "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-//	    ClientID:            "yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy",
-//	})
-//	// Use token.Token with Azure provider's Token() method
 func (p *Provider) GenerateAzureFederatedToken(ctx context.Context, input *AzureFederatedTokenInput) (*CrossCloudTokenOutput, error) {
 	if p.stsClient == nil {
 		return nil, core.ErrValidation("GCP STS client not configured").
@@ -1037,13 +1020,8 @@ func (v *poolExistsValidator) Description() string {
 }
 
 func (v *poolExistsValidator) Validate(ctx context.Context, ref core.MechanismRef) core.ValidationCheck {
-	check := core.ValidationCheck{
-		ID:          v.ID(),
-		Name:        v.Name(),
-		Description: v.Description(),
-		Severity:    core.SeverityCritical,
-		Evidence:    map[string]interface{}{"pool_name": v.name},
-	}
+	check := core.NewCheck(v, core.SeverityCritical)
+	check.Evidence["pool_name"] = v.name
 
 	pool, err := v.client.GetWorkloadIdentityPool(ctx, v.name)
 	if err != nil {
@@ -1071,13 +1049,8 @@ func (v *providerExistsValidator) Description() string {
 }
 
 func (v *providerExistsValidator) Validate(ctx context.Context, ref core.MechanismRef) core.ValidationCheck {
-	check := core.ValidationCheck{
-		ID:          v.ID(),
-		Name:        v.Name(),
-		Description: v.Description(),
-		Severity:    core.SeverityCritical,
-		Evidence:    map[string]interface{}{"provider_name": v.name},
-	}
+	check := core.NewCheck(v, core.SeverityCritical)
+	check.Evidence["provider_name"] = v.name
 
 	provider, err := v.client.GetWorkloadIdentityPoolProvider(ctx, v.name)
 	if err != nil {
@@ -1105,13 +1078,8 @@ func (v *serviceAccountExistsValidator) Description() string {
 }
 
 func (v *serviceAccountExistsValidator) Validate(ctx context.Context, ref core.MechanismRef) core.ValidationCheck {
-	check := core.ValidationCheck{
-		ID:          v.ID(),
-		Name:        v.Name(),
-		Description: v.Description(),
-		Severity:    core.SeverityCritical,
-		Evidence:    map[string]interface{}{"email": v.email},
-	}
+	check := core.NewCheck(v, core.SeverityCritical)
+	check.Evidence["email"] = v.email
 
 	saName := fmt.Sprintf("projects/%s/serviceAccounts/%s", v.projectID, v.email)
 	sa, err := v.client.GetServiceAccount(ctx, saName)

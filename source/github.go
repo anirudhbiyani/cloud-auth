@@ -204,14 +204,7 @@ func (g *GitHub) Mint(ctx context.Context, audience string) (*core.SourceToken, 
 			"the exchange succeeds", claims.Audiences, audience)
 	}
 
-	return &core.SourceToken{
-		Kind:     core.OIDC,
-		Value:    payload.Value,
-		Issuer:   claims.Issuer,
-		Subject:  claims.Subject,
-		Audience: audience,
-		Expiry:   claims.Expiry,
-	}, nil
+	return oidcToken(payload.Value, claims, audience), nil
 }
 
 // appendAudience adds the audience to the runner-supplied URL.

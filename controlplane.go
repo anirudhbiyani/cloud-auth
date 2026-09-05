@@ -7,7 +7,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -348,265 +350,95 @@ type setupOpts struct {
 	targetCloud  string
 }
 
+// newFlagSet returns a FlagSet that reports errors instead of exiting and stays
+// quiet, because this CLI prints its own usage. Every subcommand parser is
+// built on it, which is also what makes `--flag=value` work uniformly — the
+// hand-rolled parsers it replaced compared each argument to the flag name
+// exactly, so only the space-separated form was accepted here while `exec` and
+// `doctor` already took both.
+func newFlagSet(name string) *flag.FlagSet {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.Usage = func() {}
+	return fs
+}
+
+// parseFlags applies args and rejects leftovers. These subcommands take options
+// only; a bare word is a mistyped flag or a stray shell expansion, and accepting
+// it silently is how the wrong mechanism gets built.
+func parseFlags(fs *flag.FlagSet, args []string) error {
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("unexpected argument: %s", fs.Arg(0))
+	}
+	return nil
+}
+
 func parseSetupOpts(args []string) (*setupOpts, error) {
+	opts := &setupOpts{}
+	fs := newFlagSet("setup")
+
 	// No audience default here: this parser is shared by every mechanism type,
 	// and "sts.amazonaws.com" is only ever right for AWS. Defaulted globally, a
 	// GCP workload identity provider was created accepting the one audience
 	// every GitHub Actions run can request. Per-type defaults live in the
 	// build*Spec functions.
-	opts := &setupOpts{
-		statePath: core.DefaultStateStorePath(),
+	fs.StringVar(&opts.specFile, "f", "", "mechanism spec file")
+	fs.StringVar(&opts.specFile, "file", "", "mechanism spec file")
+	fs.BoolVar(&opts.dryRun, "dry-run", false, "report the plan without changing anything")
+	fs.BoolVar(&opts.force, "force", false, "proceed despite warnings")
+	fs.StringVar(&opts.statePath, "state", core.DefaultStateStorePath(), "state store path")
+	fs.BoolVar(&opts.verbose, "v", false, "verbose logging")
+	fs.BoolVar(&opts.verbose, "verbose", false, "verbose logging")
+	fs.BoolVar(&opts.requireIdPAuthorizedRole, "require-idp-authorized-role", false, "add the sts:RoleAuthorizedByIdp condition")
+	fs.StringVar(&opts.mechType, "type", "", "mechanism type")
+	fs.StringVar(&opts.source, "source", "", "source cloud or platform")
+	fs.StringVar(&opts.audience, "audience", "", "token audience")
+	fs.StringVar(&opts.subject, "subject", "", "subject the trust admits")
+	fs.BoolVar(&opts.allowUnscopedSubject, "allow-unscoped-subject", false, "accept an unscoped subject")
+	fs.StringVar(&opts.attributeCondition, "attribute-condition", "", "GCP provider attribute condition")
+	fs.StringVar(&opts.subjectScope, "subject-scope", "", "GCP subject scope")
+	fs.StringVar(&opts.attributeScope, "attribute-scope", "", "GCP attribute scope")
+	fs.BoolVar(&opts.allowWholePoolImpersonation, "allow-whole-pool-impersonation", false, "allow whole-pool impersonation")
+	fs.StringVar(&opts.unscopedJustification, "unscoped-justification", "", "why an unscoped subject is acceptable")
+	fs.StringVar(&opts.issuer, "issuer", "", "OIDC issuer URL")
+	fs.StringVar(&opts.roleName, "role-name", "", "AWS role name")
+	fs.StringVar(&opts.accountID, "account-id", "", "AWS account id")
+	fs.StringVar(&opts.oidcURL, "oidc-url", "", "AWS OIDC provider URL")
+	fs.StringVar(&opts.policyARNs, "policy-arns", "", "comma-separated managed policy ARNs")
+	fs.StringVar(&opts.projectID, "project-id", "", "GCP project id")
+	fs.StringVar(&opts.projectNumber, "project-number", "", "GCP project number")
+	fs.StringVar(&opts.poolID, "pool-id", "", "GCP workload identity pool id")
+	fs.StringVar(&opts.providerID, "provider-id", "", "GCP pool provider id")
+	fs.StringVar(&opts.providerType, "provider-type", "", "GCP pool provider type")
+	fs.StringVar(&opts.awsAccountID, "aws-account-id", "", "AWS account id for a GCP aws-type provider")
+	fs.StringVar(&opts.serviceAccount, "service-account", "", "GCP service account to impersonate")
+	fs.StringVar(&opts.tenantID, "tenant-id", "", "Azure tenant id")
+	fs.StringVar(&opts.identityType, "identity-type", "", "Azure identity type: app_registration|managed_identity")
+	fs.StringVar(&opts.appName, "app-name", "", "Azure application display name")
+	fs.StringVar(&opts.appID, "app-id", "", "Azure application (client) id")
+	fs.StringVar(&opts.identityName, "identity-name", "", "Azure managed identity name")
+	fs.StringVar(&opts.resourceGroup, "resource-group", "", "Azure resource group")
+	fs.StringVar(&opts.subscriptionID, "subscription-id", "", "Azure subscription id")
+	fs.StringVar(&opts.credentialName, "credential-name", "", "Azure federated credential name")
+	fs.StringVar(&opts.clusterName, "cluster-name", "", "Kubernetes cluster name")
+	fs.StringVar(&opts.k8sNamespace, "k8s-namespace", "", "Kubernetes namespace")
+	fs.StringVar(&opts.k8sSAName, "k8s-sa-name", "", "Kubernetes service account name")
+	fs.BoolVar(&opts.createK8sSA, "create-k8s-sa", false, "create the Kubernetes service account")
+	fs.StringVar(&opts.targetCloud, "target-cloud", "", "target cloud for k8s federation")
+
+	if err := parseFlags(fs, args); err != nil {
+		return nil, err
 	}
 
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		// File input
-		case "-f", "--file":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--file requires a path argument")
-			}
-			opts.specFile = args[i+1]
-			i++
-
-		// Common options
-		case "--dry-run":
-			opts.dryRun = true
-		case "--force":
-			opts.force = true
-		case "--state":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--state requires a path argument")
-			}
-			opts.statePath = args[i+1]
-			i++
-		case "-v", "--verbose":
-			opts.verbose = true
-		case "--require-idp-authorized-role":
-			opts.requireIdPAuthorizedRole = true
-
-		// Mechanism type
-		case "--type":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--type requires an argument")
-			}
-			opts.mechType = args[i+1]
-			i++
-
-		// Common identity options
-		case "--source":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--source requires an argument")
-			}
-			opts.source = args[i+1]
-			i++
-		case "--audience":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--audience requires an argument")
-			}
-			opts.audience = args[i+1]
-			i++
-		case "--subject":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--subject requires an argument")
-			}
-			opts.subject = args[i+1]
-			i++
-		case "--allow-unscoped-subject":
-			opts.allowUnscopedSubject = true
-		case "--attribute-condition":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--attribute-condition requires an argument")
-			}
-			opts.attributeCondition = args[i+1]
-			i++
-		case "--subject-scope":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--subject-scope requires an argument")
-			}
-			opts.subjectScope = args[i+1]
-			i++
-		case "--attribute-scope":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--attribute-scope requires an argument")
-			}
-			opts.attributeScope = args[i+1]
-			i++
-		case "--allow-whole-pool-impersonation":
-			opts.allowWholePoolImpersonation = true
-		case "--unscoped-justification":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--unscoped-justification requires an argument")
-			}
-			opts.unscopedJustification = args[i+1]
-			i++
-		case "--issuer":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--issuer requires an argument")
-			}
-			opts.issuer = args[i+1]
-			i++
-
-		// AWS OIDC options
-		case "--role-name":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--role-name requires an argument")
-			}
-			opts.roleName = args[i+1]
-			i++
-		case "--account-id":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--account-id requires an argument")
-			}
-			opts.accountID = args[i+1]
-			i++
-		case "--oidc-url":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--oidc-url requires an argument")
-			}
-			opts.oidcURL = args[i+1]
-			i++
-		case "--policy-arns":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--policy-arns requires an argument")
-			}
-			opts.policyARNs = args[i+1]
-			i++
-
-		// GCP WIF options
-		case "--project-id":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--project-id requires an argument")
-			}
-			opts.projectID = args[i+1]
-			i++
-		case "--project-number":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--project-number requires an argument")
-			}
-			opts.projectNumber = args[i+1]
-			i++
-		case "--pool-id":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--pool-id requires an argument")
-			}
-			opts.poolID = args[i+1]
-			i++
-		case "--provider-id":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--provider-id requires an argument")
-			}
-			opts.providerID = args[i+1]
-			i++
-		case "--provider-type":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--provider-type requires an argument")
-			}
-			opts.providerType = args[i+1]
-			i++
-		case "--aws-account-id":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--aws-account-id requires an argument")
-			}
-			opts.awsAccountID = args[i+1]
-			i++
-		case "--service-account":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--service-account requires an argument")
-			}
-			opts.serviceAccount = args[i+1]
-			i++
-
-		// Azure options
-		case "--tenant-id":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--tenant-id requires an argument")
-			}
-			opts.tenantID = args[i+1]
-			i++
-		case "--identity-type":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--identity-type requires an argument")
-			}
-			opts.identityType = args[i+1]
-			i++
-		case "--app-name":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--app-name requires an argument")
-			}
-			opts.appName = args[i+1]
-			i++
-		case "--app-id":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--app-id requires an argument")
-			}
-			opts.appID = args[i+1]
-			i++
-		case "--identity-name":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--identity-name requires an argument")
-			}
-			opts.identityName = args[i+1]
-			i++
-		case "--resource-group":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--resource-group requires an argument")
-			}
-			opts.resourceGroup = args[i+1]
-			i++
-		case "--subscription-id":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--subscription-id requires an argument")
-			}
-			opts.subscriptionID = args[i+1]
-			i++
-		case "--credential-name":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--credential-name requires an argument")
-			}
-			opts.credentialName = args[i+1]
-			i++
-
-		// K8s federation options
-		case "--cluster-name":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--cluster-name requires an argument")
-			}
-			opts.clusterName = args[i+1]
-			i++
-		case "--k8s-namespace":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--k8s-namespace requires an argument")
-			}
-			opts.k8sNamespace = args[i+1]
-			i++
-		case "--k8s-sa-name":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--k8s-sa-name requires an argument")
-			}
-			opts.k8sSAName = args[i+1]
-			i++
-		case "--create-k8s-sa":
-			opts.createK8sSA = true
-		case "--target-cloud":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--target-cloud requires an argument")
-			}
-			opts.targetCloud = args[i+1]
-			i++
-
-		default:
-			return nil, fmt.Errorf("unknown option: %s", args[i])
-		}
-	}
-
-	// Validate input mode
 	if opts.specFile == "" && opts.mechType == "" {
 		return nil, fmt.Errorf("either --file or --type is required")
 	}
 	if opts.specFile != "" && opts.mechType != "" {
 		return nil, fmt.Errorf("--file and --type are mutually exclusive")
 	}
-
 	return opts, nil
 }
 
@@ -1052,48 +884,30 @@ type validateOpts struct {
 }
 
 func parseValidateOpts(args []string) (*validateOpts, error) {
-	opts := &validateOpts{
-		statePath: core.DefaultStateStorePath(),
-		timeout:   30 * time.Second,
-	}
+	opts := &validateOpts{}
+	fs := newFlagSet("validate")
+	fs.StringVar(&opts.refID, "ref", "", "mechanism reference id")
+	fs.BoolVar(&opts.includeTokenTest, "include-token-test", false,
+		"mint a real token against the mechanism")
+	// Parsed by hand rather than with DurationVar: flag replaces
+	// time.ParseDuration's message with a bare "parse error", which does not
+	// tell an operator that "soon" needed to be "90s".
+	timeout := fs.String("timeout", "30s", "per-run timeout")
+	fs.StringVar(&opts.statePath, "state", core.DefaultStateStorePath(), "state store path")
+	fs.BoolVar(&opts.verbose, "verbose", false, "verbose logging")
+	fs.BoolVar(&opts.verbose, "v", false, "verbose logging")
 
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--ref":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--ref requires an ID argument")
-			}
-			opts.refID = args[i+1]
-			i++
-		case "--include-token-test":
-			opts.includeTokenTest = true
-		case "--timeout":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--timeout requires a duration argument")
-			}
-			d, err := time.ParseDuration(args[i+1])
-			if err != nil {
-				return nil, fmt.Errorf("invalid timeout duration: %w", err)
-			}
-			opts.timeout = d
-			i++
-		case "--state":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--state requires a path argument")
-			}
-			opts.statePath = args[i+1]
-			i++
-		case "-v", "--verbose":
-			opts.verbose = true
-		default:
-			return nil, fmt.Errorf("unknown option: %s", args[i])
-		}
+	if err := parseFlags(fs, args); err != nil {
+		return nil, err
 	}
-
+	d, err := time.ParseDuration(*timeout)
+	if err != nil {
+		return nil, fmt.Errorf("invalid timeout duration: %w", err)
+	}
+	opts.timeout = d
 	if opts.refID == "" {
 		return nil, fmt.Errorf("--ref is required")
 	}
-
 	return opts, nil
 }
 
@@ -1201,41 +1015,23 @@ type deleteOpts struct {
 }
 
 func parseDeleteOpts(args []string) (*deleteOpts, error) {
-	opts := &deleteOpts{
-		statePath: core.DefaultStateStorePath(),
-	}
+	opts := &deleteOpts{}
+	fs := newFlagSet("delete")
+	fs.StringVar(&opts.refID, "ref", "", "mechanism reference id")
+	fs.BoolVar(&opts.dryRun, "dry-run", false, "report what would be deleted")
+	fs.BoolVar(&opts.force, "force", false, "delete even when validation fails")
+	fs.BoolVar(&opts.yes, "yes", false, "skip the confirmation prompt")
+	fs.BoolVar(&opts.yes, "y", false, "skip the confirmation prompt")
+	fs.StringVar(&opts.statePath, "state", core.DefaultStateStorePath(), "state store path")
+	fs.BoolVar(&opts.verbose, "verbose", false, "verbose logging")
+	fs.BoolVar(&opts.verbose, "v", false, "verbose logging")
 
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--ref":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--ref requires an ID argument")
-			}
-			opts.refID = args[i+1]
-			i++
-		case "--dry-run":
-			opts.dryRun = true
-		case "--force":
-			opts.force = true
-		case "--yes", "-y":
-			opts.yes = true
-		case "--state":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--state requires a path argument")
-			}
-			opts.statePath = args[i+1]
-			i++
-		case "-v", "--verbose":
-			opts.verbose = true
-		default:
-			return nil, fmt.Errorf("unknown option: %s", args[i])
-		}
+	if err := parseFlags(fs, args); err != nil {
+		return nil, err
 	}
-
 	if opts.refID == "" {
 		return nil, fmt.Errorf("--ref is required")
 	}
-
 	return opts, nil
 }
 
@@ -1323,42 +1119,17 @@ type listOpts struct {
 }
 
 func parseListOpts(args []string) (*listOpts, error) {
-	opts := &listOpts{
-		statePath: core.DefaultStateStorePath(),
-		output:    "table",
-	}
+	opts := &listOpts{}
+	fs := newFlagSet("list")
+	fs.StringVar(&opts.mechType, "type", "", "filter by mechanism type")
+	fs.StringVar(&opts.provider, "provider", "", "filter by provider")
+	fs.StringVar(&opts.output, "output", "table", "output format: table|json")
+	fs.StringVar(&opts.output, "o", "table", "output format: table|json")
+	fs.StringVar(&opts.statePath, "state", core.DefaultStateStorePath(), "state store path")
 
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--type":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--type requires an argument")
-			}
-			opts.mechType = args[i+1]
-			i++
-		case "--provider":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--provider requires an argument")
-			}
-			opts.provider = args[i+1]
-			i++
-		case "--output", "-o":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--output requires an argument")
-			}
-			opts.output = args[i+1]
-			i++
-		case "--state":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("--state requires a path argument")
-			}
-			opts.statePath = args[i+1]
-			i++
-		default:
-			return nil, fmt.Errorf("unknown option: %s", args[i])
-		}
+	if err := parseFlags(fs, args); err != nil {
+		return nil, err
 	}
-
 	return opts, nil
 }
 

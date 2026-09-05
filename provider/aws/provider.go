@@ -702,15 +702,6 @@ func (p *Provider) deleteRoleTrustOIDC(ctx context.Context, ref core.MechanismRe
 //
 // This enables AWS workloads to authenticate to GCP without using long-lived credentials.
 // The returned token is a JSON object containing the signed request that GCP STS can validate.
-//
-// Usage:
-//
-//	token, err := awsProvider.GenerateGCPWorkloadIdentityToken(ctx, &GCPWorkloadIdentityInput{
-//	    ProjectNumber: "123456789012",
-//	    PoolID:        "my-pool",
-//	    ProviderID:    "aws-provider",
-//	})
-//	// Use token.Token with GCP provider's Token() method
 func (p *Provider) GenerateGCPWorkloadIdentityToken(ctx context.Context, input *GCPWorkloadIdentityInput) (*CrossCloudTokenOutput, error) {
 	if p.stsClient == nil {
 		return nil, core.ErrValidation("AWS STS client not configured").
@@ -1055,13 +1046,8 @@ func (v *roleExistsValidator) Name() string        { return "AWS Role Exists" }
 func (v *roleExistsValidator) Description() string { return "Checks if the IAM role exists" }
 
 func (v *roleExistsValidator) Validate(ctx context.Context, ref core.MechanismRef) core.ValidationCheck {
-	check := core.ValidationCheck{
-		ID:          v.ID(),
-		Name:        v.Name(),
-		Description: v.Description(),
-		Severity:    core.SeverityCritical,
-		Evidence:    map[string]interface{}{"role_name": v.roleName},
-	}
+	check := core.NewCheck(v, core.SeverityCritical)
+	check.Evidence["role_name"] = v.roleName
 
 	role, err := v.client.GetRole(ctx, v.roleName)
 	if err != nil {
@@ -1088,13 +1074,8 @@ func (v *oidcProviderExistsValidator) Description() string {
 }
 
 func (v *oidcProviderExistsValidator) Validate(ctx context.Context, ref core.MechanismRef) core.ValidationCheck {
-	check := core.ValidationCheck{
-		ID:          v.ID(),
-		Name:        v.Name(),
-		Description: v.Description(),
-		Severity:    core.SeverityCritical,
-		Evidence:    map[string]interface{}{"oidc_provider_arn": v.arn},
-	}
+	check := core.NewCheck(v, core.SeverityCritical)
+	check.Evidence["oidc_provider_arn"] = v.arn
 
 	provider, err := v.client.GetOpenIDConnectProvider(ctx, v.arn)
 	if err != nil {

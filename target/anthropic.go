@@ -55,9 +55,9 @@ func WithAnthropicHTTPClient(c *http.Client) AnthropicOption {
 func NewAnthropicExchanger(opts ...AnthropicOption) *AnthropicExchanger {
 	e := &AnthropicExchanger{
 		endpoint:   DefaultAnthropicEndpoint,
-		httpClient: httpx.NewSTSClient(10 * time.Second),
-		maxRetries: 2,
-		backoff:    100 * time.Millisecond,
+		httpClient: httpx.NewSTSClient(defaultExchangeTimeout),
+		maxRetries: defaultMaxRetries,
+		backoff:    defaultBackoff,
 	}
 	for _, o := range opts {
 		o(e)

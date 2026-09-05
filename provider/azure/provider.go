@@ -830,15 +830,6 @@ func (p *Provider) Delete(ctx context.Context, ref core.MechanismRef, opts core.
 //   - AWS IAM role must trust the Azure AD OIDC issuer
 //     (https://login.microsoftonline.com/{tenant_id}/v2.0 or https://sts.windows.net/{tenant_id}/)
 //   - The Azure AD app must be configured with the correct audience for AWS
-//
-// Usage:
-//
-//	token, err := azureProvider.GenerateAWSRoleAssumptionToken(ctx, &AWSRoleAssumptionInput{
-//	    TenantID: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-//	    ClientID: "yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy",
-//	    RoleARN:  "arn:aws:iam::123456789012:role/MyRole",
-//	})
-//	// Use token.Token with AWS provider's Token() method
 func (p *Provider) GenerateAWSRoleAssumptionToken(ctx context.Context, input *AWSRoleAssumptionInput) (*CrossCloudTokenOutput, error) {
 	// Checked before the client, because the field validation below
 	// dereferences it: a nil input is a caller bug, but panicking takes the
@@ -913,17 +904,6 @@ func (p *Provider) GenerateAWSRoleAssumptionToken(ctx context.Context, input *AW
 // Prerequisites:
 //   - GCP Workload Identity Pool must have a provider configured to trust Azure AD
 //   - The OIDC provider should be configured with issuer: https://login.microsoftonline.com/{tenant_id}/v2.0
-//
-// Usage:
-//
-//	token, err := azureProvider.GenerateGCPWorkloadIdentityToken(ctx, &GCPWorkloadIdentityInput{
-//	    TenantID:      "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-//	    ClientID:      "yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy",
-//	    ProjectNumber: "123456789012",
-//	    PoolID:        "my-pool",
-//	    ProviderID:    "azure-provider",
-//	})
-//	// Use token.Token with GCP provider's Token() method
 func (p *Provider) GenerateGCPWorkloadIdentityToken(ctx context.Context, input *GCPWorkloadIdentityInput) (*CrossCloudTokenOutput, error) {
 	// Checked before the client, because the field validation below
 	// dereferences it: a nil input is a caller bug, but panicking takes the
@@ -1025,13 +1005,8 @@ func (v *appExistsValidator) Name() string        { return "Application Exists" 
 func (v *appExistsValidator) Description() string { return "Checks if the Azure AD application exists" }
 
 func (v *appExistsValidator) Validate(ctx context.Context, ref core.MechanismRef) core.ValidationCheck {
-	check := core.ValidationCheck{
-		ID:          v.ID(),
-		Name:        v.Name(),
-		Description: v.Description(),
-		Severity:    core.SeverityCritical,
-		Evidence:    map[string]interface{}{"app_id": v.appID},
-	}
+	check := core.NewCheck(v, core.SeverityCritical)
+	check.Evidence["app_id"] = v.appID
 
 	app, err := v.client.GetApplication(ctx, v.appID)
 	if err != nil {
@@ -1072,13 +1047,8 @@ func (v *federatedCredentialExistsValidator) Description() string {
 }
 
 func (v *federatedCredentialExistsValidator) Validate(ctx context.Context, ref core.MechanismRef) core.ValidationCheck {
-	check := core.ValidationCheck{
-		ID:          v.ID(),
-		Name:        v.Name(),
-		Description: v.Description(),
-		Severity:    core.SeverityCritical,
-		Evidence:    map[string]interface{}{"credential_id": v.credID},
-	}
+	check := core.NewCheck(v, core.SeverityCritical)
+	check.Evidence["credential_id"] = v.credID
 
 	cred, err := v.client.GetFederatedIdentityCredential(ctx, v.appID, v.credID)
 	if err != nil {
@@ -1116,13 +1086,8 @@ func (v *managedIdentityExistsValidator) Description() string {
 }
 
 func (v *managedIdentityExistsValidator) Validate(ctx context.Context, ref core.MechanismRef) core.ValidationCheck {
-	check := core.ValidationCheck{
-		ID:          v.ID(),
-		Name:        v.Name(),
-		Description: v.Description(),
-		Severity:    core.SeverityCritical,
-		Evidence:    map[string]interface{}{"identity_name": v.identityName},
-	}
+	check := core.NewCheck(v, core.SeverityCritical)
+	check.Evidence["identity_name"] = v.identityName
 
 	mi, err := v.client.GetManagedIdentity(ctx, v.subscriptionID, v.resourceGroup, v.identityName)
 	if err != nil {

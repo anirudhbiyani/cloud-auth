@@ -216,14 +216,7 @@ func (a *Azure) mintFromFile(ctx context.Context, audience string) (*core.Source
 	}
 	// Fast path: the on-disk projected token already carries the requested aud.
 	if claims.HasAudience(audience) {
-		return &core.SourceToken{
-			Kind:     core.OIDC,
-			Value:    string(raw),
-			Issuer:   claims.Issuer,
-			Subject:  claims.Subject,
-			Audience: audience,
-			Expiry:   claims.Expiry,
-		}, nil
+		return oidcToken(string(raw), claims, audience), nil
 	}
 	// The projected token's aud is fixed by the AKS Workload Identity webhook
 	// (default api://AzureADTokenExchange). When running in-cluster, mint a fresh
@@ -234,14 +227,7 @@ func (a *Azure) mintFromFile(ctx context.Context, audience string) (*core.Source
 			return nil, fmt.Errorf("azure: %w", err)
 		}
 		minted, _ := jwt.ParseUnverified(token)
-		return &core.SourceToken{
-			Kind:     core.OIDC,
-			Value:    token,
-			Issuer:   minted.Issuer,
-			Subject:  minted.Subject,
-			Audience: audience,
-			Expiry:   minted.Expiry,
-		}, nil
+		return oidcToken(token, minted, audience), nil
 	}
 	// Not in-cluster (or TokenRequest unavailable): fail closed with guidance.
 	return nil, fmt.Errorf(
@@ -288,14 +274,7 @@ func (a *Azure) mintFromIdentityEndpoint(ctx context.Context, audience string) (
 		return nil, fmt.Errorf("azure: decoding managed-identity token: %w", err)
 	}
 	claims, _ := jwt.ParseUnverified(out.AccessToken)
-	return &core.SourceToken{
-		Kind:     core.OIDC,
-		Value:    out.AccessToken,
-		Issuer:   claims.Issuer,
-		Subject:  claims.Subject,
-		Audience: audience,
-		Expiry:   claims.Expiry,
-	}, nil
+	return oidcToken(out.AccessToken, claims, audience), nil
 }
 
 func (a *Azure) mintFromIMDS(ctx context.Context, audience string) (*core.SourceToken, error) {
@@ -316,12 +295,5 @@ func (a *Azure) mintFromIMDS(ctx context.Context, audience string) (*core.Source
 		return nil, fmt.Errorf("azure: decoding IMDS token: %w", err)
 	}
 	claims, _ := jwt.ParseUnverified(out.AccessToken)
-	return &core.SourceToken{
-		Kind:     core.OIDC,
-		Value:    out.AccessToken,
-		Issuer:   claims.Issuer,
-		Subject:  claims.Subject,
-		Audience: audience,
-		Expiry:   claims.Expiry,
-	}, nil
+	return oidcToken(out.AccessToken, claims, audience), nil
 }
