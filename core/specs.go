@@ -8,8 +8,6 @@ import (
 )
 
 // AWSRoleTrustOIDCSpec specifies an AWS IAM Role trusting an OIDC identity provider.
-// This is used for scenarios like GitHub Actions, Kubernetes, or external OIDC providers
-// accessing AWS resources.
 type AWSRoleTrustOIDCSpec struct {
 	// RoleName is the name of the IAM role to create or update.
 	RoleName string `json:"role_name" yaml:"role_name"`
@@ -21,11 +19,9 @@ type AWSRoleTrustOIDCSpec struct {
 	AccountID string `json:"account_id" yaml:"account_id"`
 
 	// OIDCProviderARN is the ARN of an existing OIDC provider.
-	// If empty and OIDCProviderURL is set, a new provider will be created.
 	OIDCProviderARN string `json:"oidc_provider_arn,omitempty" yaml:"oidc_provider_arn,omitempty"`
 
 	// OIDCProviderURL is the URL of the OIDC identity provider.
-	// Used to create a new OIDC provider if OIDCProviderARN is not set.
 	OIDCProviderURL string `json:"oidc_provider_url,omitempty" yaml:"oidc_provider_url,omitempty"`
 
 	// Audience is the expected audience claim in the OIDC token.
@@ -35,22 +31,12 @@ type AWSRoleTrustOIDCSpec struct {
 	Subject string `json:"subject,omitempty" yaml:"subject,omitempty"`
 
 	// SubjectCondition specifies the condition operator for subject matching.
-	// Valid values: "StringEquals", "StringLike" (for wildcards).
 	SubjectCondition string `json:"subject_condition,omitempty" yaml:"subject_condition,omitempty"`
 
 	// AllowUnscopedSubject permits a trust policy with no sub condition at all.
-	//
-	// A policy that pins only `aud` is assumable by every workload the issuer
-	// serves — for GitHub Actions, whose audience is the freely-requestable
-	// sts.amazonaws.com, that is every repository on GitHub. It is occasionally
-	// what you want (an issuer you operate, whose every token is equally
-	// trusted), so it stays expressible — but only deliberately, and only with a
-	// reason recorded next to it.
 	AllowUnscopedSubject bool `json:"allow_unscoped_subject,omitempty" yaml:"allow_unscoped_subject,omitempty"`
 
 	// UnscopedJustification records why an unscoped trust is acceptable here.
-	// Required whenever AllowUnscopedSubject is set, so the decision survives in
-	// the spec for the next reader and for review.
 	UnscopedJustification string `json:"unscoped_justification,omitempty" yaml:"unscoped_justification,omitempty"`
 
 	// PolicyARNs are managed policy ARNs to attach to the role.
@@ -72,19 +58,6 @@ type AWSRoleTrustOIDCSpec struct {
 	PermissionsBoundary string `json:"permissions_boundary,omitempty" yaml:"permissions_boundary,omitempty"`
 
 	// RequireIdPAuthorizedRole adds the sts:RoleAuthorizedByIdp condition.
-	//
-	// AWS shipped this in July 2026. An identity provider may embed
-	// "https://aws.amazon.com/roles" in the OIDC token naming which roles that
-	// token may assume, and STS enforces it as an ALLOW-LIST *before* the role
-	// trust policy is evaluated. That inverts the usual direction: normally
-	// only the account decides who may assume a role, and this lets the issuer
-	// constrain it too, so a stolen token is useless against roles its issuer
-	// never authorized.
-	//
-	// Off by default, and it must stay that way: turning it on for an issuer
-	// that does not emit the claim locks every workload out of the role. There
-	// is no partial credit — the condition either matches or the exchange is
-	// refused before the trust policy is read.
 	RequireIdPAuthorizedRole bool `json:"require_idp_authorized_role,omitempty" yaml:"require_idp_authorized_role,omitempty"`
 
 	// SourceProvider identifies the OIDC provider type.
@@ -92,8 +65,6 @@ type AWSRoleTrustOIDCSpec struct {
 }
 
 // IdPAuthorizedRoleClaim is the claim STS reads for sts:RoleAuthorizedByIdp.
-//
-// A string or an array of role ARNs, embedded by the identity provider.
 const IdPAuthorizedRoleClaim = "https://aws.amazon.com/roles"
 
 // IdPAuthorizedRoleConditionKey is the IAM condition key STS evaluates.
@@ -129,8 +100,7 @@ func (s *AWSRoleTrustOIDCSpec) Validate() error {
 		return fmt.Errorf("either oidc_provider_arn or oidc_provider_url must be specified")
 	}
 	if s.OIDCProviderURL != "" {
-		// An http issuer cannot be pinned to a certificate chain, so AWS cannot
-		// bind the provider to a known CA and its tokens cannot be trusted.
+		// An http issuer cannot be pinned to a certificate chain, so AWS cannot bind the provider to a known CA and its tokens cannot be trusted.
 		if err := ValidateURL(s.OIDCProviderURL); err != nil {
 			return fmt.Errorf("oidc_provider_url: %w", err)
 		}
@@ -150,21 +120,12 @@ func (s *AWSRoleTrustOIDCSpec) Validate() error {
 	return nil
 }
 
-// unscopedSubjectPatterns are subject values that admit every workload the
-// issuer serves. They match nothing more narrowly than "*" does, so accepting
-// one silently is the same hole as omitting the condition entirely.
+// unscopedSubjectPatterns are subject values that admit every workload the issuer serves.
 var unscopedSubjectPatterns = map[string]bool{
 	"*": true, "?*": true, "*:*": true, "**": true,
 }
 
-// validateSubjectScope enforces that a mechanism pins the subject claim, or says
-// out loud that it is choosing not to.
-//
-// The subject is the only part of an OIDC trust that identifies *which* workload
-// may assume the identity. The audience does not: it is chosen by the token
-// requester, and for the common issuers it is a well-known constant. So a
-// mechanism with no subject condition is world-assumable within its issuer, and
-// that has to be a deliberate, recorded decision rather than a default.
+// validateSubjectScope enforces that a mechanism pins the subject claim, or says out loud that it is choosing not to.
 func validateSubjectScope(subject string, allowUnscoped bool, justification string) error {
 	trimmed := strings.TrimSpace(subject)
 
@@ -201,7 +162,6 @@ func (s *AWSRoleTrustOIDCSpec) TargetProvider() Cloud {
 }
 
 // GCPWorkloadIdentityPoolSpec specifies a GCP Workload Identity Pool configuration.
-// This enables external identities (AWS, Azure, OIDC) to access GCP resources.
 type GCPWorkloadIdentityPoolSpec struct {
 	// ProjectID is the GCP project ID.
 	ProjectID string `json:"project_id" yaml:"project_id"`
@@ -222,7 +182,6 @@ type GCPWorkloadIdentityPoolSpec struct {
 	ProviderDisplayName string `json:"provider_display_name,omitempty" yaml:"provider_display_name,omitempty"`
 
 	// ProviderType specifies the external identity provider type.
-	// Valid values: "aws", "oidc", "saml".
 	ProviderType string `json:"provider_type" yaml:"provider_type"`
 
 	// AWSAccountID is required when ProviderType is "aws".
@@ -238,32 +197,18 @@ type GCPWorkloadIdentityPoolSpec struct {
 	AttributeMapping map[string]string `json:"attribute_mapping,omitempty" yaml:"attribute_mapping,omitempty"`
 
 	// AttributeCondition is a CEL expression for attribute conditions.
-	//
-	// This is the pool provider's admission control: with no condition, the
-	// provider accepts every identity the issuer will mint a token for.
 	AttributeCondition string `json:"attribute_condition,omitempty" yaml:"attribute_condition,omitempty"`
 
-	// SubjectScope narrows which pool identities may impersonate the service
-	// account. It is the value after the principal type in the IAM member
-	// string, so a Subject scope of "repo:org/repo:ref:refs/heads/main" becomes
-	//
-	//	principalSet://iam.googleapis.com/<pool>/subject/repo:org/repo:ref:…
-	//
-	// Empty means the whole pool, which is what Google's documentation warns
-	// against: every identity that can federate through ANY provider in the pool
-	// would be able to impersonate the target service account.
+	// SubjectScope narrows which pool identities may impersonate the service account.
 	SubjectScope string `json:"subject_scope,omitempty" yaml:"subject_scope,omitempty"`
 
-	// AttributeScope is the alternative to SubjectScope for providers that map
-	// attributes: an attribute name and value, joined as "attribute.<name>/<value>".
-	// Mutually exclusive with SubjectScope.
+	// AttributeScope is the alternative to SubjectScope for providers that map attributes: an attribute name and value, joined as "attribute.<name>/<value>".
 	AttributeScope string `json:"attribute_scope,omitempty" yaml:"attribute_scope,omitempty"`
 
 	// AllowWholePoolImpersonation permits the unscoped principalSet://…/* form.
 	AllowWholePoolImpersonation bool `json:"allow_whole_pool_impersonation,omitempty" yaml:"allow_whole_pool_impersonation,omitempty"`
 
 	// UnscopedJustification records why whole-pool impersonation is acceptable.
-	// Required with AllowWholePoolImpersonation.
 	UnscopedJustification string `json:"unscoped_justification,omitempty" yaml:"unscoped_justification,omitempty"`
 
 	// ServiceAccountEmail is the service account to impersonate.
@@ -333,9 +278,7 @@ func (s *GCPWorkloadIdentityPoolSpec) Validate() error {
 		return fmt.Errorf("subject_scope and attribute_scope are mutually exclusive")
 	}
 
-	// The pool provider decides who may federate; the IAM binding decides who
-	// may then impersonate. Both have to be narrowed, and neither has a safe
-	// default, so both are required.
+	// The pool provider decides who may federate; the IAM binding decides who may then impersonate.
 	if s.AttributeCondition == "" && !s.AllowWholePoolImpersonation {
 		return fmt.Errorf("attribute_condition is required: a workload identity pool provider with " +
 			"no attribute condition accepts every identity its issuer will mint a token for. " +
@@ -356,12 +299,7 @@ func (s *GCPWorkloadIdentityPoolSpec) Validate() error {
 	return nil
 }
 
-// ImpersonationPrincipal returns the IAM member string that may impersonate the
-// service account, scoped as narrowly as the spec allows.
-//
-// Google's guidance is explicit that the whole-pool form should be avoided; this
-// returns it only when the spec opted in, and Validate has by then required a
-// justification.
+// ImpersonationPrincipal returns the IAM member string that may impersonate the service account, scoped as narrowly as the spec allows.
 func (s *GCPWorkloadIdentityPoolSpec) ImpersonationPrincipal(poolName string) string {
 	const base = "principalSet://iam.googleapis.com/"
 	switch {
@@ -385,7 +323,6 @@ func (s *GCPWorkloadIdentityPoolSpec) TargetProvider() Cloud {
 }
 
 // AzureFederatedCredentialSpec specifies an Azure federated identity credential.
-// This enables external identities to access Azure resources without secrets.
 type AzureFederatedCredentialSpec struct {
 	// TenantID is the Azure AD tenant ID.
 	TenantID string `json:"tenant_id" yaml:"tenant_id"`
@@ -397,7 +334,6 @@ type AzureFederatedCredentialSpec struct {
 	ResourceGroup string `json:"resource_group,omitempty" yaml:"resource_group,omitempty"`
 
 	// IdentityType specifies whether to use app registration or managed identity.
-	// Valid values: "app_registration", "managed_identity".
 	IdentityType string `json:"identity_type" yaml:"identity_type"`
 
 	// ApplicationID is the app registration client ID (for app_registration type).
@@ -507,7 +443,6 @@ func (s *AzureFederatedCredentialSpec) TargetProvider() Cloud {
 }
 
 // K8sServiceAccountFederationSpec specifies a Kubernetes ServiceAccount federation.
-// This maps a K8s ServiceAccount to a cloud identity for workload identity.
 type K8sServiceAccountFederationSpec struct {
 	// ClusterName is a friendly name for the Kubernetes cluster.
 	ClusterName string `json:"cluster_name" yaml:"cluster_name"`
@@ -637,15 +572,13 @@ func (s *K8sServiceAccountFederationSpec) TargetProvider() Cloud {
 
 var (
 	awsAccountIDRegex = regexp.MustCompile(`^\d{12}$`)
-	// Every AWS partition, not just the commercial one: aws-us-gov and aws-cn
-	// role ARNs were rejected outright.
+	// Every AWS partition, not just the commercial one: aws-us-gov and aws-cn role ARNs were rejected outright.
 	awsARNRegex       = regexp.MustCompile(`^arn:aws[a-z0-9-]*:iam::\d{12}:role\/[a-zA-Z_0-9+=,.@\-_/]+$`)
 	gcpProjectIDRegex = regexp.MustCompile(`^[a-z][a-z0-9-]{4,28}[a-z0-9]$`)
 	gcpSAEmailRegex   = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.iam\.gserviceaccount\.com$`)
 	azureUUIDRegex    = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-	// azureTenantRegex accepts the two forms Entra uses for a specific tenant: a
-	// GUID, or a verified domain.
+	// azureTenantRegex accepts the two forms Entra uses for a specific tenant: a GUID, or a verified domain.
 	azureTenantRegex = regexp.MustCompile(
 		`^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}` +
 			`|[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+)$`)
@@ -692,10 +625,6 @@ func ValidateAzureUUID(id string) error {
 }
 
 // ValidateURL validates that a string is a valid HTTPS URL.
-//
-// HTTPS is not stylistic here: an http:// OIDC issuer cannot have its
-// certificate chain pinned, so AWS cannot bind the provider to a known CA and
-// the tokens it mints cannot be trusted to come from it.
 func ValidateURL(urlStr string) error {
 	u, err := url.Parse(urlStr)
 	if err != nil {
@@ -712,12 +641,6 @@ func ValidateURL(urlStr string) error {
 }
 
 // ValidateAzureTenant rejects anything that is not one concrete Entra tenant.
-//
-// The multi-tenant aliases are refused explicitly: for a federated
-// client-credentials grant an alias means "whichever tenant the assertion
-// resolves to", and since the default assertion audience is not tenant-bound,
-// that delegates the choice of who receives a usable proof of this workload's
-// identity.
 func ValidateAzureTenant(tenant string) error {
 	switch strings.ToLower(strings.TrimSpace(tenant)) {
 	case "common", "organizations", "consumers":

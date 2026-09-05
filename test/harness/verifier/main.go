@@ -1,26 +1,4 @@
 // Command verifier is the in-cloud half of the cloud-auth integration harness.
-//
-// The same static binary is deployed to every source runtime in the matrix (an
-// EKS-IRSA pod, an AKS workload-identity pod, an EC2 instance, a GCE instance).
-// On start it asks cloud-auth's own detector where it is, selects only the
-// targets.json cases whose source_runtime matches, and runs each one through
-// the broker (detect→mint→exchange). It writes a JSON report to stdout, a human
-// summary to stderr, and exits non-zero if any case failed.
-//
-// It never prints credentials, tokens, or assertions — see verify.Scrubber.
-//
-// Usage:
-//
-//	verifier [--targets ./targets.json] [--runtime <key>] [--timeout 60s]
-//	         [--skew 60s] [--probe-strict] [--allow-empty] [--out -]
-//
-// Environment:
-//
-//	CLOUD_AUTH_TARGETS_JSON  targets.json inline (ConfigMap / user-data delivery)
-//	CLOUD_AUTH_TARGETS_FILE  path to targets.json (overrides --targets)
-//
-// Exit codes: 0 all selected cases passed; 1 at least one case failed;
-// 2 the verifier could not run (no plan, undetectable runtime, bad flags).
 package main
 
 import (
@@ -40,8 +18,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/test/harness/verifier/verify"
 )
 
-// detectTimeout bounds runtime detection: every detector probes a metadata
-// endpoint, and a black-holed IMDS must not hang the Job forever.
+// detectTimeout bounds runtime detection: every detector probes a metadata endpoint, and a black-holed IMDS must not hang the Job forever.
 const detectTimeout = 15 * time.Second
 
 func main() {
@@ -61,8 +38,7 @@ type options struct {
 	out         string
 }
 
-// run is main's testable body: everything cloud-touching arrives through
-// newExchanger and the detector, everything else is plain data.
+// run is main's testable body: everything cloud-touching arrives through newExchanger and the detector, everything else is plain data.
 func run(ctx context.Context, args []string, stdout, stderr io.Writer, getenv func(string) string, newExchanger func() verify.Exchanger) int {
 	opts, err := parseFlags(args, stderr)
 	if err != nil {
@@ -88,8 +64,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, getenv fu
 
 	selected := verify.SelectCases(plan.Cases, runtimeKey)
 	if len(selected) == 0 {
-		// Every runtime in the matrix owns at least one case, so an empty
-		// selection normally means the plan and the deployment disagree.
+		// Every runtime in the matrix owns at least one case, so an empty selection normally means the plan and the deployment disagree.
 		fmt.Fprintf(stderr, "verifier: no cases for runtime %q (plan covers %v)\n", runtimeKey, planRuntimes(plan))
 		if !opts.allowEmpty {
 			return verify.ExitUsage
@@ -137,9 +112,7 @@ func parseFlags(args []string, stderr io.Writer) (options, error) {
 	return o, fs.Parse(args)
 }
 
-// resolveRuntime returns the detected runtime and its canonical key. An
-// explicit override skips detection (useful when driving the binary by hand);
-// an unrecognized runtime is fatal rather than silently selecting nothing.
+// resolveRuntime returns the detected runtime and its canonical key.
 func resolveRuntime(ctx context.Context, override string) (*core.Runtime, string, error) {
 	if override != "" {
 		key := verify.CanonicalRuntime(override)
@@ -162,8 +135,7 @@ func resolveRuntime(ctx context.Context, override string) (*core.Runtime, string
 	return rt, key, nil
 }
 
-// planRuntimes lists the distinct runtimes a plan covers, for the "nothing to
-// do here" diagnostic.
+// planRuntimes lists the distinct runtimes a plan covers, for the "nothing to do here" diagnostic.
 func planRuntimes(p *verify.Plan) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -177,8 +149,7 @@ func planRuntimes(p *verify.Plan) []string {
 	return out
 }
 
-// openOut resolves --out to a writer. Writing the report to a file as well as
-// exiting non-zero lets a Job's artifacts survive a failed run.
+// openOut resolves --out to a writer.
 func openOut(path string, stdout io.Writer) (io.Writer, func(), error) {
 	if path == "" || path == "-" {
 		return stdout, func() {}, nil

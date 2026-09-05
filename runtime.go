@@ -1,6 +1,4 @@
-// This file holds the runtime (data-plane) subcommands: obtaining short-lived
-// credentials for one cloud from a workload running in another, with zero
-// static secrets. They are dispatched from run() in controlplane.go.
+// This file holds the runtime (data-plane) subcommands: obtaining short-lived credentials for one cloud from a workload running in another, with zero static secrets.
 
 package main
 
@@ -22,9 +20,6 @@ import (
 )
 
 // targetFlags builds a core.Target from a flag set.
-//
-// It returns an error rather than swallowing one: --to used to discard the parse
-// failure, so a typo became the empty cloud and surfaced as "--to is required".
 func targetFlags(fs *flag.FlagSet) func() (core.Target, error) {
 	to := fs.String("to", "", "target: aws|gcp|azure|anthropic")
 	role := fs.String("role", "", "AWS role ARN")
@@ -35,8 +30,7 @@ func targetFlags(fs *flag.FlagSet) func() (core.Target, error) {
 	clientID := fs.String("client-id", "", "Azure app/UAMI client id")
 	scope := fs.String("scope", "", "Azure resource scope (required for azure)")
 	audience := fs.String("audience", "", "token audience (defaults per cloud)")
-	// Anthropic: the federation rule holds the match conditions, so the request
-	// names the rule and the identity rather than what the token must contain.
+	// Anthropic: the federation rule holds the match conditions, so the request names the rule and the identity rather than what the token must contain.
 	federationRule := fs.String("federation-rule", "", "Anthropic federation rule id (fdrl_...)")
 	organizationID := fs.String("organization", "", "Anthropic organization id")
 	serviceAccount := fs.String("service-account-id", "", "Anthropic service account id (svac_...)")
@@ -44,8 +38,7 @@ func targetFlags(fs *flag.FlagSet) func() (core.Target, error) {
 
 	return func() (core.Target, error) {
 		if strings.TrimSpace(*to) == "" {
-			// A typed zero, not nil: core.Target is an interface, and every
-			// consumer calls a method on this before it can decide anything.
+			// A typed zero, not nil: core.Target is an interface, and every consumer calls a method on this before it can decide anything.
 			return core.NoTarget{}, nil // the caller may resolve a target from --config
 		}
 		cloud, err := core.ParseCloud(*to)
@@ -86,22 +79,12 @@ func targetFlags(fs *flag.FlagSet) func() (core.Target, error) {
 const defaultClockSkew = 60 * time.Second
 
 // configFlags adds --config/--target to a command.
-//
-// Every data-plane command takes these now, not just doctor. The config file
-// carries source.detect, and a restriction on which identity may be used is
-// worthless if only the diagnostic command honours it.
 func configFlags(fs *flag.FlagSet) (path, target *string) {
 	return fs.String("config", "", "config file supplying the target and source restriction"),
 		fs.String("target", "", "named target from --config")
 }
 
-// resolveRuntimeConfig merges flags with an optional config file and returns the
-// target plus the source restriction to enforce.
-//
-// Explicit flags win: --to names a target directly, and a config file is only
-// consulted for the target when no --to was given. source.detect always applies
-// when a config is loaded, because it constrains the identity rather than
-// selecting a destination.
+// resolveRuntimeConfig merges flags with an optional config file and returns the target plus the source restriction to enforce.
 func resolveRuntimeConfig(flagTarget core.Target, configPath, targetName string) (core.Target, core.Selector, error) {
 	if configPath == "" {
 		return flagTarget, core.Selector{}, nil
@@ -128,8 +111,7 @@ func resolveRuntimeConfig(flagTarget core.Target, configPath, targetName string)
 	return target, sel, nil
 }
 
-// auditRole records which identity was requested, for the audit line. Only AWS
-// has a role; the others are identified by pool or client id.
+// auditRole records which identity was requested, for the audit line.
 func auditRole(t core.Target) string {
 	switch v := t.(type) {
 	case core.AWSTarget:
@@ -142,8 +124,7 @@ func auditRole(t core.Target) string {
 	case core.AzureTarget:
 		return v.ClientID
 	case core.AnthropicTarget:
-		// The service account is the identity the minted token acts as, which
-		// is what an audit record needs — the rule id says how it was reached.
+		// The service account is the identity the minted token acts as, which is what an audit record needs — the rule id says how it was reached.
 		return v.ServiceAccountID
 	default:
 		return ""
@@ -171,9 +152,7 @@ func cmdDoctor(ctx context.Context, args []string) error {
 
 	prov, rt, detectErr := source.Default().Detect(ctx)
 
-	// Print what was detected, degrading gracefully off-cloud — but NOT in json
-	// mode, where stdout carries one document and a human preamble in front of
-	// it is exactly the bug `list --output json` had.
+	// Print what was detected, degrading gracefully off-cloud — but NOT in json mode, where stdout carries one document and a human preamble in front of it is exactly the bug `list --output json` had.
 	if *format != "json" {
 		printRuntime(os.Stdout, rt, detectErr)
 	}
@@ -186,8 +165,7 @@ func cmdDoctor(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	// Report a restriction violation as the finding it is: detection may have
-	// succeeded while producing an identity the config forbids.
+	// Report a restriction violation as the finding it is: detection may have succeeded while producing an identity the config forbids.
 	if detectErr == nil {
 		if mErr := sel.Match(rt); mErr != nil {
 			if *format != "json" {
@@ -197,8 +175,7 @@ func cmdDoctor(ctx context.Context, args []string) error {
 		}
 	}
 	if target.Cloud() == "" {
-		// Detection-only. In json mode that is still a report — a consumer
-		// asked for a document and must get one.
+		// Detection-only.
 		if *format == "json" {
 			return writeDoctorJSON(os.Stdout,
 				preflight{runtime: rt, detectErr: detectErr}, nil, nil, nil, nil)
@@ -223,9 +200,7 @@ func cmdDoctor(ctx context.Context, args []string) error {
 
 	diagnoses := diagnose(p)
 
-	// --explain performs the one piece of I/O diagnose() must never do, and
-	// does it HERE so diagnose() stays pure: the trust policy is fetched by the
-	// caller and compared as data.
+	// --explain performs the one piece of I/O diagnose() must never do, and does it HERE so diagnose() stays pure: the trust policy is fetched by the caller and compared as data.
 	var (
 		trust    *core.TrustPolicy
 		findings []core.Finding
@@ -239,8 +214,7 @@ func cmdDoctor(ctx context.Context, args []string) error {
 				SourceCloud: runtimeCloud(rt),
 				TargetRole:  targetRoleARN(target),
 			}
-			// Extracted here rather than in core, which is a leaf package and
-			// cannot import internal/jwt to read a token itself.
+			// Extracted here rather than in core, which is a leaf package and cannot import internal/jwt to read a token itself.
 			if p.token != nil {
 				input.IdPAuthorizedRoles, _ = jwt.StringOrSliceClaim(
 					p.token.Reveal(), core.IdPAuthorizedRoleClaim)
@@ -258,8 +232,7 @@ func cmdDoctor(ctx context.Context, args []string) error {
 		writeExplanation(os.Stdout, trust, findings, trustErr)
 	}
 
-	// A critical finding means this exchange will not work. Exiting 0 on that
-	// would make --explain useless in a pipeline, which is half its point.
+	// A critical finding means this exchange will not work.
 	for _, f := range findings {
 		if f.Severity == core.FindingCritical {
 			return errValidationFailed(fmt.Errorf(
@@ -285,8 +258,7 @@ func runtimeCloud(rt *core.Runtime) core.Cloud {
 	return rt.Cloud
 }
 
-// printRuntime writes the detected-runtime summary, degrading gracefully when
-// detection failed (e.g. not running on a real cloud).
+// printRuntime writes the detected-runtime summary, degrading gracefully when detection failed (e.g. not running on a real cloud).
 func printRuntime(w io.Writer, rt *core.Runtime, detectErr error) {
 	if detectErr != nil || rt == nil {
 		fmt.Fprintf(w, "Detected runtime:\n  (none) — %v\n", detectErr)
@@ -327,9 +299,7 @@ func cmdExchange(ctx context.Context, args []string, defaultFormat string) error
 		return fmt.Errorf("--audience is required (pinned per target)")
 	}
 
-	// credential-process is the same operation as exchange wearing a different
-	// output contract, but a SIEM should be able to tell them apart: one is a
-	// person or a script, the other is an SDK refreshing on its own schedule.
+	// credential-process is the same operation as exchange wearing a different output contract, but a SIEM should be able to tell them apart: one is a person or a script, the other is an SDK refreshing on its own schedule.
 	op := audit.OpExchange
 	if *format == "credential-process" {
 		op = audit.OpCredentialProcess

@@ -8,8 +8,7 @@ import (
 	"strings"
 )
 
-// Microsoft Graph: applications, service principals and federated identity
-// credentials.
+// Microsoft Graph: applications, service principals and federated identity credentials.
 
 // wireApplication is the Graph shape of an application object.
 type wireApplication struct {
@@ -27,8 +26,7 @@ func (a *wireApplication) toDomain() *Application {
 	}
 }
 
-// wireFIC is the shape of a federated identity credential. Graph and ARM use
-// the same field names, so one type serves both.
+// wireFIC is the shape of a federated identity credential.
 type wireFIC struct {
 	ID          string   `json:"id,omitempty"`
 	Name        string   `json:"name,omitempty"`
@@ -73,9 +71,7 @@ func (c *restClient) CreateApplication(ctx context.Context, app *Application) (*
 		SignInAudience: app.SignInAudience,
 	}
 	if body.SignInAudience == "" {
-		// Single tenant unless asked otherwise. The multi-tenant values make the
-		// app assumable from directories the operator does not control, which is
-		// not a default anyone should get by omission.
+		// Single tenant unless asked otherwise.
 		body.SignInAudience = "AzureADMyOrg"
 	}
 	var out wireApplication
@@ -110,9 +106,7 @@ func (c *restClient) ListApplications(ctx context.Context) ([]*Application, erro
 	endpoint := c.graphURL + "/applications"
 	var all []*Application
 
-	// Graph pages with @odata.nextLink. Stopping at the first page would silently
-	// answer "these are your applications" with a prefix of them, and callers
-	// here use the result to decide whether something already exists.
+	// Graph pages with @odata.nextLink.
 	for endpoint != "" {
 		var page struct {
 			Value    []wireApplication `json:"value"`
@@ -225,12 +219,6 @@ func (c *restClient) DeleteFederatedIdentityCredential(ctx context.Context, appI
 }
 
 // createFICPaced serializes and paces federated-credential creation.
-//
-// Azure throttles these to roughly 0.25 requests per second per resource and
-// answers a concurrent create under the same identity with HTTP 409. A caller
-// that fans out therefore gets conflicts rather than speed, and the conflict is
-// indistinguishable from "this credential already exists" — so the two get
-// conflated and a setup reports success having created nothing.
 func (c *restClient) createFICPaced(ctx context.Context, endpoint, scope string, cred *FederatedIdentityCredential, out any) error {
 	c.ficMu.Lock()
 	defer c.ficMu.Unlock()
@@ -248,10 +236,6 @@ func (c *restClient) createFICPaced(ctx context.Context, endpoint, scope string,
 }
 
 // checkFICCapacity refuses the credential that would exceed Azure's cap.
-//
-// Reported before the call, naming the limit and the count, because the API's
-// own refusal says only that a limit was reached — leaving the operator to
-// discover both the number and what is already occupying the slots.
 func checkFICCapacity(existing int, resource string) error {
 	if existing < maxFederatedCredentials {
 		return nil
@@ -265,12 +249,6 @@ func checkFICCapacity(existing int, resource string) error {
 }
 
 // validateFIC rejects a credential Azure will refuse, or worse, accept.
-//
-// No property of a federated identity credential accepts a wildcard. Azure does
-// not expand one; it matches the literal characters, so a subject of
-// "repo:org/*" silently matches nothing and the credential is created
-// successfully and then never works — the failure mode Microsoft's own
-// documentation describes as failing without error.
 func validateFIC(cred *FederatedIdentityCredential) error {
 	if cred == nil {
 		return fmt.Errorf("azure: federated identity credential is required")

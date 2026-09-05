@@ -26,8 +26,7 @@ func (s *saResource) toDomain() *ServiceAccount {
 	}
 }
 
-// GetServiceAccount reads a service account by resource name
-// (projects/{project}/serviceAccounts/{email}).
+// GetServiceAccount reads a service account by resource name (projects/{project}/serviceAccounts/{email}).
 func (c *restClient) GetServiceAccount(ctx context.Context, name string) (*ServiceAccount, error) {
 	var out saResource
 	if err := c.do(ctx, http.MethodGet, c.iamURL+"/"+name, nil, &out, name); err != nil {
@@ -76,10 +75,7 @@ type wireCondition struct {
 	Expression  string `json:"expression"`
 }
 
-// policyVersion 3 is required for conditional bindings. Requesting a lower
-// version silently drops any condition already on the policy, so a read-modify-
-// write cycle would strip another team's condition as a side effect of adding an
-// unrelated member.
+// policyVersion 3 is required for conditional bindings.
 const policyVersion = 3
 
 // GetIAMPolicy reads the IAM policy on a resource.
@@ -109,11 +105,6 @@ func (c *restClient) GetIAMPolicy(ctx context.Context, resource string) (*IAMPol
 }
 
 // SetIAMPolicy writes the IAM policy on a resource.
-//
-// The etag read by GetIAMPolicy is sent back. That is what makes this a
-// compare-and-swap rather than a blind overwrite: two concurrent grants would
-// otherwise silently drop one of the two, and on a service account the thing
-// dropped is somebody's access.
 func (c *restClient) SetIAMPolicy(ctx context.Context, resource string, policy *IAMPolicy) error {
 	if policy == nil {
 		return fmt.Errorf("gcp: policy is required")
@@ -140,8 +131,7 @@ func (c *restClient) SetIAMPolicy(ctx context.Context, resource string, policy *
 	return err
 }
 
-// isEtagConflict reports a lost compare-and-swap, so the caller can say what
-// actually happened instead of reporting a bare 409.
+// isEtagConflict reports a lost compare-and-swap, so the caller can say what actually happened instead of reporting a bare 409.
 func isEtagConflict(err error) bool {
 	var apiErr *apiError
 	if !errorsAs(err, &apiErr) {

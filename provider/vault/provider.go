@@ -15,16 +15,11 @@ type Provider struct {
 	mu     sync.Mutex
 	client VaultClient
 
-	// resolveFailed caches a configuration failure so the second call reports
-	// the original cause rather than retrying a lookup that fails the same way.
+	// resolveFailed caches a configuration failure so the second call reports the original cause rather than retrying a lookup that fails the same way.
 	resolveFailed error
 }
 
 // resolve lazily builds the HTTP client from VAULT_ADDR and VAULT_TOKEN.
-//
-// Lazily, because init() registers this Provider into the global registry at
-// import time, long before anyone has asked to talk to Vault. An injected client
-// always wins.
 func (p *Provider) resolve() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -53,10 +48,6 @@ type VaultClient interface {
 	TuneAuthMethod(ctx context.Context, path string, config *AuthMethodConfig) error
 
 	// Enumeration, for `cloud-auth audit`.
-	//
-	// ListAuthMethods returns the mounted auth methods keyed by path, so the
-	// inventory can find the jwt and oidc mounts without being told where they
-	// are — a Vault operator may mount jwt at "github", "ci", or anywhere.
 	ListAuthMethods(ctx context.Context) (map[string]*AuthMethod, error)
 	// ListRoleNames lists the role names on one auth mount.
 	ListRoleNames(ctx context.Context, path string) ([]string, error)
@@ -330,8 +321,7 @@ type VaultBrokerSpec struct {
 	Source core.Cloud `json:"source" yaml:"source"`
 }
 
-// MechanismVaultBroker identifies a Vault broker mechanism. Exported so the CLI
-// can dispatch on it rather than repeating the string.
+// MechanismVaultBroker identifies a Vault broker mechanism.
 const MechanismVaultBroker core.MechanismType = "vault_broker"
 
 // Type implements core.MechanismSpec.
@@ -426,11 +416,6 @@ func (p *Provider) HasCapability(cap core.Capability) bool {
 }
 
 // requireClient reports whether this provider can reach Vault.
-//
-// The client is injected and init() registers a Provider without one, so every
-// entry point used to dereference nil and panic — the same class of bug already
-// fixed in the aws, gcp and azure providers, and still present here because
-// nothing tested this package.
 func (p *Provider) requireClient() error {
 	if err := p.resolve(); err != nil {
 		return core.ErrValidation("could not reach Vault: not configured").
@@ -449,9 +434,7 @@ func (p *Provider) requireClient() error {
 
 // Setup implements core.LifecycleProvider.
 func (p *Provider) Setup(ctx context.Context, spec core.MechanismSpec, opts core.SetupOptions) (*core.Outputs, error) {
-	// A dry run describes a plan and must not need a client, matching every other
-	// provider. This used to read the auth method unconditionally, so `setup
-	// --dry-run` required Vault credentials to tell you what it would do.
+	// A dry run describes a plan and must not need a client, matching every other provider.
 	if !opts.DryRun {
 		if err := p.requireClient(); err != nil {
 			return nil, err
@@ -471,9 +454,6 @@ func (p *Provider) Setup(ctx context.Context, spec core.MechanismSpec, opts core
 	resourceIDs["role_name"] = vaultSpec.RoleName
 
 	// Step 1: Enable auth method if not exists.
-	//
-	// On a dry run the existence is unknown, and the useful thing to report is
-	// the fuller plan — "would enable, would configure" — rather than nothing.
 	authExists := false
 	if !opts.DryRun {
 		_, err := p.client.ReadAuthMethod(ctx, vaultSpec.AuthMethodPath)
@@ -676,19 +656,6 @@ func (p *Provider) Delete(ctx context.Context, ref core.MechanismRef, opts core.
 }
 
 // GenerateAWSCredentials generates AWS credentials using Vault's AWS secrets engine.
-//
-// Vault can generate three types of AWS credentials:
-//   - IAM User credentials (long-lived, not recommended)
-//   - STS AssumeRole credentials (temporary, role-based)
-//   - STS Federation Token credentials (temporary, user-based)
-//
-// This enables any Vault-authenticated entity to obtain AWS credentials without
-// having direct access to AWS IAM.
-//
-// Prerequisites:
-//   - AWS secrets engine must be enabled at the specified path
-//   - A role must be configured with appropriate permissions
-//   - Vault must have AWS credentials configured for the secrets engine
 func (p *Provider) GenerateAWSCredentials(ctx context.Context, input *GenerateAWSCredentialsInput) (*CrossCloudTokenOutput, error) {
 	if p.client == nil {
 		return nil, core.ErrValidation("Vault client not configured").
@@ -739,15 +706,6 @@ func (p *Provider) GenerateAWSCredentials(ctx context.Context, input *GenerateAW
 }
 
 // GenerateGCPCredentials generates GCP credentials using Vault's GCP secrets engine.
-//
-// Vault can generate two types of GCP credentials:
-//   - OAuth2 access tokens (temporary, short-lived)
-//   - Service account keys (longer-lived, but should be rotated)
-//
-// Prerequisites:
-//   - GCP secrets engine must be enabled at the specified path
-//   - A role must be configured with appropriate permissions
-//   - Vault must have a GCP service account configured for the secrets engine
 func (p *Provider) GenerateGCPCredentials(ctx context.Context, input *GenerateGCPCredentialsInput) (*CrossCloudTokenOutput, error) {
 	if p.client == nil {
 		return nil, core.ErrValidation("Vault client not configured").
@@ -816,14 +774,6 @@ func (p *Provider) GenerateGCPCredentials(ctx context.Context, input *GenerateGC
 }
 
 // GenerateAzureCredentials generates Azure credentials using Vault's Azure secrets engine.
-//
-// Vault generates Azure service principal credentials (client ID and secret) that can be
-// used to authenticate to Azure services.
-//
-// Prerequisites:
-//   - Azure secrets engine must be enabled at the specified path
-//   - A role must be configured with appropriate Azure AD permissions
-//   - Vault must have Azure credentials configured for the secrets engine
 func (p *Provider) GenerateAzureCredentials(ctx context.Context, input *GenerateAzureCredentialsInput) (*CrossCloudTokenOutput, error) {
 	if p.client == nil {
 		return nil, core.ErrValidation("Vault client not configured").
@@ -928,10 +878,7 @@ func (v *roleExistsValidator) Validate(ctx context.Context, ref core.MechanismRe
 }
 
 func init() {
-	// Panic rather than discard: Register fails only on a duplicate name, which
-	// is a programming error, and the alternative is a provider that silently
-	// does not exist. Every command that reaches for it would then report
-	// "provider not found" and send the reader looking in the wrong place.
+	// Panic rather than discard: Register fails only on a duplicate name, which is a programming error, and the alternative is a provider that silently does not exist.
 	if err := core.Register(New()); err != nil {
 		panic("cloud-auth/provider/vault: registering the Vault provider: " + err.Error())
 	}

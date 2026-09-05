@@ -1,15 +1,4 @@
-// Package redact removes credential material from text that is about to leave
-// the process — an error string, an audit record, a diagnostic report.
-//
-// It combines two passes. The literal pass replaces exact values the caller has
-// registered, which is precise and catches secrets of any shape. The pattern
-// pass replaces secret-shaped runs the caller never held, which is imprecise but
-// catches the case that actually bites: an upstream error body echoing back
-// material we never saw and therefore could not register.
-//
-// This package has no dependencies, deliberately. It is imported by the packages
-// that format errors and records, and it must never be the reason one of them
-// gains a dependency edge.
+// Package redact removes credential material from text that is about to leave the process — an error string, an audit record, a diagnostic report.
 package redact
 
 import (
@@ -22,17 +11,10 @@ import (
 // Marker replaces any value that is, or merely looks like, a secret.
 const Marker = "[REDACTED]"
 
-// minSecretLen guards the literal pass: registering a very short "secret" would
-// turn redaction into a censor that mangles ordinary text.
+// minSecretLen guards the literal pass: registering a very short "secret" would turn redaction into a censor that mangles ordinary text.
 const minSecretLen = 8
 
-// tokenPatterns catch secret-shaped text the caller never registered — an STS
-// error body echoing back the assertion, a probe quoting a header, and so on.
-//
-// Each pattern is deliberately narrow enough that identity metadata survives:
-// role ARNs, issuer URLs, `system:serviceaccount:...` subjects and
-// `//iam.googleapis.com/projects/.../providers/...` pool paths must stay
-// readable, because they are what makes an error actionable.
+// tokenPatterns catch secret-shaped text the caller never registered — an STS error body echoing back the assertion, a probe quoting a header, and so on.
 var tokenPatterns = []*regexp.Regexp{
 	// Compact JWT / client assertion: three base64url segments.
 	regexp.MustCompile(`\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b`),
@@ -42,13 +24,11 @@ var tokenPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/-]{8,}={0,2}`),
 	// AWS access key ids (long-lived AKIA and session ASIA alike).
 	regexp.MustCompile(`\b(?:AKIA|ASIA)[0-9A-Z]{8,}\b`),
-	// Long opaque blobs. '/' and '.' are excluded from the class so resource
-	// paths and hostnames are never swallowed whole.
+	// Long opaque blobs.
 	regexp.MustCompile(`\b[A-Za-z0-9+_-]{40,}={0,2}`),
 }
 
-// String applies the pattern pass only. Use it where there is no scrubber to
-// carry registered literals — an error being formatted deep in a call stack.
+// String applies the pattern pass only.
 func String(in string) string {
 	if in == "" {
 		return in
@@ -60,8 +40,7 @@ func String(in string) string {
 	return out
 }
 
-// Truncate caps a string at max bytes, marking that it was cut. Upstream error
-// bodies are unbounded, and an error is a diagnostic, not a transcript.
+// Truncate caps a string at max bytes, marking that it was cut.
 func Truncate(in string, max int) string {
 	if max <= 0 || len(in) <= max {
 		return in
@@ -69,19 +48,16 @@ func Truncate(in string, max int) string {
 	return in[:max] + "…[truncated]"
 }
 
-// Body prepares an upstream response body for inclusion in an error: pattern
-// redaction, then a length cap.
+// Body prepares an upstream response body for inclusion in an error: pattern redaction, then a length cap.
 func Body(in string, max int) string { return Truncate(String(in), max) }
 
-// Scrubber applies the literal pass as well, for callers that hold the secrets
-// and can register them. Safe for concurrent use.
+// Scrubber applies the literal pass as well, for callers that hold the secrets and can register them.
 type Scrubber struct {
 	mu       sync.RWMutex
 	literals []string
 }
 
-// NewScrubber returns an empty Scrubber. Pattern redaction applies immediately;
-// literals accumulate as secrets are observed.
+// NewScrubber returns an empty Scrubber.
 func NewScrubber() *Scrubber { return &Scrubber{} }
 
 // AddSecret registers an exact value that must never appear in output.
@@ -101,21 +77,12 @@ func (s *Scrubber) AddSecret(v string) {
 	sort.Slice(s.literals, func(i, j int) bool { return len(s.literals[i]) > len(s.literals[j]) })
 }
 
-// Scrub returns in with every registered secret and every secret-shaped run
-// replaced.
+// Scrub returns in with every registered secret and every secret-shaped run replaced.
 func (s *Scrubber) Scrub(in string) string {
 	if in == "" {
 		return in
 	}
-	// Copy the CONTENTS, not the slice header. The header alone still points at
-	// the backing array that AddSecret sorts in place, so releasing the lock and
-	// then ranging over it raced with a concurrent registration — and the race
-	// was not benign here: re-ordering the array mid-iteration can move a
-	// literal past the cursor, so a secret that was registered is never
-	// substituted and reaches the output intact.
-	//
-	// The copy is a handful of strings; the alternative is holding the lock
-	// across every ReplaceAll, which serializes redaction on the slowest caller.
+	// Copy the CONTENTS, not the slice header.
 	s.mu.RLock()
 	literals := make([]string, len(s.literals))
 	copy(literals, s.literals)

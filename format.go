@@ -9,11 +9,9 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// credentialProcessJSON emits the AWS credential_process contract so an
-// existing AWS SDK config can invoke cloud-auth transparently.
+// credentialProcessJSON emits the AWS credential_process contract so an existing AWS SDK config can invoke cloud-auth transparently.
 func credentialProcessJSON(c *core.Credentials) ([]byte, error) {
-	// This contract exists to hand plaintext credentials to an AWS SDK, so
-	// Reveal is the point rather than a leak.
+	// This contract exists to hand plaintext credentials to an AWS SDK, so Reveal is the point rather than a leak.
 	plain := c.Reveal()
 	out := map[string]any{
 		"Version":         1,

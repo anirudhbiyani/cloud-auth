@@ -24,14 +24,6 @@ type Validator interface {
 }
 
 // ValidatorRegistry holds registered validators.
-//
-// The mutex is not decoration. DefaultValidators is a package-level mutable
-// registry documented as the extension point providers register into from
-// init(), and it is read while a service validates on a schedule. Concurrent map
-// access in Go is not a benign race: it is a runtime fatal error that ignores
-// recover() and takes the whole process with it — in a library whose job is
-// handing credentials to a long-running server. Registry, next door, has had
-// this since it was written.
 type ValidatorRegistry struct {
 	mu         sync.RWMutex
 	validators map[string]Validator
@@ -46,12 +38,7 @@ func NewValidatorRegistry() *ValidatorRegistry {
 	}
 }
 
-// Register adds a validator to the registry, returning an error if the ID is
-// already taken.
-//
-// It used to overwrite silently, so two packages registering the same ID left
-// whichever init() ran last in place — an ordering-dependent choice of which
-// checks actually run.
+// Register adds a validator to the registry, returning an error if the ID is already taken.
 func (r *ValidatorRegistry) Register(v Validator, types ...MechanismType) error {
 	if v == nil {
 		return fmt.Errorf("cloud-auth: cannot register a nil validator")
@@ -84,9 +71,6 @@ func (r *ValidatorRegistry) Get(id string) (Validator, bool) {
 }
 
 // GetForType returns validators applicable to a mechanism type.
-//
-// The slice is freshly allocated: returning one that aliased the registry's own
-// backing array would let a caller's append race a concurrent Register.
 func (r *ValidatorRegistry) GetForType(t MechanismType) []Validator {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -104,17 +88,9 @@ func (r *ValidatorRegistry) GetForType(t MechanismType) []Validator {
 // DefaultValidators is the global validator registry.
 var DefaultValidators = NewValidatorRegistry()
 
-// TrustCondition is one condition a trust policy places on a claim, with the
-// operator that evaluates it.
-//
-// The operator is not decoration. A "*" under StringEquals is matched
-// literally, so it admits nothing and the trust silently never works; the same
-// "*" under StringLike admits everything. Collapsing the two — which this
-// package did, by matching on the claim suffix across any operator — makes
-// those two policies indistinguishable, and they are opposites.
+// TrustCondition is one condition a trust policy places on a claim, with the operator that evaluates it.
 type TrustCondition struct {
-	// Operator is the provider's condition operator, verbatim:
-	// "StringEquals", "StringLike", "ForAllValues:StringEquals", and so on.
+	// Operator is the provider's condition operator, verbatim: "StringEquals", "StringLike", "ForAllValues:StringEquals", and so on.
 	Operator string
 	// Claim is the normalized claim name: "sub", "aud", or "oaud".
 	Claim string
@@ -128,10 +104,6 @@ func (c TrustCondition) IsPattern() bool {
 }
 
 // HonoursWildcards reports whether Operator actually expands a wildcard.
-//
-// Only the *Like family does. Everything else compares literally, so a wildcard
-// under it is just an unusual character in a string that will never appear in a
-// token.
 func (c TrustCondition) HonoursWildcards() bool {
 	op := c.Operator
 	if i := strings.LastIndex(op, ":"); i >= 0 {
@@ -140,19 +112,15 @@ func (c TrustCondition) HonoursWildcards() bool {
 	return strings.HasSuffix(op, "Like") || strings.HasSuffix(op, "LikeIfExists")
 }
 
-// TrustPolicy is the live, provider-neutral trust configuration of a mechanism:
-// who is trusted to assume it, for which audience, and scoped to which subjects.
+// TrustPolicy is the live, provider-neutral trust configuration of a mechanism: who is trusted to assume it, for which audience, and scoped to which subjects.
 type TrustPolicy struct {
 	// Issuer is the trusted OIDC issuer (or federated principal).
 	Issuer string
 	// Audiences are the accepted `aud` values.
 	Audiences []string
-	// Subjects are the accepted `sub` values or patterns. IAM StringLike
-	// wildcards ("repo:org/repo:*") are preserved verbatim.
+	// Subjects are the accepted `sub` values or patterns.
 	Subjects []string
-	// Conditions retains every condition with its operator. Audiences and
-	// Subjects are the flattened views of it, kept because the existing
-	// validators compare membership and do not care how a value is matched.
+	// Conditions retains every condition with its operator.
 	Conditions []TrustCondition
 	// Raw is the provider's original policy document, for evidence.
 	Raw string
@@ -182,10 +150,6 @@ func (p *TrustPolicy) conditionsFor(claim string) []TrustCondition {
 }
 
 // TrustPolicySource supplies the live trust policy for a mechanism.
-//
-// It exists so the core can read provider-specific state without importing
-// providers: core is the leaf package and providers import it, so the
-// dependency is inverted through this interface and implemented provider-side.
 type TrustPolicySource interface {
 	TrustPolicy(ctx context.Context, ref MechanismRef) (*TrustPolicy, error)
 }
@@ -201,8 +165,7 @@ type TrustPolicyMatchValidator struct {
 // TrustPolicyOption configures a TrustPolicyMatchValidator.
 type TrustPolicyOption func(*TrustPolicyMatchValidator)
 
-// WithTrustPolicySource supplies the live policy to compare against. Without
-// it the check cannot run and reports Skipped rather than a hollow pass.
+// WithTrustPolicySource supplies the live policy to compare against.
 func WithTrustPolicySource(s TrustPolicySource) TrustPolicyOption {
 	return func(v *TrustPolicyMatchValidator) { v.source = s }
 }
@@ -220,18 +183,7 @@ func NewTrustPolicyMatchValidator(issuer, audience, subject string, opts ...Trus
 	return v
 }
 
-// wildcardMatch reports whether s matches an IAM StringLike pattern, in which
-// `*` matches any run of characters and `?` any single one.
-//
-// Written out rather than using path.Match because that treats "/" specially,
-// and subjects are full of slashes ("repo:org/repo:ref:refs/heads/main").
-//
-// Linear, not backtracking. The previous implementation recursed over every
-// split point for each `*`, which is exponential on a pattern like
-// "*a*a*a*a*a*b" — reachable here because the pattern is a live IAM policy value
-// rather than something this code chose. This is the standard two-pointer
-// algorithm: walk both strings, and on a `*` remember where to resume if the
-// rest fails to match.
+// wildcardMatch reports whether s matches an IAM StringLike pattern, in which `*` matches any run of characters and `?` any single one.
 func wildcardMatch(pattern, s string) bool {
 	if pattern == s {
 		return true
@@ -247,10 +199,7 @@ func wildcardMatch(pattern, s string) bool {
 	)
 	for v < len(s) {
 		switch {
-		// The star case must come FIRST. Checking literal equality first means a
-		// '*' in the VALUE matches the '*' in the pattern as an ordinary
-		// character, so "*" fails to match "*0" — a bug a fuzz target found in
-		// this function within seconds of being written.
+		// The star case must come FIRST.
 		case p < len(pattern) && pattern[p] == '*':
 			// Remember this star and try matching zero characters first.
 			star, vAfterStar = p, v
@@ -274,10 +223,7 @@ func wildcardMatch(pattern, s string) bool {
 	return p == len(pattern)
 }
 
-// caseOnlyHint returns a diagnostic fragment when two values differ ONLY in
-// case. Azure Entra matches issuer, subject and audience case-sensitively and
-// exactly, so this is a common and very confusing misconfiguration: everything
-// "looks" right in a side-by-side diff. Naming it saves real debugging time.
+// caseOnlyHint returns a diagnostic fragment when two values differ ONLY in case.
 func caseOnlyHint(actual, expected string) string {
 	if actual != expected && strings.EqualFold(actual, expected) {
 		return " (differs ONLY in case — Azure and OIDC subject matching are case-sensitive)"
@@ -286,20 +232,13 @@ func caseOnlyHint(actual, expected string) string {
 }
 
 // isUnscoped reports whether a subject pattern admits essentially anything.
-// A trust that accepts any subject is the classic confused-deputy hole: any
-// workload from that issuer can assume the target identity.
-//
-// Note what this does NOT cover: a policy with no subject condition at all has
-// no pattern to test, and is just as unscoped. That case is handled by the
-// caller, which treats an empty Subjects list as a finding in its own right.
 func isUnscoped(pattern string) bool {
 	trimmed := strings.TrimSpace(pattern)
 	switch trimmed {
 	case "", "*", "**", "?*", "*:*":
 		return true
 	}
-	// A pattern whose every segment is a wildcard pins nothing either:
-	// "*:*:*" and "repo:*" differ, and only the first is unscoped.
+	// A pattern whose every segment is a wildcard pins nothing either: "*:*:*" and "repo:*" differ, and only the first is unscoped.
 	segments := strings.Split(trimmed, ":")
 	for _, seg := range segments {
 		if strings.Trim(seg, "*?") != "" {
@@ -309,13 +248,7 @@ func isUnscoped(pattern string) bool {
 	return len(segments) > 0
 }
 
-// unexpectedGrants reports audiences and subjects the live policy admits that
-// the recorded intent never asked for.
-//
-// Only meaningful when there is a recorded expectation to compare against: with
-// no expected audience or subject we cannot tell an addition from the original
-// intent, and guessing would produce noise on every legitimately multi-valued
-// policy.
+// unexpectedGrants reports audiences and subjects the live policy admits that the recorded intent never asked for.
 func (v *TrustPolicyMatchValidator) unexpectedGrants(live *TrustPolicy) []string {
 	var problems []string
 
@@ -331,17 +264,7 @@ func (v *TrustPolicyMatchValidator) unexpectedGrants(live *TrustPolicy) []string
 
 	if v.expectedSubject != "" {
 		for _, s := range live.Subjects {
-			// A live subject is expected if it is the configured one, if the
-			// configured pattern covers it, or if it is a pattern that covers the
-			// configured subject — the last case being an operator who authored a
-			// wildcard while setup recorded a concrete example of it.
-			//
-			// The limit that leaves: a live pattern broader than the configured
-			// subject but still covering it (main-only widened to any ref in the
-			// same repo) reads as expected. That is a real widening and this check
-			// does not catch it; what it does catch is a subject the configured
-			// intent has no relationship to at all, which is the shape both
-			// tampering and a mis-scoped IaC change take.
+			// A live subject is expected if it is the configured one, if the configured pattern covers it, or if it is a pattern that covers the configured subject — the last case being an operator who authored a wildcard while setup recorded a concrete example of it.
 			if s == v.expectedSubject ||
 				wildcardMatch(v.expectedSubject, s) ||
 				wildcardMatch(s, v.expectedSubject) {
@@ -412,16 +335,14 @@ func (v *TrustPolicyMatchValidator) Validate(ctx context.Context, ref MechanismR
 
 	var problems []string
 
-	// Issuer: exact. A different issuer means a different identity provider is
-	// trusted than the one intended.
+	// Issuer: exact.
 	if v.expectedIssuer != "" && live.Issuer != v.expectedIssuer {
 		problems = append(problems, fmt.Sprintf(
 			"issuer mismatch%s: policy trusts %q, expected %q",
 			caseOnlyHint(live.Issuer, v.expectedIssuer), live.Issuer, v.expectedIssuer))
 	}
 
-	// Audience: exact membership. Audience pinning is what stops a token minted
-	// for one target being replayed at another.
+	// Audience: exact membership.
 	if v.expectedAudience != "" {
 		found := false
 		for _, a := range live.Audiences {
@@ -445,15 +366,12 @@ func (v *TrustPolicyMatchValidator) Validate(ctx context.Context, ref MechanismR
 	}
 
 	// Absence is the loudest finding, and the one a membership test cannot see.
-	// A policy with no subject condition admits every workload the issuer serves;
-	// it is not "no subject to check", it is the widest possible subject.
 	if len(live.Subjects) == 0 {
 		problems = append(problems, "trust has NO subject condition: every workload this issuer "+
 			"mints a token for can assume the target identity (confused-deputy risk)")
 	}
 
-	// An unscoped pattern is a finding in its own right, even though it would
-	// "match" — it admits every workload from the issuer.
+	// An unscoped pattern is a finding in its own right, even though it would "match" — it admits every workload from the issuer.
 	for _, s := range live.Subjects {
 		if isUnscoped(s) {
 			problems = append(problems, fmt.Sprintf(
@@ -483,11 +401,7 @@ func (v *TrustPolicyMatchValidator) Validate(ctx context.Context, ref MechanismR
 		}
 	}
 
-	// Everything above asks "is what we expected still there?". That question
-	// cannot see an ADDITION: a second Allow statement admitting another
-	// audience or another subject leaves the expected values present, so a
-	// membership test still passes while the trust has been widened. Drift and
-	// tampering both look like additions, so compare as sets, not membership.
+	// Everything above asks "is what we expected still there?".
 	problems = append(problems, v.unexpectedGrants(live)...)
 
 	if len(problems) > 0 {
@@ -503,20 +417,12 @@ func (v *TrustPolicyMatchValidator) Validate(ctx context.Context, ref MechanismR
 	return check
 }
 
-// GrantedPolicySource lists the policies actually attached to a mechanism's
-// target identity. Like TrustPolicySource, it inverts the dependency so the
-// core can read provider state without importing providers.
+// GrantedPolicySource lists the policies actually attached to a mechanism's target identity.
 type GrantedPolicySource interface {
 	GrantedPolicies(ctx context.Context, ref MechanismRef) ([]string, error)
 }
 
 // PermissionsValidator checks that the expected policies are actually attached.
-//
-// Scope note: this verifies *attachment* — that the policies the spec asked for
-// are present on the identity — which is what catches drift and accidental
-// detachment. It is deliberately not a full effective-permission simulation
-// (AWS SimulatePrincipalPolicy and friends), so it will not detect a policy
-// whose contents were edited to grant less than its name implies.
 type PermissionsValidator struct {
 	requiredPermissions []string
 	source              GrantedPolicySource
@@ -526,7 +432,6 @@ type PermissionsValidator struct {
 type PermissionsOption func(*PermissionsValidator)
 
 // WithGrantedPolicySource supplies the live attachment list to compare against.
-// Without it the check reports Skipped.
 func WithGrantedPolicySource(s GrantedPolicySource) PermissionsOption {
 	return func(v *PermissionsValidator) { v.source = s }
 }
@@ -603,14 +508,7 @@ func (v *PermissionsValidator) Validate(ctx context.Context, ref MechanismRef) V
 	return check
 }
 
-// NewCheck starts a check carrying the validator's own identity, which every
-// implementation was otherwise copying field by field. Evidence is always a
-// usable map, so a caller can assign into it without checking for nil.
-//
-// Status is deliberately left unset rather than defaulted to passed: a
-// validator that returns without deciding has not verified anything, and the
-// zero CheckStatus is none of the four valid values, so nothing reads it as a
-// pass.
+// NewCheck starts a check carrying the validator's own identity, which every implementation was otherwise copying field by field.
 func NewCheck(v Validator, sev Severity) ValidationCheck {
 	return ValidationCheck{
 		ID:          v.ID(),
@@ -630,10 +528,7 @@ func RunValidation(ctx context.Context, ref MechanismRef, validators []Validator
 	}
 
 	for _, v := range validators {
-		// Stop when the caller has given up. Each check is a cloud API call, and
-		// running the rest of the list after a timeout spends quota to produce a
-		// report nobody will read. The remaining checks are recorded as skipped so
-		// IsComplete reports the truth: they did not run.
+		// Stop when the caller has given up.
 		if err := ctx.Err(); err != nil {
 			report.Checks = append(report.Checks, ValidationCheck{
 				ID:          v.ID(),

@@ -1,9 +1,4 @@
 // Package imds is an IMDSv2-only client for the AWS Instance Metadata Service.
-//
-// It always mints a session token (PUT /latest/api/token) before any metadata
-// read and never falls back to token-less IMDSv1 requests, so it resists the
-// SSRF exfiltration that IMDSv1 enables and operates cleanly where the account
-// or AMI enforces IMDSv2-only.
 package imds
 
 import (
@@ -35,9 +30,7 @@ type Client struct {
 	httpClient *http.Client
 	tokenTTL   time.Duration
 
-	// The session token is cached for its TTL. Minting one per read meant two
-	// round trips per metadata field — Detect alone made four — against a
-	// service that rate-limits.
+	// The session token is cached for its TTL.
 	mu       sync.Mutex
 	token    string
 	tokenExp time.Time
@@ -69,10 +62,6 @@ func New(opts ...Option) *Client {
 }
 
 // sessionToken returns a cached session token, minting one if none is valid.
-//
-// The lock is held across the mint so concurrent readers share one token rather
-// than each minting their own. IMDS is local and fast, so serializing here costs
-// far less than the extra round trips did.
 func (c *Client) sessionToken(ctx context.Context) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -116,8 +105,7 @@ func (c *Client) mintToken(ctx context.Context) (string, error) {
 	return string(body), nil
 }
 
-// Get reads a metadata path over IMDSv2. It mints a token first and never
-// issues a token-less request.
+// Get reads a metadata path over IMDSv2. It mints a token first and never issues a token-less request.
 func (c *Client) Get(ctx context.Context, path string) ([]byte, error) {
 	tok, err := c.sessionToken(ctx)
 	if err != nil {

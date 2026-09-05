@@ -1,16 +1,6 @@
 package core
 
 // Claim-by-claim comparison of a presented assertion against live trust.
-//
-// One AWS AccessDenied covers roughly fifteen distinct root causes. GCP's most
-// common failure — "The attribute condition was not met" — is not on Google's
-// own troubleshooting page. Microsoft's documentation states outright that a
-// wrong Azure subject produces a credential that is created successfully and
-// then fails without error.
-//
-// Everything here is a pure function over data the caller has already fetched.
-// That is deliberate and it is what diagnose() already buys: the detectors are
-// table-testable against fixtures, with no cloud.
 
 // FindingSeverity orders findings for display.
 type FindingSeverity int
@@ -36,11 +26,6 @@ func (s FindingSeverity) String() string {
 }
 
 // Finding is one diverging claim, named so an operator can act on it.
-//
-// Presented and Configured are both carried because the whole point is the
-// diff: "sub does not match" sends someone to read a policy, while
-// "policy says repo:org/repo:…, token presents repo:org@123/repo@456:…" tells
-// them what happened.
 type Finding struct {
 	// Detector identifies which check produced this, for --format json.
 	Detector string `json:"detector"`
@@ -74,8 +59,7 @@ func (f Finding) withDiff(claim, presented, configured string) Finding {
 	return f
 }
 
-// ExplainInput is everything the detectors compare. The caller fetches it; no
-// function in this file performs I/O.
+// ExplainInput is everything the detectors compare.
 type ExplainInput struct {
 	// Trust is the live trust policy read from the target.
 	Trust *TrustPolicy
@@ -85,11 +69,7 @@ type ExplainInput struct {
 	Target Target
 	// SourceCloud is the detected source cloud, where known.
 	SourceCloud Cloud
-	// IdPAuthorizedRoles is the "https://aws.amazon.com/roles" claim from the
-	// presented token, if it carries one.
-	//
-	// Extracted by the caller rather than read here: core is a leaf package and
-	// cannot import internal/jwt to parse a token itself.
+	// IdPAuthorizedRoles is the "https://aws.amazon.com/roles" claim from the presented token, if it carries one.
 	IdPAuthorizedRoles []string
 	// TargetRole is the role the exchange will attempt to assume.
 	TargetRole string
@@ -115,15 +95,13 @@ func Explain(in ExplainInput) []Finding {
 		out = append(out, detect(in)...)
 	}
 
-	// Stable, severity-first ordering. Sorting by severity alone would let the
-	// detector map's order leak through for equal severities.
+	// Stable, severity-first ordering.
 	sortFindings(out)
 	return out
 }
 
 func sortFindings(f []Finding) {
-	// Insertion sort: the list is a handful of entries and this keeps equal
-	// severities in detector-declaration order, which is deliberate.
+	// Insertion sort: the list is a handful of entries and this keeps equal severities in detector-declaration order, which is deliberate.
 	for i := 1; i < len(f); i++ {
 		for j := i; j > 0 && f[j].Severity > f[j-1].Severity; j-- {
 			f[j], f[j-1] = f[j-1], f[j]

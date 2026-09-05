@@ -20,19 +20,13 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/internal/jwt"
 )
 
-// DefaultSTSEndpoint is the global AWS STS endpoint used to build the
-// GetCallerIdentity proof. It is not used by the outbound-federation path:
-// sts:GetWebIdentityToken is only served regionally.
+// DefaultSTSEndpoint is the global AWS STS endpoint used to build the GetCallerIdentity proof.
 const DefaultSTSEndpoint = "https://sts.amazonaws.com"
 
-// defaultSigningRegion is used when no region is configured or discoverable. The
-// proof is verified by GCP against the global endpoint, so the region only has
-// to match what was signed.
+// defaultSigningRegion is used when no region is configured or discoverable.
 const defaultSigningRegion = "us-east-1"
 
-// credentialResolveTimeout bounds the ambient credential lookup. The default
-// chain ends at link-local IMDS, where nothing answers off-EC2, and the SDK's
-// own retry budget takes minutes to give up.
+// credentialResolveTimeout bounds the ambient credential lookup.
 const credentialResolveTimeout = 10 * time.Second
 
 // emptyPayloadHash is SHA-256 of the empty string (GetCallerIdentity has no body).
@@ -42,12 +36,6 @@ var emptyPayloadHash = func() string {
 }()
 
 // AWS is the Source Identity Provider for EC2, ECS, Lambda, and EKS.
-//
-// EKS-IRSA presents its projected OIDC token. EC2, ECS and Lambda have no token
-// of their own, so they mint one: an STS-vended OIDC JWT where the account has
-// enabled outbound identity federation, otherwise a SigV4-signed
-// GetCallerIdentity proof. See AWSProof to pin the choice. EKS Pod Identity is
-// detected but flagged non-federatable.
 type AWS struct {
 	getenv      func(string) string
 	readFile    func(string) ([]byte, error)
@@ -65,10 +53,7 @@ type AWS struct {
 	stsAPI   webIdentityTokenAPI
 	outbound outboundState
 
-	// The ambient config is resolved once and reused. It used to be re-loaded on
-	// every mint, which re-read the shared config file and the SSO cache each
-	// time — and, on a host with no credentials, spent the SDK's whole retry
-	// budget against a link-local IMDS address before failing.
+	// The ambient config is resolved once and reused.
 	cfgOnce sync.Once
 	cfg     aws.Config
 	cfgErr  error
@@ -82,9 +67,7 @@ func WithAWSIMDS(c *imds.Client) AWSOption                   { return func(a *AW
 func WithAWSRegion(r string) AWSOption                       { return func(a *AWS) { a.region = r } }
 func WithAWSCredentials(p aws.CredentialsProvider) AWSOption { return func(a *AWS) { a.creds = p } }
 
-// WithAWSK8sTokenClient injects a Kubernetes TokenRequest client used by the
-// EKS-IRSA mint path to dynamically re-mint a projected token for a requested
-// audience. When unset, the client is derived from the in-cluster environment.
+// WithAWSK8sTokenClient injects a Kubernetes TokenRequest client used by the EKS-IRSA mint path to dynamically re-mint a projected token for a requested audience.
 func WithAWSK8sTokenClient(c k8sTokenMinter) AWSOption { return func(a *AWS) { a.k8sClient = c } }
 
 // NewAWS builds an AWS provider with defaults.
@@ -102,15 +85,13 @@ func NewAWS(opts ...AWSOption) *AWS {
 	return a
 }
 
-// subRuntime resolves the AWS sub-runtime from environment hints. IMDS is only
-// consulted as the EC2 fallback (done in Detect, not here).
+// subRuntime resolves the AWS sub-runtime from environment hints.
 func (a *AWS) subRuntime() string {
 	switch {
 	case a.getenv("AWS_WEB_IDENTITY_TOKEN_FILE") != "":
 		return "eks-irsa"
 	case a.getenv("AWS_LAMBDA_FUNCTION_NAME") != "":
-		// Lambda vends task-role credentials in-process; it mints the SigV4
-		// GetCallerIdentity proof, same as EC2/ECS.
+		// Lambda vends task-role credentials in-process; it mints the SigV4 GetCallerIdentity proof, same as EC2/ECS.
 		return "lambda"
 	case a.getenv("AWS_CONTAINER_CREDENTIALS_FULL_URI") != "":
 		// EKS Pod Identity agent vends creds over the full URI; not OIDC.
@@ -177,9 +158,7 @@ func (a *AWS) mintIRSA(ctx context.Context, audience string) (*core.SourceToken,
 	if claims.HasAudience(audience) {
 		return oidcToken(string(raw), claims, audience), nil
 	}
-	// The projected SA token's aud is fixed by the pod's projected volume. When
-	// running in-cluster, mint a fresh token carrying the requested audience via
-	// the Kubernetes TokenRequest API rather than failing closed.
+	// The projected SA token's aud is fixed by the pod's projected volume.
 	if token, available, err := mintDynamicAudienceToken(ctx, a.k8sClient, a.getenv, a.readFile, claims, audience); available {
 		if err != nil {
 			return nil, fmt.Errorf("aws: %w", err)
@@ -194,10 +173,7 @@ func (a *AWS) mintIRSA(ctx context.Context, audience string) (*core.SourceToken,
 		claims.Audiences, audience)
 }
 
-// mintSigV4 builds and SigV4-signs a GetCallerIdentity request, then serializes
-// it into the GCP-expected token shape ({url, method, headers}). The audience
-// is carried in the x-goog-cloud-target-resource header, binding the proof to
-// the intended target and defeating replay against another trust.
+// mintSigV4 builds and SigV4-signs a GetCallerIdentity request, then serializes it into the GCP-expected token shape ({url, method, headers}).
 func (a *AWS) mintSigV4(ctx context.Context, audience string) (*core.SourceToken, error) {
 	creds, region, src, err := a.resolveCreds(ctx)
 	if err != nil {
@@ -237,26 +213,15 @@ func (a *AWS) mintSigV4(ctx context.Context, audience string) (*core.SourceToken
 		Kind:  core.AWSSigV4,
 		Value: string(value),
 		// Best-effort: the real principal is resolved by STS from the signature.
-		// The key id is the only local hint about which identity signed, and on a
-		// host where the ambient chain picked something unexpected it is the thing
-		// that explains why the exchange was refused.
 		Subject:  src.AccessKeyID,
 		Audience: audience,
 	}, nil
 }
 
 // ambientConfig loads the SDK's default configuration once.
-//
-// Note what "ambient" means for identity: this resolves whatever the default
-// chain finds — environment variables first, then the shared config profile,
-// then SSO, then the instance role. On an EC2 host with AWS_ACCESS_KEY_ID set,
-// that is NOT the instance role, so the proof is signed by a different principal
-// than Detect reported. Callers who need a specific identity should pass
-// WithAWSCredentials rather than rely on the chain.
 func (a *AWS) ambientConfig(ctx context.Context) (aws.Config, error) {
 	a.cfgOnce.Do(func() {
-		// Bound the lookup: the chain ends at link-local IMDS, and off-EC2 nothing
-		// answers there.
+		// Bound the lookup: the chain ends at link-local IMDS, and off-EC2 nothing answers there.
 		loadCtx, cancel := context.WithTimeout(ctx, credentialResolveTimeout)
 		defer cancel()
 		a.cfg, a.cfgErr = awsconfig.LoadDefaultConfig(loadCtx,
@@ -271,13 +236,11 @@ type CredentialSource struct {
 	Injected bool
 	// Provider is the SDK's name for the resolved source, when it reports one.
 	Provider string
-	// AccessKeyID is the resolved key id. Not a secret on its own, and it is what
-	// lets an operator tell which principal actually signed.
+	// AccessKeyID is the resolved key id.
 	AccessKeyID string
 }
 
-// resolveCreds returns the credentials and region for SigV4 signing, plus which
-// identity they came from.
+// resolveCreds returns the credentials and region for SigV4 signing, plus which identity they came from.
 func (a *AWS) resolveCreds(ctx context.Context) (aws.Credentials, string, CredentialSource, error) {
 	region := a.region
 	if a.creds != nil {

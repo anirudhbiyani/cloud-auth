@@ -17,8 +17,7 @@ import (
 // DefaultAWSSTSEndpoint is the global AWS STS endpoint.
 const DefaultAWSSTSEndpoint = "https://sts.amazonaws.com"
 
-// AWSExchanger exchanges an OIDC JWT for AWS credentials via
-// sts:AssumeRoleWithWebIdentity.
+// AWSExchanger exchanges an OIDC JWT for AWS credentials via sts:AssumeRoleWithWebIdentity.
 type AWSExchanger struct {
 	endpoint   string
 	httpClient *http.Client
@@ -65,8 +64,7 @@ type stsErrorXML struct {
 
 // Exchange performs sts:AssumeRoleWithWebIdentity.
 func (e *AWSExchanger) Exchange(ctx context.Context, tok *core.SourceToken, target core.Target) (*core.Credentials, error) {
-	// The concrete type carries only AWS's fields, so a caller cannot hand this
-	// exchanger an Azure tenant and have it silently ignored.
+	// The concrete type carries only AWS's fields, so a caller cannot hand this exchanger an Azure tenant and have it silently ignored.
 	t, ok := target.(core.AWSTarget)
 	if !ok {
 		return nil, fmt.Errorf("aws: expected an AWSTarget, got %T", target)
@@ -75,20 +73,14 @@ func (e *AWSExchanger) Exchange(ctx context.Context, tok *core.SourceToken, targ
 		return nil, err
 	}
 	if tok.Kind != core.OIDC {
-		// Wrapped, not a plain Errorf. Without the sentinel this is a pure
-		// configuration problem that core.CategoryOf files as an internal
-		// fault, and doctor's ErrNoFirstClassPath branch never fires — so it
-		// printed the generic "minting source proof failed" while
-		// bridgeGuidance already held exactly the right AWS paragraph.
+		// Wrapped, not a plain Errorf.
 		return nil, fmt.Errorf("%w: AWS AssumeRoleWithWebIdentity accepts only OIDC tokens, but the "+
 			"source produced a %s proof. Enable outbound identity federation for the account "+
 			"(iam:EnableOutboundWebIdentityFederation) so EC2, ECS and Lambda can mint a real OIDC "+
 			"token via sts:GetWebIdentityToken; failing that, use an OIDC-native source such as EKS "+
 			"IRSA, or a self-hosted OIDC broker", core.ErrNoFirstClassPath, tok.Kind)
 	}
-	// AssumeRoleWithWebIdentity carries no audience parameter — the aud claim
-	// lives inside the token and IAM checks it against the role's trust policy.
-	// That is a check we can also make before the token leaves the process.
+	// AssumeRoleWithWebIdentity carries no audience parameter — the aud claim lives inside the token and IAM checks it against the role's trust policy.
 	if err := checkAudienceBinding(tok, t.Audience()); err != nil {
 		return nil, fmt.Errorf("aws: %w", err)
 	}
@@ -121,9 +113,7 @@ func (e *AWSExchanger) Exchange(ctx context.Context, tok *core.SourceToken, targ
 	if err := xml.Unmarshal(body, &out); err != nil {
 		return nil, fmt.Errorf("aws: parsing STS response: %w", err)
 	}
-	// A 2xx is not proof of credentials. An unexpected body shape unmarshals
-	// happily into zero values, and returning those as success hands the caller
-	// an empty key that fails much later, somewhere unrelated.
+	// A 2xx is not proof of credentials.
 	if out.AccessKeyID == "" || out.SecretAccessKey == "" || out.SessionToken == "" {
 		return nil, fmt.Errorf("aws: STS returned %d with no credentials in the body "+
 			"(request-id %q)", status, out.RequestID)
@@ -144,12 +134,6 @@ func (e *AWSExchanger) Exchange(ctx context.Context, tok *core.SourceToken, targ
 }
 
 // sessionName resolves sts:RoleSessionName.
-//
-// It was previously the constant "cloud-auth", which made every federated
-// session in a fleet indistinguishable in CloudTrail and rendered useless the
-// common defence of constraining sts:RoleSessionName in the trust policy.
-// Deriving it from the proof's subject makes the session attributable to the
-// workload that requested it.
 func sessionName(t core.AWSTarget, tok *core.SourceToken) string {
 	if t.SessionName != "" {
 		return sanitizeSessionName(t.SessionName)
@@ -160,8 +144,7 @@ func sessionName(t core.AWSTarget, tok *core.SourceToken) string {
 	return "cloud-auth"
 }
 
-// sanitizeSessionName reduces a value to what AWS accepts for a session name:
-// [\w+=,.@-]{2,64}.
+// sanitizeSessionName reduces a value to what AWS accepts for a session name: [\w+=,.@-]{2,64}.
 func sanitizeSessionName(name string) string {
 	var b strings.Builder
 	for _, r := range name {
@@ -171,15 +154,13 @@ func sanitizeSessionName(name string) string {
 		case r == '_' || r == '+' || r == '=' || r == ',' || r == '.' || r == '@' || r == '-':
 			b.WriteRune(r)
 		default:
-			// Subjects are full of ':' and '/'; collapse rather than drop, so
-			// distinct subjects do not collide into the same session name.
+			// Subjects are full of ':' and '/'; collapse rather than drop, so distinct subjects do not collide into the same session name.
 			b.WriteRune('-')
 		}
 	}
 	out := b.String()
 	if len(out) > 64 {
-		// Keep the tail: for "repo:org/repo:ref:refs/heads/main" the distinguishing
-		// part is at the end.
+		// Keep the tail: for "repo:org/repo:ref:refs/heads/main" the distinguishing part is at the end.
 		out = out[len(out)-64:]
 	}
 	if len(out) < 2 {

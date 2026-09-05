@@ -23,25 +23,14 @@ type Provider struct {
 	client    IAMClient
 	stsClient STSClient
 
-	// resolveFailed caches a credential-resolution failure so the second call
-	// reports the original cause rather than re-running a lookup that fails the
-	// same way — and, on a host with no credentials at all, so the AWS SDK's
-	// resolver chain is walked once per process instead of once per call.
+	// resolveFailed caches a credential-resolution failure so the second call reports the original cause rather than re-running a lookup that fails the same way — and, on a host with no credentials at all, so the AWS SDK's resolver chain is walked once per process instead of once per call.
 	resolveFailed error
 
-	// tlsConfig is used only when reading an OIDC issuer's certificate chain to
-	// compute its thumbprint. nil means the platform defaults.
+	// tlsConfig is used only when reading an OIDC issuer's certificate chain to compute its thumbprint.
 	tlsConfig *tls.Config
 }
 
-// iam returns the IAM client, building a real one from the ambient AWS
-// configuration on first use.
-//
-// Construction is lazy because init() registers the provider at package load —
-// long before anyone has asked to talk to AWS. Building eagerly there would make
-// every import of this package depend on resolvable credentials, and would
-// surface a credential problem as an import-time failure rather than at the
-// operation that needed it. An injected client (tests, custom config) always wins.
+// iam returns the IAM client, building a real one from the ambient AWS configuration on first use.
 func (p *Provider) iam(ctx context.Context) (IAMClient, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -124,8 +113,6 @@ type GCPWorkloadIdentityInput struct {
 }
 
 // AzureFederatedTokenInput contains parameters for generating an Azure federated token.
-// Note: AWS cannot directly generate tokens for Azure as Azure requires OIDC tokens
-// and AWS doesn't expose an OIDC endpoint. This is included for API completeness.
 type AzureFederatedTokenInput struct {
 	// TenantID is the Azure AD tenant ID.
 	TenantID string
@@ -162,10 +149,7 @@ type AssumedRoleUser struct {
 type IAMClient interface {
 	// Role operations
 	GetRole(ctx context.Context, roleName string) (*Role, error)
-	// ListRoles enumerates every role in the account, each carrying its
-	// assume-role policy. `audit` needs roles this tool did NOT create — the
-	// pre-existing backlog is the whole population it serves — so enumerating
-	// from cloud-auth's own state would miss exactly the interesting ones.
+	// ListRoles enumerates every role in the account, each carrying its assume-role policy.
 	ListRoles(ctx context.Context) ([]*Role, error)
 	CreateRole(ctx context.Context, input *CreateRoleInput) (*Role, error)
 	UpdateAssumeRolePolicy(ctx context.Context, roleName string, policy string) error
@@ -241,13 +225,7 @@ func WithSTSClient(client STSClient) ProviderOption {
 	}
 }
 
-// WithThumbprintTLSConfig sets the TLS configuration used when reading an OIDC
-// issuer's certificate chain.
-//
-// The chain is verified by default, because the thumbprint computed from it
-// becomes a pin: an unverified handshake would let anyone in the path decide
-// what gets pinned. An issuer fronted by a private CA is a legitimate case, so
-// supply its roots here rather than disabling verification.
+// WithThumbprintTLSConfig sets the TLS configuration used when reading an OIDC issuer's certificate chain.
 func WithThumbprintTLSConfig(cfg *tls.Config) ProviderOption {
 	return func(p *Provider) {
 		p.tlsConfig = cfg
@@ -304,9 +282,7 @@ func (p *Provider) Setup(ctx context.Context, spec core.MechanismSpec, opts core
 
 // setupRoleTrustOIDC creates or updates an AWS IAM role with OIDC trust.
 func (p *Provider) setupRoleTrustOIDC(ctx context.Context, spec *core.AWSRoleTrustOIDCSpec, opts core.SetupOptions) (*core.Outputs, error) {
-	// Step 1 below can reach the OIDC-provider calls before the lazy resolve
-	// further down, so resolve up front for anything that will touch AWS. A dry
-	// run is exempt: describing a plan must not require credentials.
+	// Step 1 below can reach the OIDC-provider calls before the lazy resolve further down, so resolve up front for anything that will touch AWS.
 	if !opts.DryRun {
 		if _, err := p.iam(ctx); err != nil {
 			return nil, core.ErrValidation("AWS IAM client not configured").
@@ -328,11 +304,6 @@ func (p *Provider) setupRoleTrustOIDC(ctx context.Context, spec *core.AWSRoleTru
 	}
 
 	// Step 1: Handle OIDC provider
-	//
-	// Built-in IdPs (Google, Cognito, Login with Amazon, Facebook) are trusted by
-	// AWS natively: creating an iam:OpenIDConnectProvider for them is unnecessary
-	// and, for Google, actively wrong — the trust principal is the bare host, so
-	// a provider ARN would never be referenced.
 	switch {
 	case spec.OIDCProviderARN != "":
 		oidcProviderARN = spec.OIDCProviderARN
@@ -388,10 +359,7 @@ func (p *Provider) setupRoleTrustOIDC(ctx context.Context, spec *core.AWSRoleTru
 	if p.client != nil {
 		var roleErr error
 		existingRole, roleErr = p.client.GetRole(ctx, roleName)
-		// A permission or network failure is not "the role is absent". Treating
-		// it as absent sends the flow to CreateRole, which then fails on
-		// EntityAlreadyExists — a confusing error for what is really "we could
-		// not read the role".
+		// A permission or network failure is not "the role is absent".
 		switch {
 		case roleErr == nil:
 			roleExists = existingRole != nil
@@ -428,8 +396,7 @@ func (p *Provider) setupRoleTrustOIDC(ctx context.Context, spec *core.AWSRoleTru
 
 	var roleARN string
 	if !opts.DryRun {
-		// Resolve the IAM client (building one from the ambient AWS config if
-		// none was injected) before doing anything that touches AWS.
+		// Resolve the IAM client (building one from the ambient AWS config if none was injected) before doing anything that touches AWS.
 		if _, err := p.iam(ctx); err != nil {
 			return nil, core.ErrValidation("AWS IAM client not configured").
 				WithCause(err).
@@ -522,11 +489,7 @@ func (p *Provider) setupRoleTrustOIDC(ctx context.Context, spec *core.AWSRoleTru
 	if oidcProviderARN != "" {
 		resourceIDs["oidc_provider_arn"] = oidcProviderARN
 	}
-	// Persist what the trust was SUPPOSED to be, so a later Validate can compare
-	// the live policy against the original intent. Without these, validation can
-	// only confirm the role exists — it cannot detect that someone widened the
-	// subject condition or repointed the issuer. None of these are secrets; they
-	// are already public in the trust policy itself.
+	// Persist what the trust was SUPPOSED to be, so a later Validate can compare the live policy against the original intent.
 	if spec.OIDCProviderURL != "" {
 		resourceIDs["expected_issuer"] = spec.OIDCProviderURL
 	}
@@ -563,9 +526,7 @@ func (p *Provider) setupRoleTrustOIDC(ctx context.Context, spec *core.AWSRoleTru
 
 // Validate implements core.LifecycleProvider.
 func (p *Provider) Validate(ctx context.Context, ref core.MechanismRef, opts core.ValidateOptions) (*core.ValidationReport, error) {
-	// Resolve the IAM client BEFORE constructing validators: they capture it,
-	// and a nil client would panic inside the check rather than reporting a
-	// clean "could not reach AWS".
+	// Resolve the IAM client BEFORE constructing validators: they capture it, and a nil client would panic inside the check rather than reporting a clean "could not reach AWS".
 	if _, err := p.iam(ctx); err != nil {
 		return nil, core.ErrValidation("AWS IAM client not configured").
 			WithCause(err).
@@ -592,8 +553,6 @@ func (p *Provider) Validate(ctx context.Context, ref core.MechanismRef, opts cor
 		}
 
 		// Compare the LIVE trust policy against the intent recorded at setup.
-		// Mechanisms created before these keys were persisted simply won't have
-		// them, and the check reports skipped rather than failing spuriously.
 		expIssuer := ref.ResourceIDs["expected_issuer"]
 		expAudience := ref.ResourceIDs["expected_audience"]
 		expSubject := ref.ResourceIDs["expected_subject"]
@@ -602,11 +561,7 @@ func (p *Provider) Validate(ctx context.Context, ref core.MechanismRef, opts cor
 				expIssuer, expAudience, expSubject,
 				core.WithTrustPolicySource(p)))
 
-			// Breadth is scored unconditionally, unlike the match check above:
-			// it needs no recorded intent, only the live policy. A mechanism
-			// created before cloud-auth persisted its intent still has subjects
-			// worth grading, and that is exactly the pre-existing population
-			// most likely to carry an over-broad one.
+			// Breadth is scored unconditionally, unlike the match check above: it needs no recorded intent, only the live policy.
 			validators = append(validators, core.NewSubjectBreadthValidator(p))
 		}
 
@@ -624,9 +579,7 @@ func (p *Provider) Validate(ctx context.Context, ref core.MechanismRef, opts cor
 
 // Delete implements core.LifecycleProvider.
 func (p *Provider) Delete(ctx context.Context, ref core.MechanismRef, opts core.DeleteOptions) error {
-	// Resolve the client before dispatching. Delete used to dereference p.client
-	// directly, and init() registers a Provider with no client at all — so
-	// core.Delete on the global registry panicked instead of returning an error.
+	// Resolve the client before dispatching.
 	if _, err := p.iam(ctx); err != nil {
 		return core.ErrValidation("AWS IAM client not configured").
 			WithCause(err).
@@ -697,11 +650,7 @@ func (p *Provider) deleteRoleTrustOIDC(ctx context.Context, ref core.MechanismRe
 	return nil
 }
 
-// GenerateGCPWorkloadIdentityToken creates a signed AWS STS GetCallerIdentity request
-// that can be used with GCP Workload Identity Federation.
-//
-// This enables AWS workloads to authenticate to GCP without using long-lived credentials.
-// The returned token is a JSON object containing the signed request that GCP STS can validate.
+// GenerateGCPWorkloadIdentityToken creates a signed AWS STS GetCallerIdentity request that can be used with GCP Workload Identity Federation.
 func (p *Provider) GenerateGCPWorkloadIdentityToken(ctx context.Context, input *GCPWorkloadIdentityInput) (*CrossCloudTokenOutput, error) {
 	if p.stsClient == nil {
 		return nil, core.ErrValidation("AWS STS client not configured").
@@ -772,16 +721,6 @@ func (p *Provider) GenerateGCPWorkloadIdentityToken(ctx context.Context, input *
 }
 
 // GenerateAzureFederatedToken is not implemented here, and deliberately so.
-//
-// It used to report that AWS → Azure federation was impossible because AWS
-// exposed no OIDC token endpoint. That is no longer true: with outbound identity
-// federation enabled, sts:GetWebIdentityToken vends an RS256 JWT that Entra
-// accepts as a client assertion.
-//
-// Minting that JWT is a data-plane operation — it asserts the identity of the
-// caller, so it belongs to the workload, not to a control-plane provider holding
-// administrative IAM credentials. Use source.NewAWS().Mint, or broker.Exchange to
-// mint and exchange in one step.
 func (p *Provider) GenerateAzureFederatedToken(ctx context.Context, input *AzureFederatedTokenInput) (*CrossCloudTokenOutput, error) {
 	return nil, core.ErrValidation("minting an AWS identity token is a data-plane operation, not a provider one").
 		WithProvider(core.AWS).
@@ -793,8 +732,7 @@ func (p *Provider) GenerateAzureFederatedToken(ctx context.Context, input *Azure
 // Helper functions
 
 func (p *Provider) findOIDCProviderByURL(ctx context.Context, url string) (string, error) {
-	// Without a usable client (e.g. a dry run with no credentials) we cannot
-	// look, so report "not found" and let the caller plan a create.
+	// Without a usable client (e.g. a dry run with no credentials) we cannot look, so report "not found" and let the caller plan a create.
 	client, err := p.iam(ctx)
 	if err != nil || client == nil {
 		return "", nil
@@ -835,22 +773,14 @@ func (p *Provider) rollback(ctx context.Context, resources []string, roleExisted
 	return errors
 }
 
-// oidcConditionPrefix returns the IAM condition-key prefix for an OIDC issuer:
-// the provider NAME (host plus any path), with the scheme stripped.
-//
-// AWS: "Define condition keys using the name of the OIDC provider
-// (token.actions.githubusercontent.com) followed by a claim (:aud)". Building
-// the key from the provider ARN instead yields a key that IAM never populates,
-// so StringEquals fails and the role can never be assumed.
+// oidcConditionPrefix returns the IAM condition-key prefix for an OIDC issuer: the provider NAME (host plus any path), with the scheme stripped.
 func oidcConditionPrefix(issuerURL string) string {
 	s := strings.TrimPrefix(issuerURL, "https://")
 	s = strings.TrimPrefix(s, "http://")
 	return strings.TrimSuffix(s, "/")
 }
 
-// builtInOIDCProviders are identity providers AWS trusts natively. They need no
-// iam:OpenIDConnectProvider resource, and the trust principal is the bare host
-// rather than a provider ARN.
+// builtInOIDCProviders are identity providers AWS trusts natively.
 var builtInOIDCProviders = map[string]bool{
 	"accounts.google.com":            true,
 	"cognito-identity.amazonaws.com": true,
@@ -858,18 +788,12 @@ var builtInOIDCProviders = map[string]bool{
 	"graph.facebook.com":             true,
 }
 
-// needsOIDCProviderResource reports whether an IAM OIDC provider must be created
-// for this issuer.
+// needsOIDCProviderResource reports whether an IAM OIDC provider must be created for this issuer.
 func needsOIDCProviderResource(issuerURL string) bool {
 	return !builtInOIDCProviders[oidcConditionPrefix(issuerURL)]
 }
 
 // audienceConditionClaim returns the claim to pin the audience with.
-//
-// Normally that is "aud". For accounts.google.com it must be "oaud": AWS maps
-// the :aud key to the token's azp claim whenever azp is set, and Google service
-// account tokens do set azp — so pinning :aud to the audience would never match.
-// :oaud always carries the real aud.
 func audienceConditionClaim(issuerURL string) string {
 	if oidcConditionPrefix(issuerURL) == "accounts.google.com" {
 		return "oaud"
@@ -878,12 +802,6 @@ func audienceConditionClaim(issuerURL string) string {
 }
 
 // buildTrustPolicy renders the role's assume-role policy document.
-//
-// It refuses to emit a statement with no `:sub` condition unless the spec opted
-// into that explicitly. The same rule lives in AWSRoleTrustOIDCSpec.Validate,
-// but a caller can construct a spec directly and skip it, and the cost of
-// getting this wrong is a role any workload the issuer serves can assume — so
-// the document builder enforces it too rather than trusting its input.
 func buildTrustPolicy(oidcProviderARN string, spec *core.AWSRoleTrustOIDCSpec) (map[string]interface{}, error) {
 	prefix := oidcConditionPrefix(spec.OIDCProviderURL)
 
@@ -919,13 +837,7 @@ func buildTrustPolicy(oidcProviderARN string, spec *core.AWSRoleTrustOIDCSpec) (
 			spec.RoleName, prefix)).WithProvider(core.AWS)
 	}
 
-	// sts:RoleAuthorizedByIdp, when asked for. STS evaluates this BEFORE the
-	// trust policy, against the "https://aws.amazon.com/roles" claim the issuer
-	// embedded — so the issuer gets a say in which roles its own tokens may
-	// assume, and a stolen token is useless against roles it never named.
-	//
-	// A Bool condition, not a String one: the key answers "did the IdP
-	// authorize this role", and the comparison against the claim is STS's.
+	// sts:RoleAuthorizedByIdp, when asked for.
 	if spec.RequireIdPAuthorizedRole {
 		condition["Bool"] = map[string]string{
 			core.IdPAuthorizedRoleConditionKey: "true",
@@ -963,16 +875,7 @@ func mergeTags(base, overlay map[string]string) map[string]string {
 // thumbprintDialTimeout bounds the TLS handshake used to read an issuer's chain.
 const thumbprintDialTimeout = 10 * time.Second
 
-// getOIDCThumbprint computes the SHA-1 thumbprint AWS stores for an OIDC
-// provider: the fingerprint of the root-most certificate in the issuer's TLS
-// chain.
-//
-// This used to return a hardcoded value for two issuers and forty zeroes, with a
-// nil error, for everything else — which is every EKS cluster, every self-hosted
-// IdP, every Okta or Auth0 tenant. The thumbprint is the pin on the issuer's
-// certificate chain, so a constant silently disabled the control it exists to
-// provide, and a hardcoded literal cannot follow a CA rotation. It is computed
-// or it is an error; there is no useful third answer.
+// getOIDCThumbprint computes the SHA-1 thumbprint AWS stores for an OIDC provider: the fingerprint of the root-most certificate in the issuer's TLS chain.
 func (p *Provider) oidcThumbprint(ctx context.Context, issuer string) (string, error) {
 	u, err := neturl.Parse(issuer)
 	if err != nil {
@@ -1011,19 +914,12 @@ func (p *Provider) oidcThumbprint(ctx context.Context, issuer string) (string, e
 	if len(chain) == 0 {
 		return "", fmt.Errorf("oidc thumbprint: %s presented no certificate", host)
 	}
-	// AWS pins the last certificate in the chain the server sends — the
-	// root-most one it offers, not the leaf.
+	// AWS pins the last certificate in the chain the server sends — the root-most one it offers, not the leaf.
 	sum := sha1.Sum(chain[len(chain)-1].Raw) // #nosec G401 -- AWS defines this thumbprint as SHA-1
 	return hex.EncodeToString(sum[:]), nil
 }
 
-// isNotFoundError reports whether err means "the resource is absent", as opposed
-// to "we could not tell".
-//
-// The typed check comes first and is the one that matters: IsNotFound unwraps to
-// IAM's NoSuchEntityException. Substring matching on error text is how a
-// create-or-update decision silently inverts after an SDK message change, so it
-// remains only as a fallback for errors that reached here already stringified.
+// isNotFoundError reports whether err means "the resource is absent", as opposed to "we could not tell".
 func isNotFoundError(err error) bool {
 	if err == nil {
 		return false
@@ -1091,11 +987,7 @@ func (v *oidcProviderExistsValidator) Validate(ctx context.Context, ref core.Mec
 }
 
 func init() {
-	// Register with default registry
-	// Panic rather than discard: Register fails only on a duplicate name, which
-	// is a programming error, and the alternative is a provider that silently
-	// does not exist. Every command that reaches for it would then report
-	// "provider not found" and send the reader looking in the wrong place.
+	// Register with default registry Panic rather than discard: Register fails only on a duplicate name, which is a programming error, and the alternative is a provider that silently does not exist.
 	if err := core.Register(New()); err != nil {
 		panic("cloud-auth/provider/aws: registering the AWS provider: " + err.Error())
 	}

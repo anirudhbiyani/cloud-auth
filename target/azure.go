@@ -17,10 +17,7 @@ import (
 // DefaultAzureEndpoint is the Entra (Azure AD) login authority base.
 const DefaultAzureEndpoint = "https://login.microsoftonline.com"
 
-// AzureExchanger exchanges an OIDC JWT for an Entra access token via the
-// client-credentials grant with a federated client assertion. Azure accepts
-// only RS256 OIDC JWTs, so a SigV4 proof (AWS EC2/ECS) has no first-class path
-// and is rejected with actionable OIDC-bridge guidance.
+// AzureExchanger exchanges an OIDC JWT for an Entra access token via the client-credentials grant with a federated client assertion.
 type AzureExchanger struct {
 	endpoint   string
 	httpClient *http.Client
@@ -68,20 +65,12 @@ func (e *AzureExchanger) Exchange(ctx context.Context, tok *core.SourceToken, ta
 	if err := t.Validate(); err != nil {
 		return nil, err
 	}
-	// The default Azure audience, api://AzureADTokenExchange, is not bound to a
-	// tenant: any tenant holding a federated credential for this issuer and
-	// subject will accept the same assertion. The tenant in the URL therefore
-	// decides who receives a usable proof of our identity, which makes this
-	// check — and validateTenant above — a trust boundary rather than hygiene.
+	// The default Azure audience, api://AzureADTokenExchange, is not bound to a tenant: any tenant holding a federated credential for this issuer and subject will accept the same assertion.
 	if err := checkAudienceBinding(tok, t.Audience()); err != nil {
 		return nil, fmt.Errorf("azure: %w", err)
 	}
 	endpoint := strings.TrimRight(e.endpoint, "/") + "/" + url.PathEscape(t.Tenant) + "/oauth2/v2.0/token"
-	// The scope comes from the target, which requires it. The exchanger's own
-	// default was https://management.azure.com/.default — the Azure control
-	// plane — handed to any caller who did not think about it. There is
-	// deliberately no exchanger-level override: one caller forgetting to set it
-	// is how that default reached production in the first place.
+	// The scope comes from the target, which requires it.
 	scope := t.Scope
 	form := url.Values{
 		"grant_type":            {"client_credentials"},
@@ -129,8 +118,7 @@ func (e *AzureExchanger) classify(status int, err error) error {
 		return fmt.Errorf("azure: exchange failed: %w", err)
 	}
 	if status == http.StatusBadRequest || status == http.StatusUnauthorized {
-		// Entra returns 400/401 for issuer/subject/audience mismatch (matched
-		// case-sensitively) and missing federated credentials.
+		// Entra returns 400/401 for issuer/subject/audience mismatch (matched case-sensitively) and missing federated credentials.
 		return fmt.Errorf("azure: Entra rejected the assertion (status %d): %s "+
 			"(check case-sensitive issuer/subject/audience match and the federated identity credential): %w",
 			status, redact.Body(string(he.body), maxErrorBody), core.ErrTrustMissing)

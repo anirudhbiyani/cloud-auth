@@ -13,7 +13,6 @@ import (
 )
 
 // StateStore provides persistent storage for mechanism references and ownership tracking.
-// This enables safe deletion (only delete resources we created) and idempotency.
 type StateStore interface {
 	// Save stores a mechanism reference.
 	Save(ctx context.Context, ref MechanismRef) error
@@ -84,17 +83,6 @@ func (s *MemoryStateStore) Get(ctx context.Context, id string) (*MechanismRef, e
 }
 
 // paginate sorts refs and applies the filter's window.
-//
-// Sorting is not cosmetic. Both stores build the slice by ranging a map, and Go
-// randomizes map iteration order deliberately, so Offset/Limit were slicing a
-// different arrangement on every call: page 2 could repeat an entry from page 1
-// and omit another entirely, and nothing about the result would look wrong.
-// ID is the sort key because it is the only field guaranteed present and unique.
-//
-// An offset past the end returns nothing, which is the second half of the bug:
-// the guard used to be `Offset < len(refs)`, so paging past the last entry
-// skipped the slice entirely and returned the FULL list. A client walking pages
-// until it got an empty one never got one.
 func paginate(refs []MechanismRef, filter ListFilter) []MechanismRef {
 	slices.SortFunc(refs, func(a, b MechanismRef) int {
 		return strings.Compare(a.ID, b.ID)
@@ -179,7 +167,6 @@ type FileStateStore struct {
 }
 
 // NewFileStateStore creates a new file-based state store.
-// If the file exists, it loads the existing state.
 func NewFileStateStore(filePath string) (*FileStateStore, error) {
 	s := &FileStateStore{
 		filePath: filePath,
@@ -227,30 +214,12 @@ func (s *FileStateStore) load() error {
 
 // migrate handles schema version upgrades.
 func (s *FileStateStore) migrate(state *stateData) error {
-	// Currently only version 1, no migration needed
-	// Future versions would add migration logic here
+	// Currently only version 1, no migration needed Future versions would add migration logic here
 	state.Version = stateStoreVersion
 	return nil
 }
 
 // save writes state to file durably.
-//
-// The state file records which resources cloud-auth created, and Delete refuses
-// to remove anything not listed in it. A lost record therefore does not just
-// lose information: it makes a real cloud resource undeletable through this tool
-// ("mechanism not owned by cloud-auth"). That is what the three additions here
-// are for.
-//
-// A unique temp name, because a fixed ".tmp" meant two concurrent runs wrote the
-// same path and one clobbered the other mid-write.
-//
-// fsync on the file and on the directory, because rename only guarantees
-// atomicity of the name change, not that either the data or the directory entry
-// reached disk. A crash between the two left a state file that is valid JSON and
-// missing entries.
-//
-// And a lock file around the whole read-modify-write, because the in-process
-// mutex says nothing about a second cloud-auth process.
 func (s *FileStateStore) save() error {
 	s.state.UpdatedAt = time.Now()
 
@@ -305,19 +274,11 @@ func (s *FileStateStore) save() error {
 }
 
 // syncDir fsyncs a directory so a rename within it survives a crash.
-//
-// Directory fsync is a POSIX concept. Windows cannot open a directory as a file
-// handle to sync it, so syncDirectory is build-tagged and is a no-op there —
-// see state_lock_other.go. Calling it unconditionally made every FileStateStore
-// save fail on Windows with "Access is denied", which is to say the state store
-// did not work on Windows at all.
 func syncDir(dir string) error {
 	return syncDirectory(dir)
 }
 
-// withLock runs fn holding an exclusive advisory lock on the state file's
-// lock sibling, so two cloud-auth processes cannot interleave a
-// read-modify-write and lose each other's ownership records.
+// withLock runs fn holding an exclusive advisory lock on the state file's lock sibling, so two cloud-auth processes cannot interleave a read-modify-write and lose each other's ownership records.
 func (s *FileStateStore) withLock(fn func() error) error {
 	dir := filepath.Dir(s.filePath)
 	if err := os.MkdirAll(dir, 0700); err != nil {
@@ -345,9 +306,7 @@ func (s *FileStateStore) Save(ctx context.Context, ref MechanismRef) error {
 	defer s.mu.Unlock()
 
 	return s.withLock(func() error {
-		// Re-read inside the lock: our in-memory copy may predate another
-		// process's writes, and saving over them would lose its records — which
-		// makes the resources they describe undeletable.
+		// Re-read inside the lock: our in-memory copy may predate another process's writes, and saving over them would lose its records — which makes the resources they describe undeletable.
 		if err := s.load(); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("failed to re-read state before save: %w", err)
 		}
@@ -357,21 +316,6 @@ func (s *FileStateStore) Save(ctx context.Context, ref MechanismRef) error {
 }
 
 // refreshForRead re-reads the file so a read reflects other processes' writes.
-//
-// Save, Delete and UpdateOwnership already re-read inside the lock, with the
-// comment "our in-memory copy may predate another process's writes". Exactly
-// the same is true on the READ side, and it was not being done: a store loaded
-// at process start reported a mechanism another operator had just created as
-// absent. That is worse than a stale write, because nothing about the answer
-// looks stale — `describe` says not found, and the obvious conclusion is that
-// setup failed.
-//
-// A missing file is not an error: an empty store is the correct reading of a
-// state file nobody has written yet.
-//
-// ponytail: re-reads on every call rather than stat-ing for changes. A state
-// file is kilobytes and a CLI invocation makes a handful of reads; add mtime
-// caching if a long-lived process ever holds one of these.
 func (s *FileStateStore) refreshForRead() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

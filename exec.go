@@ -12,9 +12,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/internal/audit"
 )
 
-// splitExecArgs splits an argv into the flags before "--" and the command
-// (plus its args) after it. It returns an error if no "--" separator or no
-// command is present.
+// splitExecArgs splits an argv into the flags before "--" and the command (plus its args) after it.
 func splitExecArgs(args []string) (flags []string, command []string, err error) {
 	for i, a := range args {
 		if a == "--" {
@@ -29,9 +27,7 @@ func splitExecArgs(args []string) (flags []string, command []string, err error) 
 	return nil, nil, errors.New("exec: missing '--' separator before the command")
 }
 
-// credentialEnv returns the environment-variable assignments (KEY=VALUE) that
-// inject the given credentials, consistent with formatEnv's variable choices.
-// It returns AWS_* for AWS and the generic bearer variable otherwise.
+// credentialEnv returns the environment-variable assignments (KEY=VALUE) that inject the given credentials, consistent with formatEnv's variable choices.
 func credentialEnv(c *core.Credentials) []string {
 	// Injecting plaintext into a child process is this function's whole job.
 	plain := c.Reveal()
@@ -47,8 +43,7 @@ func credentialEnv(c *core.Credentials) []string {
 	}
 }
 
-// execEnviron composes the child process environment: the inherited base env
-// with the credential variables appended (later entries win in os/exec).
+// execEnviron composes the child process environment: the inherited base env with the credential variables appended (later entries win in os/exec).
 func execEnviron(base []string, c *core.Credentials) []string {
 	out := make([]string, 0, len(base)+3)
 	out = append(out, base...)
@@ -82,9 +77,7 @@ func cmdExec(ctx context.Context, args []string) error {
 		return fmt.Errorf("--audience is required (pinned per target)")
 	}
 
-	// exec injects live credentials into a child process. It is the operation
-	// most worth a record and had none: whatever the child then did with them is
-	// attributable only through this line.
+	// exec injects live credentials into a child process.
 	aud := newAuditor(audit.OpExec).with(func(e *audit.Event) {
 		e.TargetCloud = string(target.Cloud())
 		e.Role = auditRole(target)
@@ -99,11 +92,7 @@ func cmdExec(ctx context.Context, args []string) error {
 	}
 	aud.with(func(e *audit.Event) { e.STSRequestID = creds.STSRequestID })
 
-	// Emitted BEFORE the child runs, not after. The child may run for hours, and
-	// it may replace this process's exit path entirely via os.Exit below — so a
-	// record written afterwards is a record that frequently never gets written.
-	// The event says credentials were issued and injected, which is the fact
-	// being audited; the child's own outcome is the child's to report.
+	// Emitted BEFORE the child runs, not after.
 	_ = aud.finish(nil)
 
 	// Running an operator-supplied command IS this subcommand's purpose — the

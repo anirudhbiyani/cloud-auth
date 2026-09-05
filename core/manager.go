@@ -68,12 +68,6 @@ func (m *DefaultManager) Setup(ctx context.Context, spec MechanismSpec, opts Set
 	}
 
 	// Store reference in state store (unless dry-run).
-	//
-	// A failure here is not cosmetic and must not be printed and forgotten: the
-	// cloud resources exist, but nothing records that cloud-auth created them, so
-	// Delete will later refuse to remove them as "not owned". Surface it in the
-	// Outputs the caller already has to read, since failing outright would be
-	// worse — that would hide the identifiers needed to clean up by hand.
 	if !opts.DryRun {
 		if err := m.stateStore.Save(ctx, outputs.Ref); err != nil {
 			outputs.Instructions = append(outputs.Instructions, fmt.Sprintf(
@@ -119,11 +113,6 @@ func (m *DefaultManager) Validate(ctx context.Context, ref MechanismRef, opts Va
 	report := RunValidation(ctx, ref, validators)
 
 	// Delegate to the provider as well.
-	//
-	// The registry alone is not enough: nothing populates it for the built-in
-	// mechanism types, so relying on it made every `validate` return
-	// "Valid: true" with zero checks while the provider's real checks — role
-	// existence, trust-policy match, attached permissions — never ran at all.
 	if provider, err := m.registry.GetLifecycleProvider(ref.Provider); err == nil && provider != nil {
 		if pr, perr := provider.Validate(ctx, ref, opts); perr != nil {
 			return nil, perr
@@ -213,10 +202,7 @@ func (m *DefaultManager) Delete(ctx context.Context, ref MechanismRef, opts Dele
 		return err
 	}
 
-	// Remove from state store. The provider deletion already succeeded, so
-	// returning an error here would make a successful delete look failed and
-	// invite a retry against resources that are gone — but a stale record is
-	// still worth reporting, since it will make future runs behave oddly.
+	// Remove from state store.
 	if !opts.DryRun {
 		if err := m.stateStore.Delete(ctx, ref.ID); err != nil {
 			return fmt.Errorf("resources deleted, but the state record for %s could not be "+
@@ -320,11 +306,4 @@ func Delete(ctx context.Context, ref MechanismRef, opts ...DeleteOptions) error 
 }
 
 // globalManager backs the package-level Setup, Validate and Delete helpers.
-//
-// It is deliberately not replaceable. The previous SetGlobalManager and
-// GetGlobalManager existed to swap process-wide state "useful for testing", which
-// meant one test could change which registry and state store every other caller
-// saw. Anything needing its own wiring constructs a DefaultManager with
-// NewManager and calls it directly — which is what the tests in this repository
-// already do.
 var globalManager = NewManager()

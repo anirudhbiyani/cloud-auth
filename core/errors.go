@@ -180,14 +180,7 @@ func IsCategory(err error, category ErrorCategory) bool {
 	return false
 }
 
-// Categorize wraps err with a category and retryability, preserving it for
-// errors.Is and errors.As.
-//
-// This exists because the data plane had no access to the taxonomy at all: it
-// returned fmt.Errorf strings plus four sentinels, so a caller of
-// broker.Exchange could not tell "the network is down" from "the trust is
-// misconfigured" from "we are being throttled" without matching on message
-// text. The taxonomy was defined for exactly that and wired to nothing.
+// Categorize wraps err with a category and retryability, preserving it for errors.Is and errors.As.
 func Categorize(err error, category ErrorCategory, retryable bool) error {
 	if err == nil {
 		return nil
@@ -201,8 +194,7 @@ func Categorize(err error, category ErrorCategory, retryable bool) error {
 	}
 }
 
-// CategoryOf reports the category of err, or ErrCategoryInternal when it carries
-// none. Callers branch on this instead of inspecting messages.
+// CategoryOf reports the category of err, or ErrCategoryInternal when it carries none.
 func CategoryOf(err error) ErrorCategory {
 	var caErr *CloudAuthError
 	if errors.As(err, &caErr) {

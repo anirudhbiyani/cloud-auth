@@ -9,32 +9,24 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// Exchanger is the one cloud-touching dependency of the runner. *broker.Broker
-// satisfies it as-is: the verifier drives cloud-auth's own detect→mint→exchange
-// orchestrator rather than reimplementing any part of it.
+// Exchanger is the one cloud-touching dependency of the runner.
 type Exchanger interface {
 	Exchange(ctx context.Context, target core.Target) (*core.Credentials, *core.Runtime, error)
 }
 
-// Probe optionally proves the returned credentials actually work against the
-// target cloud. Probes are pluggable and always soft: an error (or a missing
-// implementation) is reported, never fatal, unless Runner.StrictProbe is set.
-// A probe MUST NOT return credential material in its detail string; the
-// Scrubber will redact it regardless.
+// Probe optionally proves the returned credentials actually work against the target cloud.
 type Probe func(ctx context.Context, creds *core.Credentials, c Case) (detail string, err error)
 
 // DefaultSkew is the clock-drift tolerance applied to credential expiry.
 const DefaultSkew = 60 * time.Second
 
-// DefaultCaseTimeout bounds a single exchange so one hung STS cannot wedge the
-// whole run (a Job that never exits is worse than a red one).
+// DefaultCaseTimeout bounds a single exchange so one hung STS cannot wedge the whole run (a Job that never exits is worse than a red one).
 const DefaultCaseTimeout = 60 * time.Second
 
 // Runner executes cases against an injected Exchanger.
 type Runner struct {
 	Exchanger Exchanger
-	// Probes is the probe registry; nil means "no probes registered", which
-	// makes every requested probe an "unimplemented" soft result.
+	// Probes is the probe registry; nil means "no probes registered", which makes every requested probe an "unimplemented" soft result.
 	Probes map[string]Probe
 	// Scrubber redacts credential material from every recorded string.
 	Scrubber *Scrubber
@@ -76,8 +68,7 @@ func (r *Runner) scrubber() *Scrubber {
 	return r.Scrubber
 }
 
-// Run executes every case in order and returns their results. It never returns
-// an error: a failed case is data, not a control-flow event.
+// Run executes every case in order and returns their results.
 func (r *Runner) Run(ctx context.Context, cases []Case) []CaseResult {
 	results := make([]CaseResult, 0, len(cases))
 	for _, c := range cases {
@@ -86,8 +77,7 @@ func (r *Runner) Run(ctx context.Context, cases []Case) []CaseResult {
 	return results
 }
 
-// RunCase executes one case: exchange via the broker, then assert the outcome
-// the plan declared.
+// RunCase executes one case: exchange via the broker, then assert the outcome the plan declared.
 func (r *Runner) RunCase(ctx context.Context, c Case) CaseResult {
 	res := CaseResult{
 		Name:          c.Name,
@@ -107,8 +97,7 @@ func (r *Runner) RunCase(ctx context.Context, c Case) CaseResult {
 	}
 	res.Identity = identityFromTarget(target)
 
-	// Reject an unknown sentinel here as well as at load time: a case built in
-	// code (integration tests) never passes through Plan.Validate.
+	// Reject an unknown sentinel here as well as at load time: a case built in code (integration tests) never passes through Plan.Validate.
 	var wantErr error
 	if c.Expect == ExpectError {
 		var ok bool
@@ -142,9 +131,7 @@ func (r *Runner) RunCase(ctx context.Context, c Case) CaseResult {
 	return res
 }
 
-// assertExpectedError implements the negative half of the matrix: the pair must
-// fail, and it must fail with the documented sentinel. Failing for some other
-// reason is not a pass — that is how a real regression would sneak through.
+// assertExpectedError implements the negative half of the matrix: the pair must fail, and it must fail with the documented sentinel.
 func (r *Runner) assertExpectedError(res *CaseResult, c Case, exErr, wantErr error) {
 	switch {
 	case exErr == nil:
@@ -152,17 +139,14 @@ func (r *Runner) assertExpectedError(res *CaseResult, c Case, exErr, wantErr err
 	case errors.Is(exErr, wantErr):
 		res.Status = StatusPass
 		res.MatchedSentinel = c.ExpectError
-		// Keep the actual message: it is the actionable guidance cloud-auth
-		// emits alongside the sentinel, and reviewing it is the point of the
-		// negative test.
+		// Keep the actual message: it is the actionable guidance cloud-auth emits alongside the sentinel, and reviewing it is the point of the negative test.
 		res.Note = errSummary(exErr)
 	default:
 		res.Error = fmt.Sprintf("failed with the wrong error: got %q, want %s", errSummary(exErr), c.ExpectError)
 	}
 }
 
-// assertSuccess implements the positive half: real, non-empty, unexpired
-// credentials, plus the optional probe.
+// assertSuccess implements the positive half: real, non-empty, unexpired credentials, plus the optional probe.
 func (r *Runner) assertSuccess(ctx context.Context, res *CaseResult, c Case, creds *core.Credentials, exErr error) {
 	if exErr != nil {
 		res.Error = "exchange failed: " + errSummary(exErr)
@@ -191,8 +175,7 @@ func (r *Runner) assertSuccess(ctx context.Context, res *CaseResult, c Case, cre
 	}
 }
 
-// runProbe invokes a registered probe, containing both its errors and its
-// panics: probe code talks to third-party APIs and must never take the run down.
+// runProbe invokes a registered probe, containing both its errors and its panics: probe code talks to third-party APIs and must never take the run down.
 func (r *Runner) runProbe(ctx context.Context, c Case, creds *core.Credentials) (pr ProbeResult) {
 	pr = ProbeResult{Name: c.Probe, Status: ProbeUnimplemented,
 		Detail: fmt.Sprintf("no probe named %q is registered in this build; credential validity was still asserted", c.Probe)}
@@ -218,8 +201,7 @@ func (r *Runner) runProbe(ctx context.Context, c Case, creds *core.Credentials) 
 	return ProbeResult{Name: c.Probe, Status: ProbeOK, Detail: detail}
 }
 
-// validateCredentials asserts the credentials are present, populated for their
-// cloud, and not (nearly) expired.
+// validateCredentials asserts the credentials are present, populated for their cloud, and not (nearly) expired.
 func validateCredentials(c *core.Credentials, now time.Time, skew time.Duration) error {
 	if c == nil {
 		return errors.New("exchange returned no credentials")
@@ -248,8 +230,7 @@ func validateCredentials(c *core.Credentials, now time.Time, skew time.Duration)
 	return nil
 }
 
-// knownSentinel names the sentinel an error matches, if any — useful context on
-// an unexpected failure ("trust missing" reads better than a raw STS body).
+// knownSentinel names the sentinel an error matches, if any — useful context on an unexpected failure ("trust missing" reads better than a raw STS body).
 func knownSentinel(err error) (string, bool) {
 	for _, name := range SentinelNames() {
 		s, _ := SentinelFor(name)
@@ -260,9 +241,7 @@ func knownSentinel(err error) (string, bool) {
 	return "", false
 }
 
-// The report is deliberately cloud-agnostic: one shape for every pair, so the
-// matrix is readable. These accessors pull whichever fields the concrete target
-// happens to carry.
+// The report is deliberately cloud-agnostic: one shape for every pair, so the matrix is readable.
 func roleOf(t core.Target) string {
 	if a, ok := t.(core.AWSTarget); ok {
 		return a.RoleARN
@@ -315,9 +294,7 @@ func mergeRuntimeIdentity(id *Identity, rt *core.Runtime) {
 	}
 }
 
-// scrub passes every identity field through the scrubber. These fields are
-// metadata by construction, but a subject can be operator-supplied and the
-// guarantee must hold unconditionally.
+// scrub passes every identity field through the scrubber.
 func (id *Identity) scrub(s *Scrubber) {
 	id.Issuer = s.Scrub(id.Issuer)
 	id.Subject = s.Scrub(id.Subject)

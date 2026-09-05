@@ -1,11 +1,4 @@
-// Package k8stoken mints a projected service-account OIDC token carrying a
-// caller-chosen audience via the Kubernetes TokenRequest API.
-//
-// A pod's projected service-account token has its aud fixed at projection time.
-// When a workload needs a token for a different audience (e.g. a specific
-// cross-cloud STS target), it can call the API server's TokenRequest endpoint to
-// mint a fresh token bound to the requested audience, using the pod's own
-// service-account token as the bearer credential.
+// Package k8stoken mints a projected service-account OIDC token carrying a caller-chosen audience via the Kubernetes TokenRequest API.
 package k8stoken
 
 import (
@@ -21,16 +14,14 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/internal/httpx"
 )
 
-// In-cluster credential/config file locations, exported so callers can reuse
-// them when bootstrapping a Client from the mounted service-account volume.
+// In-cluster credential/config file locations, exported so callers can reuse them when bootstrapping a Client from the mounted service-account volume.
 const (
 	TokenFile     = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 	CACertFile    = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
 	NamespaceFile = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 )
 
-// Client mints tokens via the Kubernetes TokenRequest API. All fields are
-// injectable so it is unit-testable against an httptest fake API server.
+// Client mints tokens via the Kubernetes TokenRequest API.
 type Client struct {
 	baseURL     string
 	httpClient  *http.Client
@@ -50,8 +41,7 @@ func WithServiceAccount(ns, sa string) Option {
 	return func(c *Client) { c.namespace, c.serviceAcct = ns, sa }
 }
 
-// New builds a Client with defaults. It is not usable until a base URL and a
-// service account are configured (see the source package for in-cluster wiring).
+// New builds a Client with defaults.
 func New(opts ...Option) *Client {
 	c := &Client{
 		httpClient: httpx.NewSTSClient(5 * time.Second),
@@ -80,9 +70,7 @@ func (c *Client) Mint(ctx context.Context, audience string) (string, error) {
 		return "", fmt.Errorf("k8stoken: marshaling request: %w", err)
 	}
 
-	// PathEscape both: the caller derives them from a JWT it did not verify, and
-	// source/k8stoken validates them as DNS labels — but this package is exported
-	// and cannot assume that happened.
+	// PathEscape both: the caller derives them from a JWT it did not verify, and source/k8stoken validates them as DNS labels — but this package is exported and cannot assume that happened.
 	u := fmt.Sprintf("%s/api/v1/namespaces/%s/serviceaccounts/%s/token",
 		c.baseURL, url.PathEscape(c.namespace), url.PathEscape(c.serviceAcct))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(reqBody))

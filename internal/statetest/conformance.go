@@ -1,10 +1,4 @@
 // Package statetest holds the StateStore conformance suite.
-//
-// It exists as a shared package so the remote backend is held to the SAME
-// assertions as the file store rather than to a parallel set that drifts. The
-// file store's own tests additionally cover file-specific properties — temp
-// files, permission bits, fsync — which have no remote equivalent; everything
-// here is a property any StateStore must have.
 package statetest
 
 import (
@@ -16,12 +10,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// Factory returns a fresh, empty store, and a second handle to the SAME
-// underlying storage.
-//
-// Two handles is the whole point of the concurrency assertions: one store's
-// in-process mutex says nothing about a second process, and it is the second
-// process that loses records.
+// Factory returns a fresh, empty store, and a second handle to the SAME underlying storage.
 type Factory func(t *testing.T) (a, b core.StateStore)
 
 // Run executes the conformance suite against a store implementation.
@@ -63,15 +52,12 @@ func testSaveAndGet(t *testing.T, newStores Factory) {
 	}
 }
 
-// Every lost record is a resource this tool will refuse to delete, because it no
-// longer believes it created it.
+// Every lost record is a resource this tool will refuse to delete, because it no longer believes it created it.
 func testConcurrentWriters(t *testing.T, newStores Factory) {
 	const writers, each = 4, 25
 	ctx := context.Background()
 
-	// Two handles over ONE store, which is what two processes look like — the
-	// factory is called once, because calling it again would hand back a fresh
-	// empty store and each writer would be writing somewhere nobody reads.
+	// Two handles over ONE store, which is what two processes look like — the factory is called once, because calling it again would hand back a fresh empty store and each writer would be writing somewhere nobody reads.
 	a, b := newStores(t)
 	handles := []core.StateStore{a, b}
 
@@ -102,8 +88,7 @@ func testConcurrentWriters(t *testing.T, newStores Factory) {
 	}
 }
 
-// A write through one handle must be visible through another, or two operators
-// each hold a private view and neither can see what the other created.
+// A write through one handle must be visible through another, or two operators each hold a private view and neither can see what the other created.
 func testSeparateHandles(t *testing.T, newStores Factory) {
 	a, b := newStores(t)
 	ctx := context.Background()
@@ -139,9 +124,7 @@ func testDelete(t *testing.T, newStores Factory) {
 	}
 }
 
-// Ownership decides whether delete touches a resource, so a lost update here is
-// the most expensive one: two operators, two read-modify-writes, and a resource
-// nobody will clean up.
+// Ownership decides whether delete touches a resource, so a lost update here is the most expensive one: two operators, two read-modify-writes, and a resource nobody will clean up.
 func testOwnership(t *testing.T, newStores Factory) {
 	a, b := newStores(t)
 	ctx := context.Background()
@@ -149,8 +132,7 @@ func testOwnership(t *testing.T, newStores Factory) {
 	if err := a.Save(ctx, ref("owned")); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	// A concurrent write through the other handle, between the read and the
-	// write the ownership update performs.
+	// A concurrent write through the other handle, between the read and the write the ownership update performs.
 	if err := b.Save(ctx, ref("other")); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -202,8 +184,7 @@ func testListPaging(t *testing.T, newStores Factory) {
 		}
 	}
 
-	// An offset past the end returns nothing, or a client paging until it gets
-	// an empty page never gets one.
+	// An offset past the end returns nothing, or a client paging until it gets an empty page never gets one.
 	refs, err := store.List(ctx, core.ListFilter{Offset: total + 5})
 	if err != nil {
 		t.Fatalf("List: %v", err)

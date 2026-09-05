@@ -13,16 +13,6 @@ import (
 )
 
 // GitHub namespace liveness.
-//
-// GitHub runs ONE OIDC issuer across every account on the platform and permits
-// namespace reuse. Delete an organisation, someone re-registers the name, mints
-// a token whose sub is character-for-character identical, and assumes a role
-// that is still sitting in your account trusting it.
-//
-// Published 2026 telemetry found 14% of GitHub namespaces referenced in AWS
-// trust policies were unregistered and claimable, and 24% for Azure, with each
-// dead namespace trusted by roughly twelve distinct identities. It is one API
-// call, and no mainstream scanner makes it.
 
 const (
 	githubAPI            = "https://api.github.com"
@@ -34,9 +24,7 @@ type GitHubNamespaceResolver struct {
 	http    *http.Client
 	baseURL string
 	token   string
-	// ourOwners are the organisations and users this operator controls. A
-	// namespace that resolves but is not in this set is somebody ELSE's, which
-	// is worse than an unregistered one: it is claimed, today, by a stranger.
+	// ourOwners are the organisations and users this operator controls.
 	ourOwners map[string]bool
 }
 
@@ -68,9 +56,7 @@ func WithOurGitHubOwners(owners ...string) GitHubNamespaceOption {
 	}
 }
 
-// NewGitHubNamespaceResolver builds the resolver. GITHUB_TOKEN is used when set:
-// unauthenticated GitHub API requests are limited to 60 per hour, which an
-// inventory of any size exhausts immediately.
+// NewGitHubNamespaceResolver builds the resolver.
 func NewGitHubNamespaceResolver(opts ...GitHubNamespaceOption) *GitHubNamespaceResolver {
 	r := &GitHubNamespaceResolver{
 		http:    httpx.NewSTSClient(githubResolveTimeout),
@@ -90,9 +76,7 @@ func (r *GitHubNamespaceResolver) Issuer() string {
 
 // Resolve classifies a "<owner>/<repo>" or "<owner>" namespace.
 func (r *GitHubNamespaceResolver) Resolve(ctx context.Context, namespace string) (core.NamespaceState, string, error) {
-	// An immutable subject carries numeric ids: myorg@123456/myrepo@456789.
-	// Those are not resolvable names, and they are also the format that CANNOT
-	// be silently re-registered — the id is what makes it immutable.
+	// An immutable subject carries numeric ids: myorg@123456/myrepo@456789. Those are not resolvable names, and they are also the format that CANNOT be silently re-registered — the id is what makes it immutable.
 	if strings.Contains(namespace, "@") {
 		return core.NamespaceUnknown,
 			"immutable subject: the numeric ids pin this to one repository, which is what makes " +
@@ -128,8 +112,7 @@ func (r *GitHubNamespaceResolver) Resolve(ctx context.Context, namespace string)
 			fmt.Sprintf("%q is not one of your organisations: whoever controls it can mint a token "+
 				"this trust accepts", owner), nil
 	case http.StatusForbidden, http.StatusUnauthorized:
-		// A private repository of somebody else's is indistinguishable from a
-		// nonexistent one without access, so this must not read as either.
+		// A private repository of somebody else's is indistinguishable from a nonexistent one without access, so this must not read as either.
 		return core.NamespaceUnknown,
 			"the GitHub API refused the lookup: set GITHUB_TOKEN, or this namespace is private", nil
 	default:
@@ -138,9 +121,6 @@ func (r *GitHubNamespaceResolver) Resolve(ctx context.Context, namespace string)
 }
 
 // head issues a HEAD request and returns the status.
-//
-// HEAD rather than GET: existence is the whole question, and the response body
-// of a repository lookup is large and entirely irrelevant to it.
 func (r *GitHubNamespaceResolver) head(ctx context.Context, path string) (int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, r.baseURL+path, nil)
 	if err != nil {

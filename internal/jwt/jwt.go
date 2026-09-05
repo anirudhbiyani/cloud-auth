@@ -1,10 +1,4 @@
 // Package jwt extracts claims from a JWT WITHOUT verifying its signature.
-//
-// This is deliberate and safe for cloud-auth's use: the token is one we just
-// minted from our own metadata endpoint, and it is the *target* STS that
-// verifies the signature against the issuer's JWKS. We only parse it locally to
-// populate SourceToken metadata (issuer/subject/expiry) and to power `cloud-auth
-// doctor` diagnostics. Never use this to make a trust decision.
 package jwt
 
 import (
@@ -20,8 +14,7 @@ type Claims struct {
 	Issuer   string
 	Subject  string
 	Audience string // first audience (convenience); see Audiences for all
-	// Audiences is every value of the aud claim. A JWT's aud may be a single
-	// string or an array; both are normalized here.
+	// Audiences is every value of the aud claim.
 	Audiences []string
 	Expiry    time.Time
 }
@@ -44,8 +37,7 @@ type rawClaims struct {
 	Exp int64           `json:"exp"`
 }
 
-// ParseUnverified decodes the payload segment of a compact JWT. It does NOT
-// verify the signature (see package doc).
+// ParseUnverified decodes the payload segment of a compact JWT.
 func ParseUnverified(token string) (Claims, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
@@ -70,16 +62,12 @@ func ParseUnverified(token string) (Claims, error) {
 	return c, nil
 }
 
-// audiences normalizes the aud claim (a JSON string or array of strings) into a
-// slice.
+// audiences normalizes the aud claim (a JSON string or array of strings) into a slice.
 func audiences(raw json.RawMessage) []string {
 	if len(raw) == 0 {
 		return nil
 	}
-	// null is absence, checked before the string attempt for the same reason
-	// StringOrSliceClaim does: encoding/json treats null as a no-op and returns
-	// no error, so a null aud would silently become []string{""} — a token
-	// carrying one audience, the empty string, rather than none.
+	// null is absence, checked before the string attempt for the same reason StringOrSliceClaim does: encoding/json treats null as a no-op and returns no error, so a null aud would silently become []string{""} — a token carrying one audience, the empty string, rather than none.
 	if string(raw) == "null" {
 		return nil
 	}
@@ -94,17 +82,7 @@ func audiences(raw json.RawMessage) []string {
 	return nil
 }
 
-// StringOrSliceClaim reads a claim that a JWT may encode as either a string or
-// an array of strings, and returns nothing when it is absent.
-//
-// It re-decodes the payload rather than widening Claims. Claims is the set of
-// fields every caller needs; this is for the occasional claim one caller cares
-// about — "https://aws.amazon.com/roles", which STS reads for
-// sts:RoleAuthorizedByIdp — and adding a map to Claims for that would put an
-// unvalidated blob in front of every consumer.
-//
-// Unverified, exactly like ParseUnverified: the signature is checked by whoever
-// the token is presented to, never here.
+// StringOrSliceClaim reads a claim that a JWT may encode as either a string or an array of strings, and returns nothing when it is absent.
 func StringOrSliceClaim(token, name string) ([]string, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
@@ -125,17 +103,6 @@ func StringOrSliceClaim(token, name string) ([]string, error) {
 	}
 
 	// JSON null is absence, and it has to be handled BEFORE the string attempt.
-	// encoding/json treats null as a no-op for any destination type and returns
-	// no error, so unmarshaling it into a string silently yields "" — and this
-	// function would return []string{""}: one authorized role, which happens to
-	// be the empty string.
-	//
-	// That is not a cosmetic difference. The caller distinguishes "no claim" —
-	// reported as "the identity provider authorized no roles" — from "the claim
-	// names other roles", which prints the values it did name. A null claim
-	// would take the second path and show an empty string as an authorized
-	// role, sending the operator to look for a misconfiguration that is not
-	// there.
 	if string(raw) == "null" {
 		return nil, nil
 	}

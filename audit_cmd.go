@@ -19,13 +19,6 @@ import (
 )
 
 // `cloud-auth audit` — the cross-cloud trust inventory.
-//
-// The question nobody can answer today: which external identities can assume
-// anything in any of our clouds. Access Analyzer surfaces federated principals
-// without distinguishing repo:org/specific-repo:ref:refs/heads/main from
-// repo:org/*; Prowler and ScoutSuite do partial single-cloud trust checks;
-// Cloudsplaining covers permissions policies rather than trust policies. Every
-// one of them is single-cloud.
 
 // auditOpts are the command's flags.
 type auditOpts struct {
@@ -58,9 +51,7 @@ func cmdAudit(ctx context.Context, args []string) error {
 	log := newLogger(opts.verbose)
 	log.Info("enumerating federated trust", "clouds", "aws, gcp, azure, vault")
 
-	// Every wired provider that can enumerate. A source that cannot reach its
-	// cloud fails on its own and the others still report — which is why the
-	// list is unconditional rather than gated on detected credentials.
+	// Every wired provider that can enumerate.
 	sources := []core.InventorySource{
 		awsprovider.New(),
 		gcpprovider.New(),
@@ -87,8 +78,7 @@ func cmdAudit(ctx context.Context, args []string) error {
 	return auditExit(records, failures, opts.failOn)
 }
 
-// sortRecords orders worst-first, then by resource so the output is diffable
-// between runs.
+// sortRecords orders worst-first, then by resource so the output is diffable between runs.
 func sortRecords(records []core.TrustRecord) {
 	sort.SliceStable(records, func(i, j int) bool {
 		si, sj := records[i].Severity(), records[j].Severity()
@@ -105,9 +95,7 @@ func sortRecords(records []core.TrustRecord) {
 // auditReport is the --format json shape.
 type auditReport struct {
 	Records []core.TrustRecord `json:"records"`
-	// Incomplete says whether every source was enumerated. A cloud that could
-	// not be read makes the inventory short, and short must never read as
-	// clean — the same rule validate applies to a skipped check.
+	// Incomplete says whether every source was enumerated.
 	Incomplete bool     `json:"incomplete"`
 	Failures   []string `json:"failures,omitempty"`
 	Summary    struct {
@@ -145,9 +133,7 @@ func writeAuditJSON(w io.Writer, records []core.TrustRecord, failures []error) e
 
 func writeAuditTable(w io.Writer, records []core.TrustRecord, failures []error) {
 	if len(failures) > 0 {
-		// Printed FIRST, not appended as a footnote: an inventory missing a
-		// cloud is not an inventory, and a reader who stops at the table would
-		// otherwise conclude those clouds were clean.
+		// Printed FIRST, not appended as a footnote: an inventory missing a cloud is not an inventory, and a reader who stops at the table would otherwise conclude those clouds were clean.
 		fmt.Fprintf(w, "⚠ INCOMPLETE — %d cloud(s) could not be enumerated, so nothing below\n"+
 			"  says anything about them:\n", len(failures))
 		for _, f := range failures {
@@ -184,8 +170,7 @@ func writeAuditTable(w io.Writer, records []core.TrustRecord, failures []error) 
 	fmt.Fprintf(w, "\n%d trust relationship(s): %d critical, %d warning\n",
 		len(records), critical, warning)
 
-	// The detail behind every critical row, because a table cell cannot carry
-	// "anyone can register this name and assume this role right now".
+	// The detail behind every critical row, because a table cell cannot carry "anyone can register this name and assume this role right now".
 	for _, r := range records {
 		if r.Severity() != core.FindingCritical {
 			continue
@@ -263,9 +248,7 @@ func auditExit(records []core.TrustRecord, failures []error, failOn string) erro
 		return errValidationFailed(fmt.Errorf("%d trust relationship(s) at %s severity or above",
 			n, threshold))
 	}
-	// An incomplete inventory must not report success under --fail-on: the
-	// clouds that could not be read are exactly where an unseen finding would
-	// be, and a green gate over an unread cloud is worse than no gate.
+	// An incomplete inventory must not report success under --fail-on: the clouds that could not be read are exactly where an unseen finding would be, and a green gate over an unread cloud is worse than no gate.
 	if len(failures) > 0 {
 		return errValidationFailed(fmt.Errorf(
 			"nothing reached %s severity, but %d cloud(s) could not be enumerated — "+

@@ -13,24 +13,8 @@ import (
 )
 
 // The I/O half of `doctor --explain`.
-//
-// diagnose() is pure and stays that way: it never performs I/O, which is why 25
-// of its cases run against fixtures with no cloud. So the trust policy is
-// fetched HERE, in the caller, and handed to the comparison as data. The
-// detectors in core/explain.go are likewise pure.
-//
-// --explain is opt-in because it needs target-side READ credentials that the
-// base doctor deliberately does not require: plain doctor works from the
-// workload's own identity, and asking for IAM read access would make the
-// common case need permissions it has no use for.
 
-// trustForTarget reads the live trust configuration a target's exchange will be
-// evaluated against.
-//
-// A runtime Target names a destination, not a cloud-auth mechanism, so the
-// resource ids each provider needs are derived from it rather than read from
-// state — `doctor` is used on machines that never ran `setup`, and requiring a
-// state file would make --explain useless exactly where it is most wanted.
+// trustForTarget reads the live trust configuration a target's exchange will be evaluated against.
 func trustForTarget(ctx context.Context, target core.Target) (*core.TrustPolicy, error) {
 	switch t := target.(type) {
 	case core.AWSTarget:
@@ -57,11 +41,7 @@ func trustForTarget(ctx context.Context, target core.Target) (*core.TrustPolicy,
 		})
 
 	case core.AzureTarget:
-		// Reading a federated identity credential needs the application's
-		// OBJECT id, and an AzureTarget carries its client id — a different
-		// identifier, resolvable only through a Graph lookup this command does
-		// not do. Saying so beats guessing, and beats silently reporting no
-		// findings as though the trust were fine.
+		// Reading a federated identity credential needs the application's OBJECT id, and an AzureTarget carries its client id — a different identifier, resolvable only through a Graph lookup this command does not do.
 		return nil, fmt.Errorf("--explain cannot read Azure trust from a runtime target: "+
 			"a federated identity credential is addressed by the application's object id, and "+
 			"--client-id %s is the client id. Use `cloud-auth validate --ref <mechanism>` on a "+
@@ -73,10 +53,6 @@ func trustForTarget(ctx context.Context, target core.Target) (*core.TrustPolicy,
 }
 
 // roleNameFromARN extracts the role name, including any path.
-//
-// IAM role ARNs may carry a path — arn:aws:iam::1:role/team/name — and GetRole
-// takes the name only. Splitting on the last "/" would drop the path and look
-// up the wrong role, or none.
 func roleNameFromARN(arn string) (string, error) {
 	i := strings.Index(arn, ":role/")
 	if i < 0 {
@@ -96,8 +72,7 @@ func roleNameFromARN(arn string) (string, error) {
 // writeExplanation renders the findings.
 func writeExplanation(w io.Writer, trust *core.TrustPolicy, findings []core.Finding, trustErr error) {
 	if trustErr != nil {
-		// A failure to READ the trust is not a finding about the trust, and
-		// must never render as "no problems found".
+		// A failure to READ the trust is not a finding about the trust, and must never render as "no problems found".
 		fmt.Fprintf(w, "\n⚠ could not read the target's trust configuration, so nothing below was\n"+
 			"  compared against it: %v\n", trustErr)
 		return
@@ -153,8 +128,7 @@ func quoteOrNone(v string) string {
 	return fmt.Sprintf("%q", v)
 }
 
-// wrapFix hard-wraps remediation text, which is long by design — a fix that
-// fits on one line is usually not a fix.
+// wrapFix hard-wraps remediation text, which is long by design — a fix that fits on one line is usually not a fix.
 func wrapFix(s string, width int, indent string) string {
 	words := strings.Fields(s)
 	if len(words) == 0 {
@@ -179,11 +153,6 @@ func wrapFix(s string, width int, indent string) string {
 }
 
 // doctorReport is the --format json shape.
-//
-// Stable field names, because the point of a machine-readable mode is that
-// something else parses it. Findings carry their severity as text: the Go
-// constant's numeric value is an implementation detail nobody outside this
-// process should depend on.
 type doctorReport struct {
 	Runtime  *runtimeReport `json:"runtime"`
 	Target   *targetReport  `json:"target,omitempty"`
@@ -226,9 +195,6 @@ func writeDoctorJSON(w io.Writer, p preflight, diagnoses []diagnosis,
 		Checks:   make([]checkReport, 0, len(diagnoses)),
 		Findings: findings,
 		// Complete says whether everything that was asked for actually ran.
-		// A trust read that failed makes the report incomplete, and a consumer
-		// must be able to tell that from "compared, found nothing" — the same
-		// distinction `validate` draws between skipped and passed.
 		Complete: trustErr == nil,
 	}
 	if report.Findings == nil {

@@ -10,10 +10,7 @@ import (
 	"strings"
 )
 
-// The VaultClient surface. Vault's API is uniform — a JSON write to a path, a
-// JSON read from a path — so most of these are one line of routing over do().
-// What is worth attention is where a path differs from the obvious guess, and
-// those carry a comment.
+// The VaultClient surface.
 
 // --- Auth methods ---
 
@@ -37,11 +34,6 @@ func (c *restClient) DisableAuthMethod(ctx context.Context, path string) error {
 }
 
 // ReadAuthMethod reads the auth method mounted at path.
-//
-// sys/auth/<path> is a WRITE-only endpoint; the read lives at
-// sys/mounts/auth/<path> in newer Vault and at sys/auth (the full list) in
-// older. Reading the mount directly is the portable form and is what the
-// create-or-update decision depends on.
 func (c *restClient) ReadAuthMethod(ctx context.Context, path string) (*AuthMethod, error) {
 	var resp secret
 	if err := c.do(ctx, http.MethodGet, "sys/mounts/auth/"+trimPath(path), nil, &resp); err != nil {
@@ -156,10 +148,6 @@ func (c *restClient) DeleteAWSRole(ctx context.Context, path, roleName string) e
 }
 
 // WriteAWSConfig configures the AWS auth method's client credentials.
-//
-// The path is config/client, not config: the AWS auth method has several config
-// endpoints (client, identity, certificate, sts) and writing to the wrong one
-// succeeds while configuring nothing that matters.
 func (c *restClient) WriteAWSConfig(ctx context.Context, path string, config *AWSAuthConfig) error {
 	if config == nil {
 		return fmt.Errorf("vault: config is required")
@@ -226,9 +214,6 @@ func (c *restClient) GenerateAWSCredentialsWithTTL(ctx context.Context, path, ro
 }
 
 // GenerateAWSSTSCredentials issues STS credentials, optionally for a role ARN.
-//
-// The sts endpoint, not creds: they issue different credential kinds, and the
-// STS one is what an assumed-role credential type requires.
 func (c *restClient) GenerateAWSSTSCredentials(ctx context.Context, path, roleName, roleARN, ttl string) (*AWSCredentials, error) {
 	query := map[string]string{}
 	if roleARN != "" {
@@ -291,10 +276,6 @@ func (c *restClient) GenerateGCPAccessToken(ctx context.Context, path, roleName 
 }
 
 // GenerateGCPServiceAccountKey issues a GCP service account key for a roleset.
-//
-// This mints a LONG-LIVED credential, unlike every other call here. It exists
-// because the Vault broker supports it, not because it is a good idea: prefer
-// GenerateGCPAccessToken, which expires.
 func (c *restClient) GenerateGCPServiceAccountKey(ctx context.Context, path, roleName string) (*GCPServiceAccountKey, error) {
 	var resp secret
 	endpoint := fmt.Sprintf("%s/roleset/%s/key", trimPath(path), roleName)
@@ -413,10 +394,6 @@ func (c *restClient) CreateToken(ctx context.Context, opts *CreateTokenOptions) 
 // --- Path helpers ---
 
 // trimPath normalizes a mount path: no leading or trailing slash.
-//
-// Vault treats "auth/jwt/" and "auth/jwt" as the same mount but builds different
-// request URLs from them, and a doubled slash is a 404 that reads like a missing
-// mount rather than a typo.
 func trimPath(path string) string {
 	return strings.Trim(path, "/")
 }
@@ -427,9 +404,6 @@ func authRolePath(mount, role string) string {
 }
 
 // secretsRolePath builds <mount>/roles/<name>.
-//
-// Note "roles", plural — the secrets engines use it where the auth methods use
-// the singular "role". Getting this wrong is a 404 on a mount that exists.
 func secretsRolePath(mount, role string) string {
 	return fmt.Sprintf("%s/roles/%s", trimPath(mount), role)
 }
@@ -464,8 +438,7 @@ func mountConfig(config *SecretsEngineConfig) map[string]any {
 	})
 }
 
-// secondsToTTL renders a Vault duration as the string form the write side takes,
-// so a value read back can be written back unchanged.
+// secondsToTTL renders a Vault duration as the string form the write side takes, so a value read back can be written back unchanged.
 func secondsToTTL(seconds int) string {
 	if seconds == 0 {
 		return ""
@@ -490,19 +463,13 @@ func encodeQuery(query map[string]string) string {
 // --- Enumeration ---
 
 // ListAuthMethods returns the mounted auth methods keyed by path.
-//
-// sys/auth returns the mount table as a map whose KEYS are the paths, with a
-// trailing slash on each. The trailing slash is stripped here so a caller can
-// join the path without producing a doubled separator — the same normalization
-// trimPath does everywhere else.
 func (c *restClient) ListAuthMethods(ctx context.Context) (map[string]*AuthMethod, error) {
 	var resp secret
 	if err := c.do(ctx, http.MethodGet, "sys/auth", nil, &resp); err != nil {
 		return nil, err
 	}
 
-	// sys/auth answers with the mount table at the TOP level on older Vault and
-	// under "data" on newer. Try data first, then fall back.
+	// sys/auth answers with the mount table at the TOP level on older Vault and under "data" on newer.
 	raw := resp.Data
 	if len(raw) == 0 {
 		return map[string]*AuthMethod{}, nil
@@ -527,11 +494,6 @@ func (c *restClient) ListAuthMethods(ctx context.Context) (map[string]*AuthMetho
 }
 
 // ListRoleNames lists the role names on one auth mount.
-//
-// Vault lists with the LIST verb, which most HTTP clients cannot send; the
-// documented equivalent is GET with ?list=true. A mount with no roles answers
-// 404, which is not an error — it is an empty list, and treating it as a failure
-// would abort an inventory over the first unused mount it met.
 func (c *restClient) ListRoleNames(ctx context.Context, path string) ([]string, error) {
 	var resp secret
 	endpoint := fmt.Sprintf("auth/%s/role?list=true", trimPath(path))

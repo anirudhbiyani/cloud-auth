@@ -10,9 +10,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// preflight is the set of injected results a diagnosis is computed over. It is
-// deliberately a plain data struct so the diagnostic logic can be unit-tested
-// with fakes instead of a live cloud environment.
+// preflight is the set of injected results a diagnosis is computed over.
 type preflight struct {
 	// runtime is the detected source runtime (nil if detection failed).
 	runtime *core.Runtime
@@ -30,14 +28,7 @@ type preflight struct {
 	skew time.Duration
 }
 
-// normalize replaces a nil target with core.NoTarget so every reader can call
-// Cloud() and Audience() unconditionally.
-//
-// The production caller cannot produce a nil target — targetFlags returns a
-// typed zero — but preflight is a plain struct that tests and future callers
-// build by hand, and core.Target is an interface, so a field left unset is a
-// panic waiting at the first method call rather than an empty report. Absorb it
-// here, once, instead of guarding at each of the eleven p.target uses.
+// normalize replaces a nil target with core.NoTarget so every reader can call Cloud() and Audience() unconditionally.
 func (p preflight) normalize() preflight {
 	if p.target == nil {
 		p.target = core.NoTarget{}
@@ -59,10 +50,7 @@ func (d diagnosis) String() string {
 	return fmt.Sprintf("  %s %s", sym, d.message)
 }
 
-// diagnose turns injected preflight results into an ordered list of actionable
-// findings. It never performs I/O; all cloud interaction happens in the caller
-// and is passed in via preflight. Each failure mode maps to a distinct,
-// specific message so an operator knows exactly what to fix.
+// diagnose turns injected preflight results into an ordered list of actionable findings.
 func diagnose(p preflight) []diagnosis {
 	p = p.normalize()
 	var out []diagnosis
@@ -100,8 +88,7 @@ func diagnose(p preflight) []diagnosis {
 	return out
 }
 
-// diagnoseMintError maps a mint error to a specific finding using errors.Is
-// against the sentinel errors, plus the source→target bridge guidance.
+// diagnoseMintError maps a mint error to a specific finding using errors.Is against the sentinel errors, plus the source→target bridge guidance.
 func diagnoseMintError(p preflight) []diagnosis {
 	switch {
 	case errors.Is(p.mintErr, core.ErrNonFederatableSource):
@@ -117,11 +104,7 @@ func diagnoseMintError(p preflight) []diagnosis {
 	}
 }
 
-// mintedProofSummary names the proof that was actually minted. On AWS this is
-// the difference between an STS-vended OIDC JWT and a SigV4 GetCallerIdentity
-// proof — the same principal either way, but verified by the target against
-// completely different trust configuration, so "it minted" is not enough to know
-// whether the exchange can work.
+// mintedProofSummary names the proof that was actually minted.
 func mintedProofSummary(tok *core.SourceToken) string {
 	if tok == nil {
 		return "source proof minted successfully"
@@ -136,23 +119,12 @@ func mintedProofSummary(tok *core.SourceToken) string {
 	return msg
 }
 
-// diagnoseToken performs the checks that require an actual minted token:
-// audience match, expiry/clock-skew, and Azure case-sensitivity. It also
-// reports what an exchange would still need against the target trust.
+// diagnoseToken performs the checks that require an actual minted token: audience match, expiry/clock-skew, and Azure case-sensitivity.
 func diagnoseToken(p preflight) []diagnosis {
 	var out []diagnosis
 	tok := p.token
 
-	// Proof kind against the target BEFORE anything else, because when it is
-	// wrong nothing below it matters: an audience that matches perfectly is
-	// irrelevant if the target's STS will not accept this kind of proof at all.
-	//
-	// This is the check that made bridgeGuidance dead code. It was only reached
-	// from the mint-error path, and no source returns ErrNoFirstClassPath —
-	// sources return ErrNonFederatableSource, and the exchangers return
-	// ErrNoFirstClassPath, which doctor never calls. So a SigV4 proof minted
-	// successfully, doctor reported "minted successfully (kind AWSSigV4)", and
-	// said nothing about the target refusing it.
+	// Proof kind against the target BEFORE anything else, because when it is wrong nothing below it matters: an audience that matches perfectly is irrelevant if the target's STS will not accept this kind of proof at all.
 	if d, ok := diagnoseProofKind(p); ok {
 		out = append(out, d)
 	}
@@ -183,8 +155,7 @@ func diagnoseToken(p preflight) []diagnosis {
 		}
 	}
 
-	// Azure is case-sensitive on issuer/subject/audience; a case-only mismatch
-	// against the target audience is a common, silent trust failure.
+	// Azure is case-sensitive on issuer/subject/audience; a case-only mismatch against the target audience is a common, silent trust failure.
 	if p.target.Cloud() == core.Azure && tok.Audience != "" && p.target.Audience() != "" &&
 		tok.Audience != p.target.Audience() &&
 		strings.EqualFold(tok.Audience, p.target.Audience()) {
@@ -197,10 +168,6 @@ func diagnoseToken(p preflight) []diagnosis {
 }
 
 // diagnoseProofKind reports whether the target's STS accepts this proof kind.
-//
-// Only GCP accepts a SigV4 GetCallerIdentity proof: it calls the AWS API to
-// verify it. AWS's own AssumeRoleWithWebIdentity and Entra's client-credentials
-// grant both take an OIDC JWT and nothing else.
 func diagnoseProofKind(p preflight) (diagnosis, bool) {
 	tok := p.token
 	if tok == nil || tok.Kind == core.OIDC {
@@ -220,8 +187,7 @@ func diagnoseProofKind(p preflight) (diagnosis, bool) {
 		targetCloud, tok.Kind, bridgeGuidance(sourceCloud, targetCloud))}, true
 }
 
-// bridgeGuidance returns the human guidance for a source→target pair that has
-// no first-class keyless path (e.g. AWS EC2 SigV4 → Azure OIDC-only STS).
+// bridgeGuidance returns the human guidance for a source→target pair that has no first-class keyless path (e.g. AWS EC2 SigV4 → Azure OIDC-only STS).
 func bridgeGuidance(source, target core.Cloud) string {
 	if source == core.AWS {
 		return fmt.Sprintf(
@@ -238,12 +204,9 @@ func bridgeGuidance(source, target core.Cloud) string {
 		source, target)
 }
 
-// exchangeAdvisory reports, without performing the exchange, what the target
-// trust must contain for the exchange to succeed. It maps ErrTrustMissing to
-// per-cloud remediation. This is printed after the safe (mint-only) preflight.
+// exchangeAdvisory reports, without performing the exchange, what the target trust must contain for the exchange to succeed.
 func exchangeAdvisory(target core.Target) string {
-	// A type switch, not a switch on Cloud(): each branch then reads only the
-	// fields its own cloud actually has, and the compiler enforces that.
+	// A type switch, not a switch on Cloud(): each branch then reads only the fields its own cloud actually has, and the compiler enforces that.
 	switch t := target.(type) {
 	case core.AWSTarget:
 		return fmt.Sprintf(

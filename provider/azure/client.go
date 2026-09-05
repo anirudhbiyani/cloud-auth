@@ -21,17 +21,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/internal/redact"
 )
 
-// This file is the concrete client behind provider/azure's interfaces. Without
-// it the provider could plan and never act: every non-dry-run setup, validate
-// and delete stopped at "client not configured".
-//
-// Microsoft Graph and ARM are addressed as REST. Both are plain JSON, and the
-// surface used here is narrow. Credentials are NOT hand-rolled:
-// azidentity.DefaultAzureCredential covers `az login`, managed identity,
-// workload identity and the environment variables, in that order. Writing only
-// the client-credentials flow by hand would have been fewer lines and would
-// have quietly made AZURE_CLIENT_SECRET the path of least resistance — a
-// long-lived secret, which is the thing this project exists to remove.
+// This file is the concrete client behind provider/azure's interfaces.
 
 const (
 	// graphEndpoint is the Microsoft Graph v1.0 base.
@@ -39,13 +29,11 @@ const (
 	// armEndpoint is the Azure Resource Manager base.
 	armEndpoint = "https://management.azure.com"
 
-	// graphScope and armScope are the token audiences for each surface. They are
-	// different tokens; one will not work on the other.
+	// graphScope and armScope are the token audiences for each surface.
 	graphScope = "https://graph.microsoft.com/.default"
 	armScope   = "https://management.azure.com/.default"
 
-	// armAPIVersion for user-assigned managed identities and their federated
-	// identity credentials.
+	// armAPIVersion for user-assigned managed identities and their federated identity credentials.
 	armIdentityAPIVersion = "2023-01-31"
 	// armRoleAPIVersion for role assignments.
 	armRoleAPIVersion = "2022-04-01"
@@ -56,19 +44,12 @@ const (
 	errorBodyLimit = 512
 )
 
-// Azure's documented limits on federated identity credentials. Enforced here
-// rather than discovered at runtime: the API's own refusal names the ceiling
-// without naming what is already using it.
+// Azure's documented limits on federated identity credentials.
 const (
-	// maxFederatedCredentials is the hard cap per application object or per
-	// user-assigned managed identity. Standard FICs only; the flexible-FIC
-	// preview lifts it, and is deliberately not used — see the package docs.
+	// maxFederatedCredentials is the hard cap per application object or per user-assigned managed identity.
 	maxFederatedCredentials = 20
 
-	// ficCreateInterval is the minimum gap between federated-credential
-	// creations on the same resource. Azure throttles these to 0.25 req/sec and
-	// returns 409 on concurrent creation under one identity, so they are
-	// serialized and paced rather than issued in parallel.
+	// ficCreateInterval is the minimum gap between federated-credential creations on the same resource.
 	ficCreateInterval = 4 * time.Second
 )
 
@@ -91,15 +72,13 @@ func (e *apiError) Error() string {
 	return fmt.Sprintf("azure: %s: %s", name, e.Message)
 }
 
-// NotFound reports absence, so Setup's create-or-update decision and the
-// rollback do not have to recover it by matching strings.
+// NotFound reports absence, so Setup's create-or-update decision and the rollback do not have to recover it by matching strings.
 func (e *apiError) NotFound() bool {
 	return e.StatusCode == http.StatusNotFound ||
 		e.Code == "Request_ResourceNotFound" || e.Code == "ResourceNotFound"
 }
 
-// Conflict reports that the resource already exists, or that a concurrent
-// create on the same identity lost. Azure returns 409 for both.
+// Conflict reports that the resource already exists, or that a concurrent create on the same identity lost.
 func (e *apiError) Conflict() bool { return e.StatusCode == http.StatusConflict }
 
 // Clients bundles the interfaces a fully wired Azure provider needs.
@@ -117,15 +96,12 @@ type restClient struct {
 	graphURL string
 	armURL   string
 
-	// ficPace serializes federated-credential creation. Azure throttles these
-	// per resource and answers concurrent creates with 409, so a caller that
-	// fans out gets failures rather than speed.
+	// ficPace serializes federated-credential creation.
 	ficMu       sync.Mutex
 	lastFIC     time.Time
 	ficInterval time.Duration
 
-	// now and sleep are injectable so the pacing can be tested without
-	// spending real seconds.
+	// now and sleep are injectable so the pacing can be tested without spending real seconds.
 	now   func() time.Time
 	sleep func(context.Context, time.Duration) error
 }
@@ -188,10 +164,6 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 }
 
 // do performs one authenticated JSON call against Graph or ARM.
-//
-// scope selects which token is minted: Graph and ARM issue separate tokens for
-// separate audiences, and presenting one to the other fails as an authorization
-// error that reads like a permissions problem.
 func (c *restClient) do(ctx context.Context, method, endpoint, scope string, body, out any, resource string) error {
 	var reader io.Reader
 	if body != nil {
@@ -250,11 +222,6 @@ func redactedPath(endpoint string) string {
 }
 
 // parseAPIError decodes the two error envelopes Azure uses.
-//
-// Graph nests {"error":{"code":..,"message":..}}; ARM uses the same outer shape
-// but its code is a different vocabulary; and Entra's token endpoint answers
-// with {"error":"...","error_description":"AADSTS70021: ..."}. All three are
-// recognised so callers can branch on a code rather than a substring.
 func parseAPIError(status int, raw []byte, resource string) error {
 	e := &apiError{StatusCode: status, Resource: resource}
 
@@ -277,9 +244,7 @@ func parseAPIError(status int, raw []byte, resource string) error {
 	if err := json.Unmarshal(raw, &oauth); err == nil && oauth.Error != "" {
 		e.Code = oauth.Error
 		e.Message = redact.Body(oauth.Description, errorBodyLimit)
-		// Entra puts the actionable identifier inside the description, not the
-		// code: every failure here is "invalid_client" or "invalid_request"
-		// until you read the AADSTS number.
+		// Entra puts the actionable identifier inside the description, not the code: every failure here is "invalid_client" or "invalid_request" until you read the AADSTS number.
 		if aadsts := extractAADSTS(oauth.Description); aadsts != "" {
 			e.Code = aadsts
 		}

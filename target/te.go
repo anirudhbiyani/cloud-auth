@@ -1,12 +1,4 @@
-// Package target contains the Target Exchangers: one per target cloud. Each takes a
-// normalized source proof plus a target binding and performs the target STS
-// call, returning native short-lived credentials.
-//
-// Retry policy is uniform across exchangers: transient transport errors and 5xx
-// responses are retried with bounded backoff; 4xx responses are configuration
-// or trust errors and are surfaced immediately, never retried. This keeps
-// misconfiguration fast and honest (supporting the >99%-success and
-// <30-min-to-first-exchange goals) instead of masking it behind retries.
+// Package target contains the Target Exchangers: one per target cloud.
 package target
 
 import (
@@ -24,18 +16,13 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/internal/redact"
 )
 
-// maxErrorBody caps how much of an upstream response an error carries. An error
-// is a diagnostic, not a transcript, and these bodies are unbounded.
+// maxErrorBody caps how much of an upstream response an error carries.
 const maxErrorBody = 512
 
-// maxBackoff caps a single wait, so an upstream asking for patience cannot stall
-// a caller indefinitely through the exponential schedule.
+// maxBackoff caps a single wait, so an upstream asking for patience cannot stall a caller indefinitely through the exponential schedule.
 const maxBackoff = 5 * time.Second
 
-// Defaults every exchanger starts from. They live here, next to the retry loop
-// that consumes them, because they are one policy rather than four coincidences:
-// a change to how hard cloud-auth leans on a token endpoint should not have to
-// be made in four files and be half-applied.
+// Defaults every exchanger starts from.
 const (
 	defaultExchangeTimeout = 10 * time.Second
 	defaultMaxRetries      = 2
@@ -43,17 +30,13 @@ const (
 )
 
 // httpError carries the status, body and headers of a non-2xx STS response.
-// The headers are kept for Retry-After, which is the only reliable signal for
-// how long a throttled caller should wait.
 type httpError struct {
 	status int
 	body   []byte
 	header http.Header
 }
 
-// Error redacts before formatting. Token endpoints echo request material into
-// error descriptions, and this string travels: into the exchanger's wrapped
-// error, out of Exchange, and into the audit record the CLI writes to stderr.
+// Error redacts before formatting.
 func (e *httpError) Error() string {
 	return fmt.Sprintf("status %d: %s", e.status, redact.Body(string(e.body), maxErrorBody))
 }
@@ -61,39 +44,14 @@ func (e *httpError) Error() string {
 // asHTTPError unwraps err into an *httpError if present.
 func asHTTPError(err error, target **httpError) bool { return errors.As(err, target) }
 
-// throttleCodes are the error codes cloud STS endpoints use for rate limiting,
-// which arrive with a 4xx status and are therefore invisible to a
-// status-code-only rule.
+// throttleCodes are the error codes cloud STS endpoints use for rate limiting, which arrive with a 4xx status and are therefore invisible to a status-code-only rule.
 var throttleCodes = []string{"Throttling", "ThrottlingException", "SlowDown",
 	"TooManyRequestsException", "RequestLimitExceeded", "rateLimitExceeded"}
 
-// propagationCodes are 4xx answers meaning "the trust is right, it is not
-// replicated yet" — as opposed to "the trust is wrong", which is what every
-// other 4xx here means.
-//
-// AADSTS70021 is Entra's answer while a newly created federated identity
-// credential propagates, which takes a few minutes. A workload that runs
-// immediately after `cloud-auth setup` hits it, and the operator cannot tell it
-// apart from a wrong subject without knowing the number.
-//
-// This is the third and last documented exception to "4xx never retries", and it
-// is deliberately a list of exact codes rather than a rule about a status class.
-// AADSTS700213 — a genuinely wrong subject — is superficially identical in every
-// respect except this number, and it must keep failing on the first attempt.
+// propagationCodes are 4xx answers meaning "the trust is right, it is not replicated yet" — as opposed to "the trust is wrong", which is what every other 4xx here means.
 var propagationCodes = []string{"AADSTS70021"}
 
 // retryable reports whether an error should be retried.
-//
-// Transport errors and 5xx are retryable. 4xx generally is not — a rejected
-// trust does not become accepted on the third attempt, and retrying it turns a
-// clear misconfiguration into a slow one.
-//
-// The exceptions are throttles and propagation. 429 is the obvious one and was
-// previously treated as a permanent failure, so a brief rate limit surfaced as
-// what looked like a trust error. AWS additionally returns 400 with a Throttling
-// code in the body, which no status-code rule can see, so the body is checked
-// for the known codes. Entra's AADSTS70021 is the third case: the trust is
-// correct and has not replicated yet. See propagationCodes.
 func retryable(err error) bool {
 	var he *httpError
 	if errors.As(err, &he) {
@@ -120,15 +78,6 @@ func retryable(err error) bool {
 }
 
 // containsErrorCode reports whether body carries code as a whole identifier.
-//
-// A plain substring match is wrong for the AADSTS family, because the codes are
-// prefixes of each other: "AADSTS700213" — a genuinely wrong subject, which must
-// fail immediately — contains "AADSTS70021", the propagation code that must be
-// retried. Matching loosely would retry every wrong-subject exchange four times
-// and then report the propagation message, which is precisely the wrong advice.
-//
-// So a match requires that the next character is not a digit. The throttle codes
-// above are alphabetic and unambiguous, and keep using a plain substring match.
 func containsErrorCode(body, code string) bool {
 	for i := 0; ; {
 		j := strings.Index(body[i:], code)
@@ -143,8 +92,7 @@ func containsErrorCode(body, code string) bool {
 	}
 }
 
-// retryAfter returns the delay an upstream asked for, if any. Honouring it is
-// both politer and more effective than guessing.
+// retryAfter returns the delay an upstream asked for, if any.
 func retryAfter(he *httpError) (time.Duration, bool) {
 	if he == nil || he.header == nil {
 		return 0, false
@@ -167,10 +115,6 @@ func retryAfter(he *httpError) (time.Duration, bool) {
 }
 
 // backoffFor returns how long to wait before attempt n (1-based).
-//
-// Exponential with full jitter. The previous schedule was backoff*attempt with
-// no jitter at all, so every instance of a fleet that hit the same throttle
-// retried in lockstep and re-created the burst that caused it.
 func backoffFor(base time.Duration, attempt int, he *httpError) time.Duration {
 	if d, ok := retryAfter(he); ok {
 		return d
@@ -187,13 +131,11 @@ func backoffFor(base time.Duration, attempt int, he *httpError) time.Duration {
 	if window > maxBackoff {
 		window = maxBackoff
 	}
-	// Full jitter: uniform in [0, window). Spreads a fleet rather than merely
-	// delaying it in unison.
+	// Full jitter: uniform in [0, window).
 	return time.Duration(rand.Int63n(int64(window) + 1)) // #nosec G404 -- load spreading, not a secret
 }
 
 // doWithRetry issues req-producing calls with bounded exponential-ish backoff.
-// The request is rebuilt per attempt via newReq because a body may be consumed.
 func doWithRetry(ctx context.Context, client *http.Client, maxRetries int, backoff time.Duration, newReq func() (*http.Request, error)) ([]byte, int, error) {
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
@@ -229,19 +171,7 @@ func doWithRetry(ctx context.Context, client *http.Client, maxRetries int, backo
 	return nil, 0, fmt.Errorf("exhausted retries: %w", lastErr)
 }
 
-// checkAudienceBinding verifies the proof we are about to transmit was minted
-// for the target we are about to transmit it to.
-//
-// The target STS validates this too, and will reject a mismatch — but only after
-// the proof has been disclosed to it. A source token is a bearer assertion about
-// our identity, so sending one to the wrong endpoint is a disclosure whether or
-// not the exchange succeeds: presenting a GCP-signed token for audience A to
-// some other cloud's STS hands that party a usable assertion for its lifetime.
-// The one check that has to happen locally is therefore this one.
-//
-// An empty token audience is not treated as a mismatch. Callers may construct a
-// SourceToken directly without one, and there is nothing to compare against;
-// we cannot verify, so we do not claim to.
+// checkAudienceBinding verifies the proof we are about to transmit was minted for the target we are about to transmit it to.
 func checkAudienceBinding(tok *core.SourceToken, want string) error {
 	if tok.Audience == "" || want == "" || tok.Audience == want {
 		return nil
@@ -251,18 +181,7 @@ func checkAudienceBinding(tok *core.SourceToken, want string) error {
 		"target's audience", tok.Audience, want)
 }
 
-// categorize maps an exchange failure onto the shared taxonomy, so a caller of
-// broker.Exchange can branch on core.CategoryOf(err) instead of matching on
-// message text.
-//
-// The taxonomy existed for exactly this and was wired to nothing: the data plane
-// returned fmt.Errorf strings plus four sentinels, which told a caller whether
-// trust was missing but not whether the failure was worth retrying, whether the
-// network was down, or whether it was being throttled.
-// raw carries the transport/HTTP shape; classified carries the provider's
-// message and sentinel. The category has to come from raw, because classify
-// deliberately unwraps the *httpError to build a readable message and the status
-// would otherwise be lost.
+// categorize maps an exchange failure onto the shared taxonomy, so a caller of broker.Exchange can branch on core.CategoryOf(err) instead of matching on message text.
 func categorize(raw error, classified error) error {
 	if classified == nil {
 		return nil
@@ -287,8 +206,7 @@ func categorize(raw error, classified error) error {
 	case he.status == http.StatusNotFound:
 		return core.Categorize(err, core.ErrCategoryNotFound, false)
 	case he.status >= 400:
-		// A 400 from a token endpoint is a rejected assertion or a malformed
-		// request: configuration, not transport.
+		// A 400 from a token endpoint is a rejected assertion or a malformed request: configuration, not transport.
 		return core.Categorize(err, core.ErrCategoryValidation, false)
 	default:
 		return core.Categorize(err, core.ErrCategoryInternal, false)

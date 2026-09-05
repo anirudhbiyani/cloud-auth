@@ -12,21 +12,12 @@ import (
 // GCP side of the cross-cloud trust inventory.
 
 // inventoryProjectEnv names the project to enumerate.
-//
-// A GCP workload identity pool is a project-scoped resource and there is no
-// tenant-wide listing, so a project has to be named. This reads the same
-// variable gcloud and the client libraries use rather than inventing one.
 const inventoryProjectEnv = "GOOGLE_CLOUD_PROJECT"
 
 // InventoryCloud implements core.InventorySource.
 func (p *Provider) InventoryCloud() core.Cloud { return core.GCP }
 
-// ListTrustRecords enumerates every workload identity pool provider in the
-// project, one record per provider.
-//
-// A provider is the unit, not the pool: the pool is a trust boundary with no
-// conditions of its own, and the attribute condition that decides which
-// identities are admitted lives on the provider.
+// ListTrustRecords enumerates every workload identity pool provider in the project, one record per provider.
 func (p *Provider) ListTrustRecords(ctx context.Context) ([]core.TrustRecord, error) {
 	project := strings.TrimSpace(os.Getenv(inventoryProjectEnv))
 	if project == "" {
@@ -49,23 +40,13 @@ func (p *Provider) ListTrustRecords(ctx context.Context) ([]core.TrustRecord, er
 		if pool == nil || pool.Name == "" {
 			continue
 		}
-		// GCP keeps a deleted pool listed with state DELETED for 30 days, its
-		// name reserved. Reporting one as a live trust relationship puts a row
-		// in a security audit that nobody can act on — the resource is already
-		// gone — and a false finding costs more here than a missing one.
-		//
-		// Filtered HERE rather than in the client: the client returns what the
-		// API returns, because a deleted pool is exactly what explains an
-		// ALREADY_EXISTS on a name nothing appears to be using. Which pools
-		// count as a live trust is this consumer's question.
+		// GCP keeps a deleted pool listed with state DELETED for 30 days, its name reserved.
 		if isDeleted(pool.State) {
 			continue
 		}
 		providers, err := p.wifClient.ListWorkloadIdentityPoolProviders(ctx, pool.Name)
 		if err != nil {
-			// One unreadable pool must not abort the project, and it is
-			// recorded as an unknown rather than skipped: a pool nobody can
-			// read is a gap in the inventory, not an absence of trust.
+			// One unreadable pool must not abort the project, and it is recorded as an unknown rather than skipped: a pool nobody can read is a gap in the inventory, not an absence of trust.
 			records = append(records, core.TrustRecord{
 				Cloud: core.GCP, Resource: pool.Name, Name: pool.DisplayName,
 				Liveness: core.LivenessResult{
@@ -95,14 +76,9 @@ func trustRecordForProvider(pool *WorkloadIdentityPool, prov *WorkloadIdentityPo
 		Cloud:    core.GCP,
 		Resource: prov.Name,
 		Name:     providerDisplayName(pool, prov),
-		// subjectsFromAttributeCondition already returns "*" for an absent
-		// condition, which is the honest answer: a provider with no attribute
-		// condition admits every identity its issuer will mint. Reusing it
-		// keeps the inventory and the validator agreeing on that.
+		// subjectsFromAttributeCondition already returns "*" for an absent condition, which is the honest answer: a provider with no attribute condition admits every identity its issuer will mint.
 		SubjectCondition: firstSubject(subjectsFromAttributeCondition(prov.AttributeCondition)),
-		// CEL, not an IAM operator. Recording the expression language rather
-		// than a made-up "StringEquals" keeps the wildcard-under-exact-operator
-		// detector from firing on a GCP condition it cannot reason about.
+		// CEL, not an IAM operator.
 		Operator: "CEL",
 	}
 	switch {
@@ -110,9 +86,7 @@ func trustRecordForProvider(pool *WorkloadIdentityPool, prov *WorkloadIdentityPo
 		rec.Issuer = prov.OIDC.IssuerURI
 		rec.Audiences = prov.OIDC.AllowedAudiences
 	case prov.AWS != nil:
-		// An aws-type provider trusts an AWS ACCOUNT, verified by a SigV4
-		// GetCallerIdentity call rather than a JWT. There is no OIDC issuer,
-		// and describing one would be wrong.
+		// An aws-type provider trusts an AWS ACCOUNT, verified by a SigV4 GetCallerIdentity call rather than a JWT.
 		rec.Issuer = "aws:" + prov.AWS.AccountID
 	}
 	return rec

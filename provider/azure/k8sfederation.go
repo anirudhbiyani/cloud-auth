@@ -8,19 +8,9 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
-// A Kubernetes ServiceAccount federated to Azure is a federated identity
-// credential: the cluster's projected SA token is an OIDC token, its issuer is
-// the cluster's OIDC issuer, and its sub claim is the fixed string
-// system:serviceaccount:<namespace>:<name>.
-//
-// So this translates and delegates to the federated-credential path rather than
-// reimplementing it, exactly as provider/aws does. The Outputs and MechanismRef
-// are an AzureFederatedCredential, deliberately: that is what exists in the
-// tenant afterwards, and it means validate and delete — which branch on
-// ref.Type — work on the result without learning a second spec type.
+// A Kubernetes ServiceAccount federated to Azure is a federated identity credential: the cluster's projected SA token is an OIDC token, its issuer is the cluster's OIDC issuer, and its sub claim is the fixed string system:serviceaccount:<namespace>:<name>.
 
 // k8sSubjectFormat is the sub claim a projected ServiceAccount token carries.
-// Exact, never a pattern: Azure matches subjects literally.
 const k8sSubjectFormat = "system:serviceaccount:%s:%s"
 
 // setupK8sFederation maps a Kubernetes ServiceAccount to an Azure identity.
@@ -32,11 +22,7 @@ func (p *Provider) setupK8sFederation(ctx context.Context, spec *core.K8sService
 	return p.setupFederatedCredential(ctx, translated, opts)
 }
 
-// k8sToFederatedCredentialSpec rewrites a K8s federation spec as the Azure
-// federated identity credential it is.
-//
-// Separate from the setup call so the mapping — and especially the subject — is
-// testable without a Graph client.
+// k8sToFederatedCredentialSpec rewrites a K8s federation spec as the Azure federated identity credential it is.
 func k8sToFederatedCredentialSpec(spec *core.K8sServiceAccountFederationSpec) (*core.AzureFederatedCredentialSpec, error) {
 	if spec.TargetCloud != core.Azure {
 		return nil, core.ErrValidation(fmt.Sprintf(
@@ -55,9 +41,7 @@ func k8sToFederatedCredentialSpec(spec *core.K8sServiceAccountFederationSpec) (*
 			WithDetail("service_account", fmt.Sprintf("%s/%s", spec.Namespace, spec.ServiceAccountName))
 	}
 	if strings.ContainsAny(spec.Namespace+spec.ServiceAccountName, "*?") {
-		// Azure matches subjects literally, so a wildcard here would not widen
-		// the trust — it would produce a credential that matches nothing and
-		// fails without error. Refusing is the kinder answer either way.
+		// Azure matches subjects literally, so a wildcard here would not widen the trust — it would produce a credential that matches nothing and fails without error.
 		return nil, core.ErrValidation(
 			"namespace and service_account_name must be exact: Azure matches the subject " +
 				"literally, so a wildcard would create a credential that never matches a token").
@@ -66,17 +50,7 @@ func k8sToFederatedCredentialSpec(spec *core.K8sServiceAccountFederationSpec) (*
 
 	cfg := spec.AzureConfig
 
-	// K8sToAzureConfig carries TenantID, SubscriptionID, IdentityType,
-	// ApplicationID and RoleAssignments — and no ResourceGroup or
-	// ManagedIdentityName. It is shaped for an app registration, and a managed
-	// identity cannot be expressed through it at all: core's own validation
-	// requires both of those fields for managed_identity, so translating to one
-	// would fail one layer down with a message about a field this spec type has
-	// no way to set.
-	//
-	// So app registration is the default, and asking for a managed identity is
-	// refused here with somewhere to go, rather than passed through to become a
-	// confusing validation error.
+	// K8sToAzureConfig carries TenantID, SubscriptionID, IdentityType, ApplicationID and RoleAssignments — and no ResourceGroup or ManagedIdentityName.
 	identityType := normalizeIdentityType(cfg.IdentityType)
 	switch identityType {
 	case "", "app_registration":
@@ -105,9 +79,7 @@ func k8sToFederatedCredentialSpec(spec *core.K8sServiceAccountFederationSpec) (*
 		RoleAssignments:         cfg.RoleAssignments,
 		Source:                  core.Kubernetes,
 	}
-	// core requires an id or a display name; with neither, name the app after
-	// the workload rather than failing an operator who gave a namespace and a
-	// ServiceAccount and reasonably expected that to be enough.
+	// core requires an id or a display name; with neither, name the app after the workload rather than failing an operator who gave a namespace and a ServiceAccount and reasonably expected that to be enough.
 	if out.ApplicationID == "" {
 		out.ApplicationDisplayName = fmt.Sprintf("cloud-auth %s %s/%s",
 			k8sClusterName(spec), spec.Namespace, spec.ServiceAccountName)
@@ -115,13 +87,7 @@ func k8sToFederatedCredentialSpec(spec *core.K8sServiceAccountFederationSpec) (*
 	return out, nil
 }
 
-// normalizeIdentityType accepts the CLI's hyphenated spelling and the spec's
-// underscored one.
-//
-// buildAzureSpec normalizes --identity-type for the azure-federated path, but
-// buildK8sSpec passes the raw flag value straight into azure_config — so
-// "managed-identity" arrived here unrecognised while the same word worked on the
-// other command. A spec file can legitimately use either spelling too.
+// normalizeIdentityType accepts the CLI's hyphenated spelling and the spec's underscored one.
 func normalizeIdentityType(in string) string {
 	switch strings.ToLower(strings.TrimSpace(in)) {
 	case "":
@@ -144,9 +110,6 @@ func k8sClusterName(spec *core.K8sServiceAccountFederationSpec) string {
 }
 
 // k8sCredentialName derives a stable, Azure-legal credential name.
-//
-// Stable because re-running setup for the same ServiceAccount must target the
-// same credential rather than consuming another of the twenty slots.
 func k8sCredentialName(spec *core.K8sServiceAccountFederationSpec) string {
 	return azureSafeName(fmt.Sprintf("k8s-%s-%s", spec.Namespace, spec.ServiceAccountName))
 }
@@ -162,8 +125,7 @@ func azureSafeName(in string) string {
 			b.WriteRune('-')
 		}
 	}
-	// Azure caps most of these names at 128; well under it in practice, but a
-	// namespace and account name are operator-supplied and unbounded.
+	// Azure caps most of these names at 128; well under it in practice, but a namespace and account name are operator-supplied and unbounded.
 	name := strings.Trim(b.String(), "-")
 	if len(name) > 120 {
 		name = strings.Trim(name[:120], "-")

@@ -10,8 +10,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// Azure Resource Manager: user-assigned managed identities, their federated
-// identity credentials, and role assignments.
+// Azure Resource Manager: user-assigned managed identities, their federated identity credentials, and role assignments.
 
 // identityResourceID builds the ARM resource id of a user-assigned identity.
 func identityResourceID(subscriptionID, resourceGroup, name string) string {
@@ -101,9 +100,6 @@ func (c *restClient) GetManagedIdentityFederatedCredential(ctx context.Context, 
 }
 
 // CreateManagedIdentityFederatedCredential adds a credential to an identity.
-//
-// The 20-credential cap and the creation throttle apply to managed identities
-// exactly as they do to applications.
 func (c *restClient) CreateManagedIdentityFederatedCredential(ctx context.Context, subscriptionID, resourceGroup, identityName string, cred *FederatedIdentityCredential) (*FederatedIdentityCredential, error) {
 	if err := validateFIC(cred); err != nil {
 		return nil, err
@@ -183,10 +179,6 @@ func (c *restClient) putFICPaced(ctx context.Context, endpoint string, body, out
 }
 
 // CreateRoleAssignment grants a role at a scope.
-//
-// The assignment name is a client-generated GUID, which is what makes this
-// idempotent: re-running with the same inputs targets the same assignment and
-// Azure answers 409 rather than creating a duplicate grant.
 func (c *restClient) CreateRoleAssignment(ctx context.Context, scope, roleDefinitionID, principalID string) error {
 	if scope == "" || roleDefinitionID == "" || principalID == "" {
 		return fmt.Errorf("azure: scope, role definition and principal are required")
@@ -198,16 +190,13 @@ func (c *restClient) CreateRoleAssignment(ctx context.Context, scope, roleDefini
 		"properties": map[string]any{
 			"roleDefinitionId": roleDefinitionID,
 			"principalId":      principalID,
-			// Without this ARM rejects a brand-new service principal with
-			// "principal does not exist", because directory replication has not
-			// caught up with the object that was just created.
+			// Without this ARM rejects a brand-new service principal with "principal does not exist", because directory replication has not caught up with the object that was just created.
 			"principalType": "ServicePrincipal",
 		},
 	}
 	err := c.do(ctx, http.MethodPut, endpoint, armScope, body, nil, scope)
 
-	// A 409 here means the grant already exists. That is the desired end state,
-	// so it is success — treating it as failure would make setup non-idempotent.
+	// A 409 here means the grant already exists.
 	var apiErr *apiError
 	if asAPIError(err, &apiErr) && apiErr.Conflict() {
 		return nil
@@ -256,8 +245,7 @@ func (c *restClient) ListRoleAssignments(ctx context.Context, scope, principalID
 	return out, nil
 }
 
-// trimLeadingSlash normalizes an ARM scope so it can be joined to the base URL
-// without producing a double slash, which ARM answers with a confusing 400.
+// trimLeadingSlash normalizes an ARM scope so it can be joined to the base URL without producing a double slash, which ARM answers with a confusing 400.
 func trimLeadingSlash(scope string) string {
 	for len(scope) > 0 && scope[0] == '/' {
 		scope = scope[1:]
@@ -265,12 +253,7 @@ func trimLeadingSlash(scope string) string {
 	return scope
 }
 
-// ListManagedIdentities enumerates the user-assigned identities in a
-// subscription.
-//
-// Subscription-scoped, because ARM has no tenant-wide list of them: a tenant
-// with twenty subscriptions needs twenty calls, and there is no API that
-// collapses them.
+// ListManagedIdentities enumerates the user-assigned identities in a subscription.
 func (c *restClient) ListManagedIdentities(ctx context.Context, subscriptionID string) ([]*ManagedIdentity, error) {
 	if subscriptionID == "" {
 		return nil, fmt.Errorf("azure: a subscription id is required to list managed identities")
@@ -284,9 +267,7 @@ func (c *restClient) ListManagedIdentities(ctx context.Context, subscriptionID s
 	for endpoint != "" {
 		var page struct {
 			Value []wireIdentity `json:"value"`
-			// ARM pages with nextLink, an absolute URL. Stopping at the first
-			// page would answer "these are your identities" with a prefix of
-			// them, and this inventory decides what exists from the result.
+			// ARM pages with nextLink, an absolute URL.
 			NextLink string `json:"nextLink"`
 		}
 		if err := c.do(ctx, http.MethodGet, endpoint, armScope, nil, &page, subscriptionID); err != nil {
@@ -334,10 +315,6 @@ func (c *restClient) ListManagedIdentityFederatedCredentials(ctx context.Context
 }
 
 // resourceGroupFromID pulls the resource group out of an ARM resource id.
-//
-// The identity's own fields do not carry it, and every subsequent call —
-// listing its credentials, deleting it — is addressed by resource group. Parsing
-// the id is the only way to get it from a subscription-wide listing.
 func resourceGroupFromID(id string) string {
 	const marker = "/resourceGroups/"
 	i := strings.Index(id, marker)
