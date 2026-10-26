@@ -37,6 +37,7 @@ func TestGitHubNamespaceResolve(t *testing.T) {
 		name      string
 		namespace string
 		owners    []string
+		token     string
 		want      core.NamespaceState
 		detailHas string
 	}{
@@ -50,7 +51,13 @@ func TestGitHubNamespaceResolve(t *testing.T) {
 		},
 		{
 			name: "unregistered and claimable right now", namespace: "deletedorg/gone", owners: []string{"myorg"},
-			want: core.NamespaceUnregistered, detailHas: "anyone can register it",
+			token: "ghp_x",
+			want:  core.NamespaceUnregistered, detailHas: "anyone can register it",
+		},
+		{
+			// GitHub answers 404 for a private repository the caller cannot see, so an unauthenticated 404 must not read as absence.
+			name: "404 without a token is not absence", namespace: "deletedorg/gone", owners: []string{"myorg"},
+			want: core.NamespaceUnknown, detailHas: "GITHUB_TOKEN",
 		},
 		{
 			// Without knowing which orgs are ours, "it exists" says nothing about who controls it — and claiming it is fine would be the dangerous half of the guess.
@@ -72,7 +79,7 @@ func TestGitHubNamespaceResolve(t *testing.T) {
 			opts := []GitHubNamespaceOption{
 				WithGitHubAPI(srv.URL),
 				WithGitHubNamespaceHTTPClient(srv.Client()),
-				WithGitHubToken(""),
+				WithGitHubToken(tc.token),
 			}
 			if len(tc.owners) > 0 {
 				opts = append(opts, WithOurGitHubOwners(tc.owners...))

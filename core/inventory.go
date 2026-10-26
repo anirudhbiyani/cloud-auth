@@ -218,6 +218,11 @@ func BuildInventory(ctx context.Context, sources []InventorySource, resolvers []
 			continue
 		}
 		for _, r := range found {
+			// A gap record (no issuer, liveness already explaining why) is missing information, not a trust: scoring its empty subject would report it as critical and overwrite the explanation.
+			if r.Issuer == "" && r.Liveness.State != "" {
+				records = append(records, r)
+				continue
+			}
 			r.Breadth = ScoreSubject(r.SubjectCondition)
 			r.Liveness = ResolveLiveness(ctx, r.Issuer, r.SubjectCondition, resolvers)
 			r.RenameFragile = IsRenameFragile(r.Issuer, r.SubjectCondition)

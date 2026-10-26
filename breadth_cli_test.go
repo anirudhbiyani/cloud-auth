@@ -14,6 +14,8 @@ import (
 // setupWith runs a dry-run setup with the given subject and extra flags, returning what reached stdout and stderr.
 func setupWith(t *testing.T, subject string, extra ...string) (stdout, stderr string, err error) {
 	t.Helper()
+	// Off-cloud, the SDK's credential chain ends by probing IMDS and waiting out its retries; this is a test of the CLI, not of the network.
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
 	state := filepath.Join(t.TempDir(), "state.json")
 	args := append([]string{
 		"--type", "aws-oidc",
