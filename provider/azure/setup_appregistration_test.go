@@ -15,13 +15,16 @@ import (
 type recordingGraph struct {
 	GraphClient
 
-	existing *Application // returned by GetApplication when non-nil
+	existing *Application      // returned by GetApplication when non-nil
+	sp       *ServicePrincipal // returned by FindServicePrincipalByAppID
 	getErr   error
 	spErr    error
 	credErr  error
 
-	created  []string // resource types created, in order
-	deleted  []string // object ids deleted, in order
+	listed   []*Application                 // returned by ListApplications
+	ficsOn   []*FederatedIdentityCredential // returned by ListFederatedIdentityCredentials
+	created  []string                       // resource types created, in order
+	deleted  []string                       // object ids deleted, in order
 	sawCred  *FederatedIdentityCredential
 	credApp  string // the app id CreateFederatedIdentityCredential was addressed with
 	appSeqNo int
@@ -32,6 +35,10 @@ func (g *recordingGraph) GetApplication(context.Context, string) (*Application, 
 		return nil, g.getErr
 	}
 	return g.existing, nil
+}
+
+func (g *recordingGraph) ListApplications(context.Context) ([]*Application, error) {
+	return g.listed, nil
 }
 
 func (g *recordingGraph) CreateApplication(_ context.Context, app *Application) (*Application, error) {
@@ -47,6 +54,10 @@ func (g *recordingGraph) CreateApplication(_ context.Context, app *Application) 
 func (g *recordingGraph) DeleteApplication(_ context.Context, id string) error {
 	g.deleted = append(g.deleted, id)
 	return nil
+}
+
+func (g *recordingGraph) FindServicePrincipalByAppID(context.Context, string) (*ServicePrincipal, error) {
+	return g.sp, nil
 }
 
 func (g *recordingGraph) CreateServicePrincipal(context.Context, string) (*ServicePrincipal, error) {
@@ -65,6 +76,10 @@ func (g *recordingGraph) CreateFederatedIdentityCredential(_ context.Context, ap
 	g.credApp = appID
 	g.sawCred = cred
 	return &FederatedIdentityCredential{ID: "fic-1"}, nil
+}
+
+func (g *recordingGraph) ListFederatedIdentityCredentials(context.Context, string) ([]*FederatedIdentityCredential, error) {
+	return g.ficsOn, nil
 }
 
 func (g *recordingGraph) DeleteFederatedIdentityCredential(_ context.Context, _, credID string) error {
@@ -91,6 +106,51 @@ func setupApp(t *testing.T, g *recordingGraph, a ARMClient, spec *core.AzureFede
 	t.Helper()
 	p := New(WithGraphClient(g), WithARMClient(a))
 	return p.Setup(context.Background(), spec, opts)
+}
+
+// A live re-run created a second registration with the same display name, and the first run's cleanup then left it behind.
+func TestSetupAppRegistrationReusesAnExistingApp(t *testing.T) {
+	g := &recordingGraph{listed: []*Application{{ID: "obj-0", AppID: "client-0", DisplayName: "cloud-auth-deploy"}}}
+	out, err := setupApp(t, g, &recordingARM{}, appSpec(nil), core.SetupOptions{})
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	for _, c := range g.created {
+		if c == "application" {
+			t.Fatalf("created a second application; %v", g.created)
+		}
+	}
+	if g.credApp != "obj-0" {
+		t.Errorf("credential addressed to %q, want the existing app obj-0", g.credApp)
+	}
+	if out.Ref.Owned {
+		t.Error("an application this run did not create must not be owned, or Delete removes it")
+	}
+
+	// Second re-run: the credential exists too. Graph refuses a duplicate name, so it has to be found, not created.
+	g = &recordingGraph{
+		listed: []*Application{{ID: "obj-0", AppID: "client-0", DisplayName: "cloud-auth-deploy"}},
+		sp:     &ServicePrincipal{ID: "sp-0", AppID: "client-0"},
+		ficsOn: []*FederatedIdentityCredential{{ID: "fic-0", Name: "github-main"}},
+	}
+	out, err = setupApp(t, g, &recordingARM{}, appSpec(nil), core.SetupOptions{})
+	if err != nil {
+		t.Fatalf("Setup with everything in place: %v", err)
+	}
+	if len(g.created) != 0 {
+		t.Errorf("created %v; everything was already there", g.created)
+	}
+	if out.Ref.ResourceIDs["federated_credential_id"] != "fic-0" || out.Ref.ResourceIDs["service_principal_id"] != "sp-0" {
+		t.Errorf("re-run resolved %v, want the existing fic-0 and sp-0", out.Ref.ResourceIDs)
+	}
+
+	// Two of the same name is ambiguous, and guessing would attach a trust to somebody else's app.
+	g = &recordingGraph{listed: []*Application{
+		{ID: "obj-0", DisplayName: "cloud-auth-deploy"}, {ID: "obj-1", DisplayName: "cloud-auth-deploy"}}}
+	if _, err := setupApp(t, g, &recordingARM{}, appSpec(nil), core.SetupOptions{}); err == nil ||
+		!strings.Contains(err.Error(), "ambiguous") {
+		t.Errorf("two apps of the same name: err = %v, want ambiguous", err)
+	}
 }
 
 func TestSetupAppRegistrationCreatesAllThreeObjects(t *testing.T) {

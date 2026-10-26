@@ -634,3 +634,25 @@ func TestRedactedPath(t *testing.T) {
 		}
 	}
 }
+
+// Graph rejects '+' for a space in $filter ("The $filter expression must evaluate to a single boolean value"), which is what url.QueryEscape produces; a live re-run failed on exactly that.
+func TestFindServicePrincipalByAppIDPercentEncodesTheFilter(t *testing.T) {
+	f := newFakeAzure(t)
+	const appID = "acb08980-5f67-4579-acfa-4195ae73a35c"
+	var rawQuery string
+	f.handle("/v1.0/servicePrincipals", func(w http.ResponseWriter, r *http.Request) {
+		rawQuery = r.URL.RawQuery
+		f.json(w, http.StatusOK, map[string]any{"value": []map[string]any{{"id": "sp-1", "appId": appID}}})
+	})
+
+	sp, err := f.client(t).FindServicePrincipalByAppID(context.Background(), appID)
+	if err != nil {
+		t.Fatalf("FindServicePrincipalByAppID: %v", err)
+	}
+	if sp == nil || sp.ID != "sp-1" {
+		t.Errorf("sp = %+v, want sp-1", sp)
+	}
+	if strings.Contains(rawQuery, "+") || !strings.Contains(rawQuery, "appId%20eq%20") {
+		t.Errorf("query = %q; the filter must be percent-encoded", rawQuery)
+	}
+}

@@ -537,9 +537,31 @@ func (p *Provider) setupWorkloadIdentityPool(ctx context.Context, spec *core.GCP
 	if !opts.DryRun && p.iamClient != nil {
 		// Get current policy
 		saResource := fmt.Sprintf("projects/%s/serviceAccounts/%s", spec.ProjectID, spec.ServiceAccountEmail)
+		// A failure here must take the pool and provider this run created with it: a live run left an ACTIVE pool behind when the binding was refused.
+		rollback := func(failure error) error {
+			var errs []error
+			var orphaned []string
+			if !providerExists {
+				if err := p.wifClient.DeleteWorkloadIdentityPoolProvider(ctx, providerName); err != nil {
+					errs = append(errs, err)
+					orphaned = append(orphaned, providerName)
+				}
+			}
+			if createdPool {
+				if err := p.wifClient.DeleteWorkloadIdentityPool(ctx, poolName); err != nil {
+					errs = append(errs, err)
+					orphaned = append(orphaned, poolName)
+				}
+			}
+			if len(errs) > 0 {
+				return &core.RollbackError{OriginalError: failure, RollbackErrors: errs, OrphanedResources: orphaned}
+			}
+			return failure
+		}
+
 		policy, err := p.iamClient.GetIAMPolicy(ctx, saResource)
 		if err != nil {
-			return nil, core.ErrPermission("failed to get service account IAM policy").WithCause(err)
+			return nil, rollback(core.ErrPermission("failed to get service account IAM policy").WithCause(err))
 		}
 
 		// Add workload identity user binding, scoped as narrowly as the spec allows.
@@ -571,7 +593,7 @@ func (p *Provider) setupWorkloadIdentityPool(ctx context.Context, spec *core.GCP
 		}
 
 		if err := p.iamClient.SetIAMPolicy(ctx, saResource, policy); err != nil {
-			return nil, core.ErrPermission("failed to set service account IAM policy").WithCause(err)
+			return nil, rollback(core.ErrPermission("failed to set service account IAM policy").WithCause(err))
 		}
 	}
 
@@ -699,7 +721,25 @@ func (p *Provider) deleteWorkloadIdentityPool(ctx context.Context, ref core.Mech
 		return err
 	}
 
-	// Delete in reverse order: provider -> pool -> optionally SA
+	// Delete in reverse order: binding -> provider -> pool -> optionally SA
+
+	// Step 0: Revoke impersonation first. Setup added a workloadIdentityUser member for this pool on the service account, and a live run left those behind: a soft-deleted pool can be undeleted, and the member would be live again.
+	poolName := ref.ResourceIDs["pool_name"]
+	if sa := ref.ResourceIDs["service_account_email"]; sa != "" && poolName != "" {
+		if err := p.requireClients(ctx, false, true); err != nil {
+			return err
+		}
+		saResource := fmt.Sprintf("projects/%s/serviceAccounts/%s", ref.ResourceIDs["project_id"], sa)
+		policy, err := p.iamClient.GetIAMPolicy(ctx, saResource)
+		if err != nil && !isNotFoundError(err) {
+			return core.ErrPermission("failed to get service account IAM policy").WithCause(err)
+		}
+		if policy != nil && removePoolMembers(policy, poolName) {
+			if err := p.iamClient.SetIAMPolicy(ctx, saResource, policy); err != nil {
+				return core.ErrPermission("failed to revoke impersonation on the service account").WithCause(err)
+			}
+		}
+	}
 
 	// Step 1: Delete provider
 	if providerName := ref.ResourceIDs["provider_name"]; providerName != "" {
@@ -724,6 +764,31 @@ func (p *Provider) deleteWorkloadIdentityPool(ctx context.Context, ref core.Mech
 	// Note: We don't delete the service account by default as it may be used elsewhere
 
 	return nil
+}
+
+// removePoolMembers drops every member that federates through poolName from the policy's workloadIdentityUser bindings, reporting whether anything changed.
+func removePoolMembers(policy *IAMPolicy, poolName string) bool {
+	changed := false
+	kept := policy.Bindings[:0]
+	for _, b := range policy.Bindings {
+		if b.Role == "roles/iam.workloadIdentityUser" {
+			members := b.Members[:0]
+			for _, m := range b.Members {
+				if strings.Contains(m, "/"+poolName+"/") {
+					changed = true
+					continue
+				}
+				members = append(members, m)
+			}
+			b.Members = members
+			if len(b.Members) == 0 {
+				continue
+			}
+		}
+		kept = append(kept, b)
+	}
+	policy.Bindings = kept
+	return changed
 }
 
 // GenerateAWSRoleAssumptionToken creates an OIDC identity token that can be used to assume an AWS IAM role via AssumeRoleWithWebIdentity.

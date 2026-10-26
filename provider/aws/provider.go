@@ -748,11 +748,19 @@ func (p *Provider) findOIDCProviderByURL(ctx context.Context, url string) (strin
 		if err != nil {
 			continue
 		}
-		if provider.URL == url || provider.URL == strings.TrimSuffix(url, "/") {
+		// IAM stores and returns the URL without its scheme, so compare hosts: a scheme-sensitive match re-created an existing provider and got EntityAlreadyExists.
+		if oidcProviderHost(provider.URL) == oidcProviderHost(url) {
 			return arn, nil
 		}
 	}
 	return "", nil
+}
+
+// oidcProviderHost normalises an OIDC provider URL the way IAM does: no scheme, no trailing slash.
+func oidcProviderHost(u string) string {
+	u = strings.TrimPrefix(u, "https://")
+	u = strings.TrimPrefix(u, "http://")
+	return strings.TrimSuffix(u, "/")
 }
 
 func (p *Provider) rollback(ctx context.Context, resources []string, roleExisted bool) []error {
