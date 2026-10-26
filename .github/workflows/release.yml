@@ -24,7 +24,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.27.0"
+          go-version: "1.27.3"
 
       # A tag that does not pass its own tests must not become a release.
       # Re-run rather than trusting the CI run on the commit: a tag can be
