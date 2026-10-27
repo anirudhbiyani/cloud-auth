@@ -157,6 +157,8 @@ type GraphClient interface {
 	// Service Principal operations
 	GetServicePrincipal(ctx context.Context, id string) (*ServicePrincipal, error)
 	CreateServicePrincipal(ctx context.Context, appID string) (*ServicePrincipal, error)
+	// FindServicePrincipalByAppID returns nil, nil when the application has no service principal.
+	FindServicePrincipalByAppID(ctx context.Context, appID string) (*ServicePrincipal, error)
 	DeleteServicePrincipal(ctx context.Context, id string) error
 
 	// Federated Identity Credential operations
@@ -374,16 +376,30 @@ func (p *Provider) setupAppRegistrationFederated(ctx context.Context, spec *core
 				WithResource("application", spec.ApplicationID)
 		}
 	} else if spec.ApplicationDisplayName != "" {
-		// Create new application
-		action := core.PlannedAction{
-			Operation:    "create",
-			ResourceType: "application",
-			Details:      map[string]interface{}{"display_name": spec.ApplicationDisplayName},
-			Reversible:   true,
+		// Reuse an application of that name if there is exactly one: display names are not unique in Entra, and creating unconditionally made every re-run add another registration.
+		var existing *Application
+		if p.graphClient != nil {
+			var err error
+			if existing, err = p.findApplicationByDisplayName(ctx, spec.ApplicationDisplayName); err != nil {
+				return nil, core.ErrPermission("failed to look up application by display name").
+					WithCause(err).WithProvider(core.Azure)
+			}
 		}
-		plan.Actions = append(plan.Actions, action)
+		if existing != nil {
+			appID = existing.AppID
+			appObjectID = existing.ID
+		} else {
+			// Create new application
+			action := core.PlannedAction{
+				Operation:    "create",
+				ResourceType: "application",
+				Details:      map[string]interface{}{"display_name": spec.ApplicationDisplayName},
+				Reversible:   true,
+			}
+			plan.Actions = append(plan.Actions, action)
+		}
 
-		if !opts.DryRun {
+		if existing == nil && !opts.DryRun {
 			if p.graphClient == nil {
 				return nil, core.ErrValidation("Azure Graph client not configured").
 					WithProvider(core.Azure).
@@ -408,22 +424,34 @@ func (p *Provider) setupAppRegistrationFederated(ctx context.Context, spec *core
 	resourceIDs["app_object_id"] = appObjectID
 	resourceIDs["tenant_id"] = spec.TenantID
 
-	// Step 2: Create service principal if we created the app
-	if createdApp && !opts.DryRun {
-		action := core.PlannedAction{
-			Operation:    "create",
-			ResourceType: "service-principal",
-			Details:      map[string]interface{}{"app_id": appID},
-			Reversible:   true,
+	// Step 2: Resolve the service principal — reuse the existing app's, or create one. Role assignments are addressed to it, so an existing app without one resolved is a re-run that silently skips them.
+	if !opts.DryRun && appID != "" {
+		var sp *ServicePrincipal
+		if !createdApp {
+			var err error
+			if sp, err = p.graphClient.FindServicePrincipalByAppID(ctx, appID); err != nil {
+				return nil, core.ErrPermission("failed to look up service principal").
+					WithCause(err).WithProvider(core.Azure)
+			}
 		}
-		plan.Actions = append(plan.Actions, action)
+		if sp == nil {
+			action := core.PlannedAction{
+				Operation:    "create",
+				ResourceType: "service-principal",
+				Details:      map[string]interface{}{"app_id": appID},
+				Reversible:   true,
+			}
+			plan.Actions = append(plan.Actions, action)
 
-		sp, err := p.graphClient.CreateServicePrincipal(ctx, appID)
-		if err != nil {
-			// Rollback: delete application
-			_ = p.graphClient.DeleteApplication(ctx, appObjectID)
-			return nil, core.ErrPermission("failed to create service principal").
-				WithCause(err).WithProvider(core.Azure)
+			var err error
+			if sp, err = p.graphClient.CreateServicePrincipal(ctx, appID); err != nil {
+				// Rollback: delete application
+				if createdApp {
+					_ = p.graphClient.DeleteApplication(ctx, appObjectID)
+				}
+				return nil, core.ErrPermission("failed to create service principal").
+					WithCause(err).WithProvider(core.Azure)
+			}
 		}
 		resourceIDs["service_principal_id"] = sp.ID
 	}
@@ -442,6 +470,23 @@ func (p *Provider) setupAppRegistrationFederated(ctx context.Context, spec *core
 	plan.Actions = append(plan.Actions, action)
 
 	if !opts.DryRun {
+		// Credential names are unique per application and Graph refuses a duplicate, so a re-run must find the one it made last time rather than create.
+		if !createdApp {
+			existing, err := p.graphClient.ListFederatedIdentityCredentials(ctx, appObjectID)
+			if err != nil {
+				return nil, core.ErrPermission("failed to list federated credentials").
+					WithCause(err).WithProvider(core.Azure)
+			}
+			for _, c := range existing {
+				if c != nil && c.Name == spec.FederatedCredentialName {
+					resourceIDs["federated_credential_id"] = c.ID
+					break
+				}
+			}
+		}
+	}
+
+	if _, reused := resourceIDs["federated_credential_id"]; !opts.DryRun && !reused {
 		audiences := spec.Audiences
 		if len(audiences) == 0 {
 			audiences = []string{"api://AzureADTokenExchange"}
@@ -1041,5 +1086,28 @@ func init() {
 	// Register with default registry Panic rather than discard: Register fails only on a duplicate name, which is a programming error, and the alternative is a provider that silently does not exist.
 	if err := core.Register(New()); err != nil {
 		panic("cloud-auth/provider/azure: registering the Azure provider: " + err.Error())
+	}
+}
+
+// findApplicationByDisplayName returns the one application with that display name, nil when there is none, and an error when there are several: names are not unique in Entra, and guessing would attach a trust to somebody else's app.
+func (p *Provider) findApplicationByDisplayName(ctx context.Context, displayName string) (*Application, error) {
+	// ponytail: client-side filter over the tenant listing; a server-side $filter=displayName eq … if tenants prove large enough to notice.
+	apps, err := p.graphClient.ListApplications(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var matches []*Application
+	for _, a := range apps {
+		if a != nil && a.DisplayName == displayName {
+			matches = append(matches, a)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return nil, nil
+	case 1:
+		return matches[0], nil
+	default:
+		return nil, fmt.Errorf("azure: application display name %q is ambiguous: %d registrations carry it; pass --app-id", displayName, len(matches))
 	}
 }

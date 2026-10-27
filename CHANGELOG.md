@@ -10,6 +10,46 @@ Breaking changes are called out explicitly.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`audit` reported 65 false criticals in one tenant.** ARM returns managed
+  identity ids with `/resourcegroups/` in lower case; the resource-group parser
+  was case-sensitive, so every identity became a gap record — and gap records
+  were then scored as "critical, no subject condition", overwriting the
+  explanation of what could not be read. Gaps are no longer scored.
+- **`audit` called a private GitHub repository "unregistered — anyone can
+  register it".** GitHub answers 404 for a private repository the caller cannot
+  see, so an unauthenticated 404 is now reported as not visible; the land-grab
+  verdict requires `GITHUB_TOKEN`.
+- **AWS on a laptop with no region configured.** The SDK probes IMDS for a
+  region before applying a default and an unreachable IMDS aborted every AWS
+  call. IAM is global, so the client now defaults to `us-east-1`. Credentials
+  are resolved at client construction, so `setup --dry-run` without credentials
+  degrades to "plan a create" by design rather than by the accident of the
+  earlier failure.
+- **Live `setup` → `validate` → `delete` on all three clouds, found by running
+  it.** AWS: a re-run tried to re-create the OIDC provider (IAM returns the URL
+  without its scheme, the comparison was scheme-sensitive) and got
+  `EntityAlreadyExists`. GCP: the Compute default service account
+  (`<number>-compute@developer.gserviceaccount.com`) was rejected as an invalid
+  email; a single-subject impersonation binding was built as `principalSet://`,
+  which IAM refuses — it is `principal://`; a refused binding left the pool
+  and provider this run had just created; and `delete` left the
+  `workloadIdentityUser` member on the service account after the pool was gone. Azure: every run created another app
+  registration of the same display name, and the first run's cleanup left the
+  second behind; the federated credential and service principal are now found
+  on a re-run rather than created. The lifecycle test now asserts a re-run
+  lands on the same resources.
+- **`doctor` exited 0 after a failed preflight.** `doctor && deploy` proceeded
+  off-cloud. A failed check now exits as a validation failure, in both text and
+  `--format json`.
+
+### Changed
+
+- Dependencies upgraded (AWS SDK v2 1.47, azidentity 1.15, x/oauth2 0.37 and
+  the rest); CI's golangci-lint pinned to v2.15.0, which reads Go 1.27.3 export
+  data.
+
 ## [0.1.0] - 2026-08-29
 
 First tagged release. Before this, `go install …@latest` resolved to a

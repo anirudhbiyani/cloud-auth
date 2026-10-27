@@ -282,3 +282,27 @@ func validateFIC(cred *FederatedIdentityCredential) error {
 	}
 	return nil
 }
+
+// FindServicePrincipalByAppID implements GraphClient.
+func (c *restClient) FindServicePrincipalByAppID(ctx context.Context, appID string) (*ServicePrincipal, error) {
+	if appID == "" {
+		return nil, fmt.Errorf("azure: application id is required")
+	}
+	var page struct {
+		Value []struct {
+			ID          string `json:"id"`
+			AppID       string `json:"appId"`
+			DisplayName string `json:"displayName"`
+		} `json:"value"`
+	}
+	// Percent-encoded, not form-encoded: Graph rejects '+' for a space in $filter.
+	endpoint := c.graphURL + "/servicePrincipals?$filter=" + url.PathEscape("appId eq '"+appID+"'")
+	if err := c.do(ctx, http.MethodGet, endpoint, graphScope, nil, &page, appID); err != nil {
+		return nil, err
+	}
+	if len(page.Value) == 0 {
+		return nil, nil
+	}
+	sp := page.Value[0]
+	return &ServicePrincipal{ID: sp.ID, AppID: sp.AppID, DisplayName: sp.DisplayName, ObjectID: sp.ID}, nil
+}

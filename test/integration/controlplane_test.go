@@ -87,9 +87,15 @@ func runLifecycle(t *testing.T, spec core.MechanismSpec) {
 		t.Logf("check %q was skipped: %s", check.Name, check.Message)
 	}
 
-	// Idempotency: setup again must not fail, and must not create a second resource.
-	if _, err := manager.Setup(ctx, spec, core.SetupOptions{}); err != nil {
-		t.Errorf("re-running setup on an existing mechanism failed: %v", err)
+	// Idempotency: setup again must not fail, and must not create a second resource — the re-run has to land on the same resources, or the first run's cleanup leaves the second's behind.
+	again, err := manager.Setup(ctx, spec, core.SetupOptions{})
+	if err != nil {
+		t.Fatalf("re-running setup on an existing mechanism failed: %v", err)
+	}
+	for k, v := range outputs.Ref.ResourceIDs {
+		if got := again.Ref.ResourceIDs[k]; got != v {
+			t.Errorf("re-run resolved %s = %q, first run created %q: setup created a second resource", k, got, v)
+		}
 	}
 }
 

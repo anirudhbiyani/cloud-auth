@@ -164,6 +164,22 @@ func TestDoctorWithNoArgumentsDoesNotPanic(t *testing.T) {
 	}
 }
 
+// `doctor && deploy` must stop on a failed preflight: off-cloud there is no source runtime, which is a failed check, not a note.
+func TestDoctorFailsWhenAPreflightCheckFails(t *testing.T) {
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+	_, err := captureStdout(t, func() error {
+		return cmdDoctor(context.Background(), []string{
+			"--to", "aws", "--role", "arn:aws:iam::123456789012:role/x", "--audience", "sts.amazonaws.com"})
+	})
+	var vf validationFailure
+	if !errors.As(err, &vf) {
+		t.Fatalf("err = %v; a failed preflight must exit as a validation failure", err)
+	}
+	if !strings.Contains(err.Error(), "preflight check") {
+		t.Errorf("the error does not say what failed: %v", err)
+	}
+}
+
 // The commands that genuinely require a target must say so, before any network call and without dereferencing a nil interface.
 func TestRuntimeCommandsRefuseAMissingTarget(t *testing.T) {
 	ctx := context.Background()

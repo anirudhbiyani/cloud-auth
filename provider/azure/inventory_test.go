@@ -246,6 +246,9 @@ func TestResourceGroupFromID(t *testing.T) {
 		{"/subscriptions/s/resourceGroups/my-rg/providers/Microsoft.ManagedIdentity/" +
 			"userAssignedIdentities/x", "my-rg"},
 		{"/subscriptions/s/resourceGroups/my-rg", "my-rg"},
+		// What the subscription-wide ARM listing actually returns.
+		{"/subscriptions/s/resourcegroups/MC-prophecy-qa/providers/Microsoft.ManagedIdentity/" +
+			"userAssignedIdentities/x", "MC-prophecy-qa"},
 		{"/malformed", ""},
 		{"", ""},
 	} {

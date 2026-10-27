@@ -128,6 +128,7 @@ func TestAuditErrorIsRedacted(t *testing.T) {
 
 // setup mutates trust, so it is audited whatever the outcome.
 func TestSetupEmitsAnAuditRecord(t *testing.T) {
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
 	state := filepath.Join(t.TempDir(), "state.json")
 	stderr, err := captureStderr(t, func() error {
 		return cmdSetup(context.Background(), []string{
@@ -201,6 +202,7 @@ func TestSetupEmitsARecordOnFailure(t *testing.T) {
 
 // Audit records must not land in stdout, which for several commands is a document another program parses.
 func TestAuditGoesToStderrNotStdout(t *testing.T) {
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
 	state := filepath.Join(t.TempDir(), "state.json")
 
 	stdout, err := captureStdout(t, func() error {

@@ -96,7 +96,8 @@ func TestImpersonationPrincipalIsScoped(t *testing.T) {
 
 	s := gcpBase()
 	s.SubjectScope = "repo:myorg/myrepo:ref:refs/heads/main"
-	if got, want := s.ImpersonationPrincipal(pool), base+"/subject/repo:myorg/myrepo:ref:refs/heads/main"; got != want {
+	// principal://, not principalSet://: a live SetIamPolicy refused the set form for a single subject.
+	if got, want := s.ImpersonationPrincipal(pool), "principal://iam.googleapis.com/"+pool+"/subject/repo:myorg/myrepo:ref:refs/heads/main"; got != want {
 		t.Errorf("subject scope:\n got %s\nwant %s", got, want)
 	}
 

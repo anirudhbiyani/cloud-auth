@@ -301,14 +301,14 @@ func (s *GCPWorkloadIdentityPoolSpec) Validate() error {
 
 // ImpersonationPrincipal returns the IAM member string that may impersonate the service account, scoped as narrowly as the spec allows.
 func (s *GCPWorkloadIdentityPoolSpec) ImpersonationPrincipal(poolName string) string {
-	const base = "principalSet://iam.googleapis.com/"
 	switch {
 	case s.SubjectScope != "":
-		return base + poolName + "/subject/" + s.SubjectScope
+		// A single subject is a principal, not a set: IAM rejects principalSet://…/subject/… as an invalid member.
+		return "principal://iam.googleapis.com/" + poolName + "/subject/" + s.SubjectScope
 	case s.AttributeScope != "":
-		return base + poolName + "/attribute." + s.AttributeScope
+		return "principalSet://iam.googleapis.com/" + poolName + "/attribute." + s.AttributeScope
 	default:
-		return base + poolName + "/*"
+		return "principalSet://iam.googleapis.com/" + poolName + "/*"
 	}
 }
 
@@ -575,8 +575,9 @@ var (
 	// Every AWS partition, not just the commercial one: aws-us-gov and aws-cn role ARNs were rejected outright.
 	awsARNRegex       = regexp.MustCompile(`^arn:aws[a-z0-9-]*:iam::\d{12}:role\/[a-zA-Z_0-9+=,.@\-_/]+$`)
 	gcpProjectIDRegex = regexp.MustCompile(`^[a-z][a-z0-9-]{4,28}[a-z0-9]$`)
-	gcpSAEmailRegex   = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.iam\.gserviceaccount\.com$`)
-	azureUUIDRegex    = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	// Google-managed accounts live outside *.iam.gserviceaccount.com: the Compute default is <number>-compute@developer.gserviceaccount.com, App Engine's is <project>@appspot.gserviceaccount.com.
+	gcpSAEmailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.gserviceaccount\.com$`)
+	azureUUIDRegex  = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 	// azureTenantRegex accepts the two forms Entra uses for a specific tenant: a GUID, or a verified domain.
 	azureTenantRegex = regexp.MustCompile(

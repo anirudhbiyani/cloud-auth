@@ -316,8 +316,9 @@ func (c *restClient) ListManagedIdentityFederatedCredentials(ctx context.Context
 
 // resourceGroupFromID pulls the resource group out of an ARM resource id.
 func resourceGroupFromID(id string) string {
-	const marker = "/resourceGroups/"
-	i := strings.Index(id, marker)
+	// ARM ids are case-insensitive and the subscription-wide listing returns "/resourcegroups/" in lower case.
+	const marker = "/resourcegroups/"
+	i := strings.Index(strings.ToLower(id), marker)
 	if i < 0 {
 		return ""
 	}

@@ -237,6 +237,23 @@ func TestBuildInventoryScoresAndResolves(t *testing.T) {
 	}
 }
 
+// A source that could not read one resource reports a gap, not a trust: scoring its empty subject would make every gap a critical finding.
+func TestBuildInventoryLeavesGapRecordsUnscored(t *testing.T) {
+	gap := TrustRecord{Cloud: Azure, Resource: "/subscriptions/s/.../identity",
+		Liveness: LivenessResult{State: NamespaceUnknown, Detail: "could not read this identity's federated credentials"}}
+	records, _ := BuildInventory(context.Background(),
+		[]InventorySource{fakeSource{cloud: Azure, records: []TrustRecord{gap}}}, nil)
+	if len(records) != 1 {
+		t.Fatalf("got %d records, want 1", len(records))
+	}
+	if records[0].Severity() != FindingInfo {
+		t.Errorf("a gap scored as %v; it is missing information, not an open trust", records[0].Severity())
+	}
+	if records[0].Liveness.Detail != gap.Liveness.Detail {
+		t.Errorf("the gap's explanation was overwritten: %q", records[0].Liveness.Detail)
+	}
+}
+
 // A missing GCP credential must not hide the AWS findings.
 func TestBuildInventoryContinuesPastAFailingSource(t *testing.T) {
 	const gh = "https://token.actions.githubusercontent.com"

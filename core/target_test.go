@@ -44,6 +44,15 @@ func TestTargetValidation(t *testing.T) {
 			},
 			"invalid GCP service account email",
 		},
+		{
+			// The Compute default account is not under *.iam.gserviceaccount.com, and it is what a live run was refused with.
+			"gcp ok, compute default sa",
+			GCPTarget{
+				WorkloadIdentityPool:      "projects/1/locations/global/workloadIdentityPools/p/providers/x",
+				ImpersonateServiceAccount: "1065490928440-compute@developer.gserviceaccount.com",
+			},
+			"",
+		},
 
 		{
 			"azure ok",

@@ -95,6 +95,12 @@ func (r *GitHubNamespaceResolver) Resolve(ctx context.Context, namespace string)
 
 	switch status {
 	case http.StatusNotFound:
+		// GitHub answers 404, not 403, for a private repository the caller cannot see, so without a token this is not evidence of absence.
+		if r.token == "" {
+			return core.NamespaceUnknown,
+				"not visible to an unauthenticated lookup: a private repository and a nonexistent " +
+					"one both answer 404 — set GITHUB_TOKEN to tell them apart", nil
+		}
 		return core.NamespaceUnregistered,
 			"this namespace does not exist on GitHub: anyone can register it and mint a token " +
 				"whose sub matches this trust exactly", nil

@@ -59,14 +59,18 @@ func NewIAMClient(ctx context.Context, optFns ...func(*awsconfig.LoadOptions) er
 	defer cancel()
 
 	opts := append([]func(*awsconfig.LoadOptions) error{
-		// Cap the IMDS probe rather than waiting out the default retry budget.
-		awsconfig.WithEC2IMDSRegion(),
+		// IAM is global, so a laptop with no region configured must not fail: the SDK probes IMDS before applying a default and an unreachable IMDS aborts the load.
+		awsconfig.WithDefaultRegion("us-east-1"),
 		awsconfig.WithRetryMaxAttempts(2),
 	}, optFns...)
 
 	cfg, err := awsconfig.LoadDefaultConfig(loadCtx, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("aws: loading configuration: %w", err)
+	}
+	// Resolve credentials now rather than on the first call: a client with none is not a client, and callers (dry run in particular) degrade on "no client", not on a failed API call.
+	if _, err := cfg.Credentials.Retrieve(loadCtx); err != nil {
+		return nil, fmt.Errorf("aws: resolving credentials: %w", err)
 	}
 	return &realIAMClient{api: iam.NewFromConfig(cfg)}, nil
 }

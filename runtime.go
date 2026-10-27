@@ -224,15 +224,30 @@ func cmdDoctor(ctx context.Context, args []string) error {
 	}
 
 	if *format == "json" {
-		return writeDoctorJSON(os.Stdout, p, diagnoses, trust, findings, trustErr)
+		if err := writeDoctorJSON(os.Stdout, p, diagnoses, trust, findings, trustErr); err != nil {
+			return err
+		}
+		return doctorVerdict(diagnoses, findings)
 	}
 
 	writeDiagnoses(os.Stdout, p, diagnoses)
 	if *explain {
 		writeExplanation(os.Stdout, trust, findings, trustErr)
 	}
+	return doctorVerdict(diagnoses, findings)
+}
 
-	// A critical finding means this exchange will not work.
+// doctorVerdict turns the preflight into an exit status: a failed check or a critical finding means the exchange will not work, and `doctor && deploy` must stop here.
+func doctorVerdict(diagnoses []diagnosis, findings []core.Finding) error {
+	failed := 0
+	for _, d := range diagnoses {
+		if !d.ok {
+			failed++
+		}
+	}
+	if failed > 0 {
+		return errValidationFailed(fmt.Errorf("%d of %d preflight check(s) failed", failed, len(diagnoses)))
+	}
 	for _, f := range findings {
 		if f.Severity == core.FindingCritical {
 			return errValidationFailed(fmt.Errorf(
