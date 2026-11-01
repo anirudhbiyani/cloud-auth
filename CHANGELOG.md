@@ -10,6 +10,19 @@ Breaking changes are called out explicitly.
 
 ## [Unreleased]
 
+### Added
+- Integration harness: run on clusters you already operate. `scripts/existing.sh` captures an EKS or AKS cluster's facts, `up.sh --existing <clouds>` skips provisioning for them, `GKE_CLUSTER`/`GKE_LOCATION`/`GKE_PROJECT` put the GCP source on an existing GKE cluster via Workload Identity instead of a GCE VM, and `EKS_CONTEXT`/`AKS_CONTEXT`/`GKE_CONTEXT` pin each runtime to its own kube context. `aws/stage2` can reuse an IAM OIDC provider that already registers the AKS issuer (`azure_oidc_provider_arn`).
+- Integration harness: `LAMBDA=1` deploys the verifier as a Lambda function (`tofu/aws/lambda`), giving the AWS SigV4 source path and the AWS → Azure negative test without an EC2 instance. The verifier speaks the Lambda runtime API itself (stdlib, no new dependency).
+- First live proof of all six first-class cross-cloud pairs (GKE/EKS/AKS → AWS/GCP/Azure) through the harness.
+
+### Fixed (harness)
+- Stage2 preflight demanded `run_id` in tfvars although the driver passes it as `-var`, so stage2 could never start.
+- Service-account annotations were applied before the account existed, so no runtime got its federation wiring.
+- Pods lacked RBAC to re-mint their projected token via TokenRequest, which AKS → GCP needs.
+- Azure targets carried no `scope`; the verifier now uses the ARM scope the harness grants Reader on.
+- `verify.sh` read a `.passed` key that never existed: every case printed FAIL and no failure was counted.
+- Teardown deleted hand-written facts files and the stage2 tfvars a destroy retry needs.
+
 ### Fixed
 
 - **`audit` reported 65 false criticals in one tenant.** ARM returns managed

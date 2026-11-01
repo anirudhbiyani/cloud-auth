@@ -33,11 +33,10 @@ info "STAGE 2 — trust"
 for c in "${ACTIVE[@]}"; do tofu_destroy "$c" stage2; done
 
 info "STAGE 1 — compute"
+[[ " ${ACTIVE[*]} " == *" aws "* ]] && tofu_destroy aws lambda
 for c in "${ACTIVE[@]}"; do tofu_destroy "$c" stage1; done
 
-# Generated tfvars are derived artifacts; drop them so a later run can't pick up
-# stale cross-cloud facts.
-for c in "${ACTIVE[@]}"; do rm -f "$(module_dir "$c" stage2)/harness.auto.tfvars"; done
+# harness.auto.tfvars is deliberately kept: a destroy retry needs the module's inputs to plan, and up.sh rewrites it every run.
 rm -f "$STATE_DIR/targets.json"
 
 if (( DESTROY_FAILURES > 0 )); then

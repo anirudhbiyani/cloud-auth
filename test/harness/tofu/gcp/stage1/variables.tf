@@ -140,3 +140,30 @@ variable "extra_metadata" {
   type        = map(string)
   default     = {}
 }
+
+# ---------------------------------------------------------------------------
+# GKE mode: use an EXISTING cluster as the source runtime instead of a GCE VM.
+# ---------------------------------------------------------------------------
+
+variable "gke_cluster" {
+  description = <<-EOT
+    Name of an existing GKE cluster with Workload Identity enabled. When set, no
+    VM is created; instead the harness KSA (cloud-auth-test/verifier) is allowed
+    to impersonate the source service account, so the pod's metadata server
+    mints the same accounts.google.com token the VM would. Empty = create a VM.
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "gke_location" {
+  description = "Zone or region of gke_cluster. Required when gke_cluster is set."
+  type        = string
+  default     = ""
+}
+
+variable "gke_project" {
+  description = "Project that owns gke_cluster, when it differs from project_id. Its Workload Identity pool is what the binding names."
+  type        = string
+  default     = ""
+}

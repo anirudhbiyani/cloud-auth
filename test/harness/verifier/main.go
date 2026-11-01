@@ -2,11 +2,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -24,7 +26,49 @@ const detectTimeout = 15 * time.Second
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if api := os.Getenv("AWS_LAMBDA_RUNTIME_API"); api != "" {
+		os.Exit(lambdaLoop(ctx, "http://"+api+"/2018-06-01/runtime/invocation/", []string{"--allow-empty"}))
+	}
 	os.Exit(run(ctx, os.Args[1:], os.Stdout, os.Stderr, os.Getenv, func() verify.Exchanger { return broker.New() }))
+}
+
+// lambdaLoop serves the Lambda custom-runtime API: each event is a targets.json document, each response the JSON report. The binary is the function's `bootstrap`, so one static build covers every runtime.
+// ponytail: hand-rolled runtime loop instead of aws-lambda-go; it is three HTTP calls and saves a dependency.
+func lambdaLoop(ctx context.Context, api string, args []string) int {
+	for {
+		resp, err := http.Get(api + "next") // #nosec G107 G704 -- the runtime API host comes from Lambda itself.
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "verifier: lambda runtime api: %v\n", err)
+			return 1
+		}
+		id := resp.Header.Get("Lambda-Runtime-Aws-Request-Id")
+		event, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || id == "" {
+			fmt.Fprintf(os.Stderr, "verifier: lambda runtime api: /next answered %d\n", resp.StatusCode)
+			return 1
+		}
+
+		var out, log bytes.Buffer
+		getenv := func(k string) string {
+			if k == verify.EnvTargetsInline {
+				return string(event)
+			}
+			return os.Getenv(k)
+		}
+		code := run(ctx, args, &out, &log, getenv, func() verify.Exchanger { return broker.New() })
+		_, _ = os.Stderr.Write(log.Bytes()) // CloudWatch
+		body := out.Bytes()
+		if len(body) == 0 {
+			body = fmt.Appendf(nil, `{"error":"verifier exited %d before writing a report","log":%q}`, code, log.String())
+		}
+		post, err := http.Post(api+id+"/response", "application/json", bytes.NewReader(body)) // #nosec G107 G704
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "verifier: posting response: %v\n", err)
+			return 1
+		}
+		_ = post.Body.Close()
+	}
 }
 
 // options are the parsed flags.

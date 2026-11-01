@@ -160,6 +160,7 @@ locals {
 # publicly-trusted CA, which IAM verifies against its own root CA library and
 # then populates the attribute itself.
 resource "aws_iam_openid_connect_provider" "azure" {
+  count          = var.azure_oidc_provider_arn == "" ? 1 : 0
   url            = var.azure_aks_oidc_issuer_url
   client_id_list = [var.audience]
 
@@ -178,7 +179,7 @@ data "aws_iam_policy_document" "from_azure" {
 
       principals {
         type        = "Federated"
-        identifiers = [aws_iam_openid_connect_provider.azure.arn]
+        identifiers = [coalesce(var.azure_oidc_provider_arn, one(aws_iam_openid_connect_provider.azure[*].arn))]
       }
 
       # The subject scope: one specific service account in one specific AKS

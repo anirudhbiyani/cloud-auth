@@ -1,5 +1,5 @@
 # These outputs are the CONTRACT (test/harness/CONTRACT.md -> state/gcp-stage1.json).
-# The key set here must stay exactly these eight names — the driver serialises
+# The key set here must stay exactly these ten names — the driver serialises
 # them with:
 #
 #   tofu -chdir=test/harness/tofu/gcp/stage1 output -json \
@@ -48,6 +48,16 @@ output "issuer_url" {
 }
 
 output "gce_instance_name" {
-  description = "Name of the GCE source VM."
-  value       = google_compute_instance.source.name
+  description = "Name of the GCE source VM. Null in GKE mode."
+  value       = one(google_compute_instance.source[*].name)
+}
+
+output "gke_cluster_name" {
+  description = "Existing GKE cluster used as the source runtime. Empty in VM mode."
+  value       = var.gke_cluster
+}
+
+output "gke_location" {
+  description = "Location of gke_cluster_name. Empty in VM mode."
+  value       = var.gke_location
 }
