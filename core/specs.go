@@ -653,3 +653,112 @@ func ValidateAzureTenant(tenant string) error {
 	}
 	return nil
 }
+
+// AnthropicFederationSpec specifies a Claude Platform workload identity federation: an issuer registration, a service account, and the rule binding them.
+type AnthropicFederationSpec struct {
+	// OrganizationID is the Anthropic organization UUID; the runtime exchange needs it, so it is recorded with the mechanism.
+	OrganizationID string `json:"organization_id" yaml:"organization_id"`
+
+	// ServiceAccountName names the service account to create or reuse (^[a-z0-9-]+$). Ignored when ServiceAccountID is set.
+	ServiceAccountName string `json:"service_account_name,omitempty" yaml:"service_account_name,omitempty"`
+
+	// ServiceAccountID reuses an existing service account (svac_...).
+	ServiceAccountID string `json:"service_account_id,omitempty" yaml:"service_account_id,omitempty"`
+
+	// IssuerURL is the OIDC issuer; an existing issuer registration with this URL is reused.
+	IssuerURL string `json:"issuer_url" yaml:"issuer_url"`
+
+	// IssuerName names a newly registered issuer; defaults to a slug of the issuer host.
+	IssuerName string `json:"issuer_name,omitempty" yaml:"issuer_name,omitempty"`
+
+	// JWKSURL points at the JWKS directly when the issuer serves no discovery document.
+	JWKSURL string `json:"jwks_url,omitempty" yaml:"jwks_url,omitempty"`
+
+	// RuleName names the federation rule (^[a-z0-9-]+$, unique in the organization).
+	RuleName string `json:"rule_name" yaml:"rule_name"`
+
+	// SubjectPrefix is an exact match on sub, or a prefix match with a trailing *.
+	SubjectPrefix string `json:"subject_prefix,omitempty" yaml:"subject_prefix,omitempty"`
+
+	// Audience the token's aud must contain; the runtime mints the proof for this value.
+	Audience string `json:"audience" yaml:"audience"`
+
+	// Claims are exact-match top-level claims.
+	Claims map[string]string `json:"claims,omitempty" yaml:"claims,omitempty"`
+
+	// Condition is a CEL expression over claims.
+	Condition string `json:"condition,omitempty" yaml:"condition,omitempty"`
+
+	// WorkspaceID enables the rule in one workspace (wrkspc_...). Either this or AppliesToAllWorkspaces.
+	WorkspaceID string `json:"workspace_id,omitempty" yaml:"workspace_id,omitempty"`
+
+	// AppliesToAllWorkspaces enables the rule in every workspace.
+	AppliesToAllWorkspaces bool `json:"applies_to_all_workspaces,omitempty" yaml:"applies_to_all_workspaces,omitempty"`
+
+	// OAuthScope is workspace:developer (default) or workspace:inference; the Admin API accepts no other scope from an OAuth caller.
+	OAuthScope string `json:"oauth_scope,omitempty" yaml:"oauth_scope,omitempty"`
+
+	// TokenLifetimeSeconds is 60..86400; 0 takes the platform default (3600).
+	TokenLifetimeSeconds int `json:"token_lifetime_seconds,omitempty" yaml:"token_lifetime_seconds,omitempty"`
+
+	// Source identifies the OIDC provider type.
+	Source Cloud `json:"source" yaml:"source"`
+}
+
+var anthropicNameRegex = regexp.MustCompile(`^[a-z0-9-]{1,255}$`)
+
+// Type implements MechanismSpec.
+func (s *AnthropicFederationSpec) Type() MechanismType { return MechanismAnthropicFederation }
+
+// Validate implements MechanismSpec.
+func (s *AnthropicFederationSpec) Validate() error {
+	if strings.TrimSpace(s.OrganizationID) == "" {
+		return fmt.Errorf("organization_id is required")
+	}
+	if s.ServiceAccountID == "" && !anthropicNameRegex.MatchString(s.ServiceAccountName) {
+		return fmt.Errorf("service_account_name must match ^[a-z0-9-]+$ (or set service_account_id to reuse one)")
+	}
+	if s.ServiceAccountID != "" && !strings.HasPrefix(s.ServiceAccountID, "svac_") {
+		return fmt.Errorf("service_account_id %q does not look like a service account id (expected svac_...)", s.ServiceAccountID)
+	}
+	if err := ValidateURL(s.IssuerURL); err != nil {
+		return fmt.Errorf("issuer_url: %w", err)
+	}
+	if !strings.HasPrefix(s.IssuerURL, "https://") {
+		return fmt.Errorf("issuer_url must use https")
+	}
+	if s.IssuerName != "" && !anthropicNameRegex.MatchString(s.IssuerName) {
+		return fmt.Errorf("issuer_name must match ^[a-z0-9-]+$")
+	}
+	if !anthropicNameRegex.MatchString(s.RuleName) {
+		return fmt.Errorf("rule_name must match ^[a-z0-9-]+$")
+	}
+	if strings.TrimSpace(s.Audience) == "" {
+		return fmt.Errorf("audience is required: it pins the proof to this rule and the runtime mints for it")
+	}
+	// Anthropic rejects a match block with only an audience; so do we, before a request is made.
+	if s.SubjectPrefix == "" && len(s.Claims) == 0 && s.Condition == "" {
+		return fmt.Errorf("at least one of subject_prefix, claims, or condition is required: a rule matching every token from the issuer is not a trust boundary")
+	}
+	if (s.WorkspaceID == "") == !s.AppliesToAllWorkspaces {
+		return fmt.Errorf("exactly one of workspace_id or applies_to_all_workspaces is required")
+	}
+	if s.WorkspaceID != "" && !strings.HasPrefix(s.WorkspaceID, "wrkspc_") {
+		return fmt.Errorf("workspace_id %q does not look like a workspace id (expected wrkspc_...)", s.WorkspaceID)
+	}
+	switch s.OAuthScope {
+	case "", "workspace:developer", "workspace:inference":
+	default:
+		return fmt.Errorf("oauth_scope %q: the Admin API lets an OAuth caller create only workspace:developer or workspace:inference rules; create an %s rule in the Console", s.OAuthScope, s.OAuthScope)
+	}
+	if s.TokenLifetimeSeconds != 0 && (s.TokenLifetimeSeconds < 60 || s.TokenLifetimeSeconds > 86400) {
+		return fmt.Errorf("token_lifetime_seconds must be between 60 and 86400")
+	}
+	return nil
+}
+
+// SourceProvider implements MechanismSpec.
+func (s *AnthropicFederationSpec) SourceProvider() Cloud { return s.Source }
+
+// TargetProvider implements MechanismSpec.
+func (s *AnthropicFederationSpec) TargetProvider() Cloud { return Anthropic }

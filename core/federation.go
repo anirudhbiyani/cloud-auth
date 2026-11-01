@@ -15,7 +15,9 @@ const (
 	GCP   Cloud = "gcp"
 	Azure Cloud = "azure"
 	// Anthropic is the Claude Platform.
-	Anthropic  Cloud = "anthropic"
+	Anthropic Cloud = "anthropic"
+	// OpenAI is the OpenAI API platform.
+	OpenAI     Cloud = "openai"
 	Vault      Cloud = "vault"
 	Okta       Cloud = "okta"
 	GitHubOIDC Cloud = "github_oidc"
@@ -23,7 +25,7 @@ const (
 )
 
 // federationTargets are the destinations a workload can obtain credentials FOR.
-var federationTargets = map[Cloud]bool{AWS: true, GCP: true, Azure: true, Anthropic: true}
+var federationTargets = map[Cloud]bool{AWS: true, GCP: true, Azure: true, Anthropic: true, OpenAI: true}
 
 // trustPeers are the additional providers the control plane can establish trust WITH.
 var trustPeers = map[Cloud]bool{
@@ -36,7 +38,7 @@ func ParseCloud(s string) (Cloud, error) {
 	if federationTargets[c] || trustPeers[c] {
 		return c, nil
 	}
-	return "", fmt.Errorf("cloud-auth: unknown cloud %q (want aws, gcp, azure, "+
+	return "", fmt.Errorf("cloud-auth: unknown cloud %q (want aws, gcp, azure, anthropic, openai, "+
 		"vault, okta, github_oidc, or kubernetes)", s)
 }
 
@@ -75,7 +77,7 @@ func ParseFederationTarget(s string) (Cloud, error) {
 	if !federationTargets[c] {
 		return "", fmt.Errorf("cloud-auth: %s is a trust peer, not a federation target: "+
 			"cloud-auth can establish trust with it but cannot obtain credentials for it "+
-			"(want aws, gcp, azure, or anthropic)", c)
+			"(want aws, gcp, azure, anthropic, or openai)", c)
 	}
 	return c, nil
 }

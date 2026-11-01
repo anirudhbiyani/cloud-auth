@@ -144,16 +144,16 @@ environment all along.
 **Legend:** ✅ works · ❌ the target STS will not accept this proof · 🚫 **refused
 by design** — cloud-auth returns `ErrNonFederatableSource` rather than attempt it.
 
-| Source runtime | Proof it mints | → AWS | → GCP | → Azure | → Anthropic |
-|---|---|:---:|:---:|:---:|:---:|
-| **GitHub Actions** — `actions` | OIDC (runner token endpoint) | ✅ | ✅ | ✅ | ✅ |
-| **AWS** — `eks-irsa` | OIDC (projected SA token) | ✅ | ✅ | ✅ | ✅ |
-| **AWS** — `ec2`, `ecs`, `lambda` | OIDC via `sts:GetWebIdentityToken` | ✅ | ✅ | ✅ | ✅ |
-| **AWS** — `ec2`, `ecs`, `lambda` | SigV4 `GetCallerIdentity` | ✅ | ✅ | ❌ | ❌ |
-| **AWS** — `eks-pod-identity` | *none* | 🚫 | 🚫 | 🚫 | 🚫 |
-| **GCP** — `gce`, `gke`, `cloud-run`, `cloud-functions` | OIDC (metadata identity token) | ✅ | ✅ | ✅ | ✅ |
-| **Azure** — `aks-workload-identity` | OIDC (projected SA token) | ✅ | ✅ | ✅ | ✅ |
-| **Azure** — `vm`, `app-service`, `container-apps` | *none* | 🚫 | 🚫 | 🚫 | 🚫 |
+| Source runtime | Proof it mints | → AWS | → GCP | → Azure | → Anthropic | → OpenAI |
+|---|---|:---:|:---:|:---:|:---:|:---:|
+| **GitHub Actions** — `actions` | OIDC (runner token endpoint) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **AWS** — `eks-irsa` | OIDC (projected SA token) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **AWS** — `ec2`, `ecs`, `lambda` | OIDC via `sts:GetWebIdentityToken` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **AWS** — `ec2`, `ecs`, `lambda` | SigV4 `GetCallerIdentity` | ✅ | ✅ | ❌ | ❌ | ❌ |
+| **AWS** — `eks-pod-identity` | *none* | 🚫 | 🚫 | 🚫 | 🚫 | 🚫 |
+| **GCP** — `gce`, `gke`, `cloud-run`, `cloud-functions` | OIDC (metadata identity token) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Azure** — `aks-workload-identity` | OIDC (projected SA token) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Azure** — `vm`, `app-service`, `container-apps` | *none* | 🚫 | 🚫 | 🚫 | 🚫 | 🚫 |
 
 **Why two runtimes are refused rather than attempted.**
 
@@ -331,6 +331,44 @@ attribute to a cache.
 >
 > Also worth knowing: `ANTHROPIC_API_KEY` sits *above* federation in the SDKs'
 > credential precedence, so a leftover key silently shadows it.
+
+`exec` and `env` hand the minted token to the child as `ANTHROPIC_AUTH_TOKEN`,
+which every Anthropic SDK reads as a bearer token.
+
+**The rule itself can be managed by cloud-auth.** `setup -f` with an
+`anthropic_federation` spec registers the issuer, creates (or reuses) the
+service account, and creates the rule through the
+[Admin API](https://platform.claude.com/docs/en/manage-claude/wif-admin-api);
+`validate` diffs the live rule against what was set up, and `delete` archives
+all three in dependency order, keeping an issuer or service account that another
+rule still uses. It needs an `org:admin` OAuth token in `ANTHROPIC_AUTH_TOKEN`
+(`ant auth login --profile admin --scope org:admin`); Admin API keys are refused
+on these endpoints. The API lets an OAuth caller create only
+`workspace:developer` and `workspace:inference` rules, so an `org:admin` rule is
+still a Console action. See [`examples/anthropic-federation.json`](examples/anthropic-federation.json).
+
+### OpenAI
+
+OpenAI's [workload identity federation](https://developers.openai.com/api/docs/guides/workload-identity-federation)
+is an RFC 8693 token exchange at `https://auth.openai.com/oauth/token`: an OIDC
+proof whose `aud` is `https://api.openai.com/v1` becomes a short-lived access
+token acting as an OpenAI service account.
+
+```bash
+cloud-auth exec --to openai --identity-provider <workload-identity-provider-id> --service-account-id <service-account-id> -- your-program
+```
+
+The request names the Workload Identity Provider and the service account; the
+provider's *service account mapping* decides whether this token's claims may act
+as that account and which permissions it gets. A `scope` in the request grants
+nothing. The audience defaults to `https://api.openai.com/v1` because every
+OpenAI provider guide configures that value; pass `--audience` if your provider
+was registered with another. The child process receives the token as
+`OPENAI_API_KEY`, which the OpenAI SDKs send as a bearer token.
+
+There is no control plane for OpenAI: providers and mappings are created in the
+dashboard (Organization Settings → Security → Workload Identity Provider) and
+OpenAI documents no API for them, so `setup`/`validate`/`delete` do not cover it.
 
 ### `doctor --explain`: which claim actually diverged
 
@@ -548,6 +586,15 @@ cloud-auth setup --type k8s-federation \
   --oidc-url <url>             # Cluster OIDC issuer URL
   --target-cloud <cloud>       # Target: aws, gcp, or azure
   # Plus target-cloud specific options
+```
+
+#### Anthropic federation rule (`anthropic_federation`, spec file only)
+
+Registers an issuer, creates or reuses a service account, and creates the rule
+binding them. Needs `ANTHROPIC_AUTH_TOKEN` with the `org:admin` scope.
+
+```bash
+cloud-auth setup -f examples/anthropic-federation.json
 ```
 
 ### Validation

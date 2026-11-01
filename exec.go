@@ -38,6 +38,10 @@ func credentialEnv(c *core.Credentials) []string {
 			"AWS_SECRET_ACCESS_KEY=" + plain.SecretAccessKey,
 			"AWS_SESSION_TOKEN=" + plain.SessionToken,
 		}
+	case core.Anthropic:
+		return []string{"ANTHROPIC_AUTH_TOKEN=" + plain.AccessToken}
+	case core.OpenAI:
+		return []string{"OPENAI_API_KEY=" + plain.AccessToken}
 	default:
 		return []string{"CLOUD_AUTH_ACCESS_TOKEN=" + plain.AccessToken}
 	}
