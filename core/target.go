@@ -225,3 +225,38 @@ func (t AnthropicTarget) Validate() error {
 	}
 	return nil
 }
+
+// DefaultOpenAIAudience is the audience OpenAI's provider guides configure and the value every documented identity token carries.
+const DefaultOpenAIAudience = "https://api.openai.com/v1"
+
+// OpenAITarget requests a short-lived OpenAI API access token via RFC 8693 token exchange.
+type OpenAITarget struct {
+	// IdentityProviderID is the OpenAI Workload Identity Provider registered for the source issuer.
+	IdentityProviderID string
+
+	// ServiceAccountID is the OpenAI service account the minted token acts as; the provider's mapping must name it.
+	ServiceAccountID string
+
+	// TokenAudience is the audience the source proof must be minted for; defaults to DefaultOpenAIAudience.
+	TokenAudience string
+}
+
+func (t OpenAITarget) Cloud() Cloud { return OpenAI }
+
+func (t OpenAITarget) Audience() string {
+	if t.TokenAudience == "" {
+		return DefaultOpenAIAudience
+	}
+	return t.TokenAudience
+}
+
+func (t OpenAITarget) Validate() error {
+	if strings.TrimSpace(t.IdentityProviderID) == "" {
+		return fmt.Errorf("openai target: identity_provider_id is required; OpenAI resolves the " +
+			"mapping from the provider and service account named in the request, never from the token")
+	}
+	if strings.TrimSpace(t.ServiceAccountID) == "" {
+		return fmt.Errorf("openai target: service_account_id is required")
+	}
+	return nil
+}

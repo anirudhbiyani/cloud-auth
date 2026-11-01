@@ -1,0 +1,14 @@
+{
+  "type": "anthropic_federation",
+  "organization_id": "00000000-0000-0000-0000-000000000000",
+  "service_account_name": "deploy-bot",
+  "issuer_url": "https://token.actions.githubusercontent.com",
+  "rule_name": "gha-main-deploy",
+  "subject_prefix": "repo:myorg/myrepo:ref:refs/heads/main",
+  "audience": "https://api.anthropic.com",
+  "claims": { "repository_owner": "myorg" },
+  "workspace_id": "wrkspc_01ABCDEFabcdef0123456789XY",
+  "oauth_scope": "workspace:inference",
+  "token_lifetime_seconds": 600,
+  "source": "github_oidc"
+}

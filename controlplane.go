@@ -20,6 +20,7 @@ import (
 	"github.com/anirudhbiyani/cloud-auth/internal/audit"
 
 	// Import providers to register them
+	_ "github.com/anirudhbiyani/cloud-auth/provider/anthropic"
 	_ "github.com/anirudhbiyani/cloud-auth/provider/aws"
 	_ "github.com/anirudhbiyani/cloud-auth/provider/azure"
 	_ "github.com/anirudhbiyani/cloud-auth/provider/gcp"
@@ -116,7 +117,8 @@ Setup Options (File-based):
   -f, --file <path>       Spec file (YAML or JSON)
 
 Setup Options (Flag-based):
-  --type <type>           Mechanism type (aws-oidc, gcp-wif, azure-federated, k8s-federation)
+  --type <type>           Mechanism type (aws-oidc, gcp-wif, azure-federated, k8s-federation);
+                          anthropic_federation is spec-file only (-f)
   
   AWS OIDC Role Trust (--type aws-oidc):
     --role-name <name>      AWS IAM role name to create/update
@@ -1275,7 +1277,7 @@ func loadSpec(path string) (core.MechanismSpec, error) {
 		}
 		return nil, fmt.Errorf("%s must include a `type` field naming the mechanism "+
 			"(aws_role_trust_oidc, gcp_workload_identity_pool, azure_federated_credential, "+
-			"k8s_service_account_federation)", path)
+			"k8s_service_account_federation, anthropic_federation)", path)
 	}
 
 	var spec core.MechanismSpec
@@ -1303,6 +1305,12 @@ func loadSpec(path string) (core.MechanismSpec, error) {
 		var s core.K8sServiceAccountFederationSpec
 		if err := yaml.Unmarshal(data, &s); err != nil {
 			return nil, fmt.Errorf("failed to parse K8sServiceAccountFederationSpec from %s: %w", path, err)
+		}
+		spec = &s
+	case core.MechanismAnthropicFederation:
+		var s core.AnthropicFederationSpec
+		if err := yaml.Unmarshal(data, &s); err != nil {
+			return nil, fmt.Errorf("failed to parse AnthropicFederationSpec from %s: %w", path, err)
 		}
 		spec = &s
 	// vault.VaultBrokerSpec has existed all along; loadSpec simply never knew about it, so examples/vault-jwt-auth.json — shipped documentation — could not be loaded by the tool it documents.

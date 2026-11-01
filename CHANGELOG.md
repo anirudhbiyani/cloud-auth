@@ -11,6 +11,9 @@ Breaking changes are called out explicitly.
 ## [Unreleased]
 
 ### Added
+- OpenAI as a federation target: `--to openai --identity-provider <id> --service-account-id <id>` performs the RFC 8693 token exchange at auth.openai.com and hands the token to the child as `OPENAI_API_KEY`. Audience defaults to `https://api.openai.com/v1`.
+- Anthropic control plane: `setup -f` with an `anthropic_federation` spec registers the issuer, creates or reuses the service account, and creates the federation rule through the Admin API; `validate` diffs the live rule, `delete` archives in dependency order and keeps shared parents. Requires an `org:admin` OAuth token in `ANTHROPIC_AUTH_TOKEN`.
+- `exec`/`env` now emit `ANTHROPIC_AUTH_TOKEN` for Anthropic credentials instead of the generic `CLOUD_AUTH_ACCESS_TOKEN`.
 - Integration harness: run on clusters you already operate. `scripts/existing.sh` captures an EKS or AKS cluster's facts, `up.sh --existing <clouds>` skips provisioning for them, `GKE_CLUSTER`/`GKE_LOCATION`/`GKE_PROJECT` put the GCP source on an existing GKE cluster via Workload Identity instead of a GCE VM, and `EKS_CONTEXT`/`AKS_CONTEXT`/`GKE_CONTEXT` pin each runtime to its own kube context. `aws/stage2` can reuse an IAM OIDC provider that already registers the AKS issuer (`azure_oidc_provider_arn`).
 - Integration harness: `LAMBDA=1` deploys the verifier as a Lambda function (`tofu/aws/lambda`), giving the AWS SigV4 source path and the AWS → Azure negative test without an EC2 instance. The verifier speaks the Lambda runtime API itself (stdlib, no new dependency).
 - First live proof of all six first-class cross-cloud pairs (GKE/EKS/AKS → AWS/GCP/Azure) through the harness.
