@@ -61,9 +61,15 @@ account's numeric unique id). GKE is optional/not required for v1 of the harness
   "source_sa_email": "cloud-auth-test-src@my-proj.iam.gserviceaccount.com",
   "source_sa_unique_id": "109876543210987654321",
   "issuer_url": "https://accounts.google.com",
-  "gce_instance_name": "cloud-auth-test-src"
+  "gce_instance_name": "cloud-auth-test-src",
+  "gke_cluster_name": "",
+  "gke_location": ""
 }
 ```
+GKE mode (`gke_cluster` var set): `gce_instance_name` is null, the two `gke_*` keys
+are filled, and the pod's KSA (`cloud-auth-test/verifier`) impersonates
+`source_sa_email` via Workload Identity — the token is otherwise identical to the
+VM's, so stage2 is unchanged.
 
 ### `state/azure-stage1.json`
 ```json
@@ -79,6 +85,19 @@ account's numeric unique id). GKE is optional/not required for v1 of the harness
   "subject": "system:serviceaccount:cloud-auth-test:verifier"
 }
 ```
+
+### `state/aws-lambda.json` (optional, `LAMBDA=1`)
+```json
+{
+  "lambda_function_name": "cloud-auth-test-verifier",
+  "lambda_role_name": "cloud-auth-test-lambda-source",
+  "lambda_role_arn": "arn:aws:iam::123456789012:role/cloud-auth-test-lambda-source",
+  "region": "us-west-1"
+}
+```
+The Lambda is an AWS *source* with the same SigV4 proof as EC2. When present, its
+role name is what gcp-stage2's `aws_ec2_role_name` receives (the SigV4 provider
+trusts one role), and the EC2 rows of the matrix are replaced by Lambda rows.
 
 ## stage2 outputs — exact keys
 

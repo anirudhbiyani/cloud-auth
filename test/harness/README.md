@@ -25,6 +25,11 @@ cd test/harness
 Useful variations:
 
 ```bash
+./scripts/existing.sh aws my-eks us-west-1     # reuse clusters you already run …
+./scripts/existing.sh azure my-rg my-aks
+EKS_CONTEXT=<ctx> AKS_CONTEXT=<ctx> ./run-harness.sh --existing aws,azure
+GKE_CLUSTER=my-gke GKE_LOCATION=us-central1 GKE_CONTEXT=<ctx> ./run-harness.sh  # … GKE pod instead of a GCE VM
+LAMBDA=1 ./run-harness.sh                      # … and a Lambda instead of an EC2 for the SigV4 path
 ./run-harness.sh --check                    # static checks only — no cloud, no cost
 ./run-harness.sh --clouds aws,gcp           # subset of clouds
 ./run-harness.sh --runtimes aws-ec2         # subset of source runtimes
@@ -74,6 +79,10 @@ verifier code against that file, not against each other.
 | 5 | AWS EKS-IRSA | GCP | WIF (oidc) |
 | 6 | AWS EKS-IRSA | Azure | Entra FIC client assertion |
 | 7 | AWS EC2 | GCP | WIF (aws / SigV4 proof) |
+| 1b | GCP GKE (Workload Identity) | AWS | `AssumeRoleWithWebIdentity` — only with `GKE_CLUSTER` set |
+| 2b | GCP GKE (Workload Identity) | Azure | Entra FIC client assertion — only with `GKE_CLUSTER` set |
+| 7b | AWS Lambda | GCP | WIF (aws / SigV4 proof), no instance — only with `LAMBDA=1` |
+| — | AWS Lambda | Azure | **negative test** — same gap as EC2, only with `LAMBDA=1` |
 | — | AWS EC2 | Azure | **negative test** — must refuse with `ErrNoFirstClassPath` |
 
 Rows 1–6 are the six first-class pairs. Row 7 additionally covers the SigV4
@@ -92,6 +101,8 @@ delivered per runtime:
 | EKS-IRSA / AKS-WI | A bare `sleep` pod bound to the right service account; `kubectl cp` the binary, `kubectl exec` it. The pod inherits the projected SA token — the exact credential under test. |
 | EC2 | AWS SSM `send-command` (no inbound SSH). |
 | GCE | `gcloud compute scp` + `ssh`. |
+| Lambda | The binary *is* the function (`bootstrap`, `provided.al2023`): `aws lambda invoke` with `targets.json` as the event, the report comes back as the response. Needs `LAMBDA=1`. |
+| GKE-WI | Same as EKS/AKS; the SA carries `iam.gke.io/gcp-service-account` so the pod's metadata server mints a token for the source SA. Needs `GKE_CLUSTER`. |
 
 The verifier detects its own runtime and runs only the cases matching it, so the
 same binary and the same `targets.json` go everywhere.
@@ -167,6 +178,7 @@ test/harness/
 │   ├── down.sh          # stage2 down, then stage1 down
 │   └── sweep.sh         # find/delete orphans by tag
 ├── tofu/{aws,gcp,azure}/{stage1,stage2}/
+├── tofu/aws/lambda/     # optional serverless AWS source (LAMBDA=1)
 ├── verifier/            # the in-cloud verifier (+ Dockerfile, job.yaml)
 └── state/               # run artifacts (gitignored)
 ```

@@ -140,3 +140,15 @@ variable "azure_subject" {
     error_message = "azure_subject must be a fully-qualified \"system:serviceaccount:<namespace>:<name>\" subject with no wildcard."
   }
 }
+
+variable "azure_oidc_provider_arn" {
+  description = <<-EOT
+    ARN of an IAM OIDC provider that ALREADY registers azure_aks_oidc_issuer_url.
+    IAM allows one provider per URL per account, so when the cluster's issuer is
+    already federated into this account the harness must reuse it rather than
+    fail with EntityAlreadyExists. The provider is never modified; set `audience`
+    to one of its client ids. Empty = create a harness-owned provider.
+  EOT
+  type        = string
+  default     = ""
+}

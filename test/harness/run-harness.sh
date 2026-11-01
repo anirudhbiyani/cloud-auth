@@ -9,6 +9,9 @@
 #   ./run-harness.sh                          # full cycle, all clouds
 #   ./run-harness.sh --clouds aws,gcp         # subset of clouds
 #   ./run-harness.sh --runtimes aws-ec2       # subset of source runtimes
+#   ./run-harness.sh --existing aws,azure     # reuse your own EKS/AKS clusters (see up.sh)
+#   GKE_CLUSTER=c GKE_LOCATION=z ./run-harness.sh   # GCP source = pod on your GKE cluster
+#   LAMBDA=1 ./run-harness.sh                       # AWS SigV4 source = a Lambda, no EC2
 #   ./run-harness.sh --keep                   # leave it up for debugging
 #   ./run-harness.sh --yes                    # no prompts (unattended)
 #   ./run-harness.sh --check                  # static checks only, no cloud calls
@@ -21,7 +24,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 source ./scripts/lib.sh
 
 CLOUDS="aws,gcp,azure"
-RUNTIMES="gcp-gce,aws-ec2,aws-eks-irsa,azure-aks-workload-identity"
+RUNTIMES="gcp-gce,gcp-gke,aws-ec2,aws-lambda,aws-eks-irsa,azure-aks-workload-identity"
 KEEP=0
 CHECK_ONLY=0
 
@@ -29,6 +32,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --clouds)   CLOUDS="$2"; shift 2 ;;
     --runtimes) RUNTIMES="$2"; shift 2 ;;
+    --existing) EXISTING="$2"; shift 2 ;;
     --keep)     KEEP=1; shift ;;
     --yes|-y)   ASSUME_YES=1; export ASSUME_YES; shift ;;
     --check)    CHECK_ONLY=1; shift ;;
@@ -47,7 +51,7 @@ run_static_checks() {
   ok "shell syntax"
 
   if command -v tofu >/dev/null 2>&1 && tofu version >/dev/null 2>&1; then
-    for d in tofu/*/stage1 tofu/*/stage2; do
+    for d in tofu/*/stage1 tofu/*/stage2 tofu/aws/lambda; do
       [[ -d "$d" ]] || continue
       if tofu -chdir="$d" init -backend=false -input=false >/dev/null 2>&1 \
          && tofu -chdir="$d" validate >/dev/null 2>&1; then
@@ -115,7 +119,7 @@ trap on_signal INT TERM
 run_static_checks || die "static checks failed — fix before spending money on infrastructure"
 
 # ---------- the cycle ----------
-./scripts/up.sh ${ASSUME_YES:+--yes} --clouds "$CLOUDS"
+./scripts/up.sh ${ASSUME_YES:+--yes} ${EXISTING:+--existing "$EXISTING"} --clouds "$CLOUDS"
 
 VERIFY_RC=0
 ./scripts/verify.sh --runtimes "$RUNTIMES" || VERIFY_RC=$?

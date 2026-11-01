@@ -77,14 +77,15 @@ tofu_destroy() {        # tofu_destroy <cloud> <stage> [extra tofu args...]
   local cloud="$1" stage="$2"; shift 2
   local dir; dir="$(module_dir "$cloud" "$stage")"
   if [[ ! -d "$dir" ]]; then warn "no module $cloud/$stage, skipping"; return 0; fi
-  if [[ ! -f "$dir/terraform.tfstate" && ! -d "$dir/.terraform" ]]; then
-    warn "no state for $cloud/$stage, nothing to destroy"; return 0
+  if [[ ! -f "$dir/terraform.tfstate" ]]; then
+    warn "no state for $cloud/$stage, nothing to destroy"; return 0   # a hand-written --existing facts file stays
   fi
   info "destroy $cloud/$stage"
   tofu -chdir="$dir" init -input=false >/dev/null 2>&1 || true
   if tofu -chdir="$dir" destroy -input=false -auto-approve -var "run_id=$RUN_ID" "$@"; then
     ok "$cloud/$stage destroyed"
-    rm -f "$STATE_DIR/$cloud-$stage.json"
+    # An empty tfstate left by an earlier destroy still runs this branch, so the marker, not the state, protects a hand-written facts file.
+    [[ -f "$STATE_DIR/$cloud-$stage.existing" ]] || rm -f "$STATE_DIR/$cloud-$stage.json"
   else
     warn "destroy FAILED for $cloud/$stage — resources may remain. Sweep with: make sweep"
     DESTROY_FAILURES=$((${DESTROY_FAILURES:-0} + 1))
@@ -114,6 +115,7 @@ assert_required_vars_supplied() {   # <cloud> <stage> <tfvars-file>
   local missing=()
   while read -r name; do
     [[ -n "$name" ]] || continue
+    [[ "$name" == run_id ]] && continue   # supplied by tofu_apply as -var, never via tfvars
     grep -qE "^[[:space:]]*$name[[:space:]]*=" "$tfvars" 2>/dev/null || missing+=("$name")
   done < <(awk '
     /^variable[[:space:]]/ { v=$2; gsub(/"/,"",v); d=0; depth=1; next }

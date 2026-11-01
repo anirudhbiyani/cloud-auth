@@ -80,6 +80,7 @@ resource "google_service_account" "source" {
 # ---------------------------------------------------------------------------
 
 resource "google_compute_instance" "source" {
+  count        = var.gke_cluster == "" ? 1 : 0
   project      = local.project_id
   name         = local.instance_name
   zone         = var.zone
@@ -141,4 +142,13 @@ resource "google_compute_instance" "source" {
   metadata_startup_script = var.startup_script != "" ? var.startup_script : null
 
   depends_on = [google_project_service.required]
+}
+
+# GKE mode: Workload Identity lets the KSA impersonate the source SA, which is
+# what makes the pod's identity endpoint return a token with sub = unique_id.
+resource "google_service_account_iam_member" "gke_workload_identity" {
+  count              = var.gke_cluster == "" ? 0 : 1
+  service_account_id = google_service_account.source.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "serviceAccount:${coalesce(var.gke_project, local.project_id)}.svc.id.goog[cloud-auth-test/verifier]"
 }

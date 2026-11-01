@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -142,5 +145,42 @@ func TestRunAllowEmptyExitsClean(t *testing.T) {
 		func() verify.Exchanger { return stubExchanger{} })
 	if code != verify.ExitOK {
 		t.Fatalf("exit = %d, want %d", code, verify.ExitOK)
+	}
+}
+
+// The Lambda loop must hand each event to run as the inline plan and post the JSON report back under the invocation's request id.
+func TestLambdaLoopPostsTheReport(t *testing.T) {
+	var posted struct {
+		path string
+		body []byte
+	}
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/next" && r.Method == http.MethodGet:
+			calls++
+			if calls > 1 { // second poll: end the loop
+				http.Error(w, "bye", http.StatusGone)
+				return
+			}
+			w.Header().Set("Lambda-Runtime-Aws-Request-Id", "req-1")
+			_, _ = w.Write([]byte(twoCasePlan)) // no aws-lambda case: --allow-empty yields an empty report
+		case r.Method == http.MethodPost:
+			posted.path = r.URL.Path
+			posted.body, _ = io.ReadAll(r.Body)
+			w.WriteHeader(http.StatusAccepted)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	// The loop ends when /next stops answering 200, which the second poll arranges.
+	_ = lambdaLoop(context.Background(), srv.URL+"/", []string{"--runtime", "aws-lambda", "--allow-empty"})
+	if posted.path != "/req-1/response" {
+		t.Fatalf("posted to %q, want /req-1/response", posted.path)
+	}
+	var report map[string]any
+	if err := json.Unmarshal(posted.body, &report); err != nil || report["run_id"] == nil || report["error"] != nil {
+		t.Fatalf("response is not the report: %s (%v)", posted.body, err)
 	}
 }

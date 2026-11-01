@@ -221,6 +221,7 @@ test/harness/tofu/**/terraform.tfstate.*
 test/harness/tofu/**/*.tfplan
 # Generated cross-cloud tfvars (derived from stage1 outputs each run).
 test/harness/tofu/**/harness.auto.tfvars
+test/harness/tofu/**/local.auto.tfvars
 # Run artifacts: stage outputs, merged targets, verifier reports, built binary.
 test/harness/state/*
 !test/harness/state/.gitkeep
