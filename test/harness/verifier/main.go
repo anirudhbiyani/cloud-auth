@@ -36,7 +36,7 @@ func main() {
 // ponytail: hand-rolled runtime loop instead of aws-lambda-go; it is three HTTP calls and saves a dependency.
 func lambdaLoop(ctx context.Context, api string, args []string) int {
 	for {
-		resp, err := http.Get(api + "next") // #nosec G107 -- the runtime API host comes from Lambda itself.
+		resp, err := http.Get(api + "next") // #nosec G107 G704 -- the runtime API host comes from Lambda itself.
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "verifier: lambda runtime api: %v\n", err)
 			return 1
@@ -62,7 +62,7 @@ func lambdaLoop(ctx context.Context, api string, args []string) int {
 		if len(body) == 0 {
 			body = fmt.Appendf(nil, `{"error":"verifier exited %d before writing a report","log":%q}`, code, log.String())
 		}
-		post, err := http.Post(api+id+"/response", "application/json", bytes.NewReader(body)) // #nosec G107
+		post, err := http.Post(api+id+"/response", "application/json", bytes.NewReader(body)) // #nosec G107 G704
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "verifier: posting response: %v\n", err)
 			return 1
