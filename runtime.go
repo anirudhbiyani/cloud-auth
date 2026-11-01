@@ -21,7 +21,7 @@ import (
 
 // targetFlags builds a core.Target from a flag set.
 func targetFlags(fs *flag.FlagSet) func() (core.Target, error) {
-	to := fs.String("to", "", "target: aws|gcp|azure|anthropic")
+	to := fs.String("to", "", "target: aws|gcp|azure|anthropic|openai")
 	role := fs.String("role", "", "AWS role ARN")
 	sessionName := fs.String("session-name", "", "AWS sts:RoleSessionName (default: the proof's subject)")
 	pool := fs.String("pool", "", "GCP workload identity pool provider resource name")
@@ -33,8 +33,9 @@ func targetFlags(fs *flag.FlagSet) func() (core.Target, error) {
 	// Anthropic: the federation rule holds the match conditions, so the request names the rule and the identity rather than what the token must contain.
 	federationRule := fs.String("federation-rule", "", "Anthropic federation rule id (fdrl_...)")
 	organizationID := fs.String("organization", "", "Anthropic organization id")
-	serviceAccount := fs.String("service-account-id", "", "Anthropic service account id (svac_...)")
+	serviceAccount := fs.String("service-account-id", "", "Anthropic (svac_...) or OpenAI service account id")
 	workspaceID := fs.String("workspace", "", "Anthropic workspace id (wrkspc_...)")
+	identityProvider := fs.String("identity-provider", "", "OpenAI workload identity provider id")
 
 	return func() (core.Target, error) {
 		if strings.TrimSpace(*to) == "" {
@@ -44,6 +45,13 @@ func targetFlags(fs *flag.FlagSet) func() (core.Target, error) {
 		cloud, err := core.ParseCloud(*to)
 		if err != nil {
 			return nil, err
+		}
+		if cloud == core.OpenAI {
+			return core.OpenAITarget{
+				IdentityProviderID: *identityProvider,
+				ServiceAccountID:   *serviceAccount,
+				TokenAudience:      *audience,
+			}, nil
 		}
 		if cloud == core.Anthropic {
 			return core.AnthropicTarget{
@@ -125,6 +133,8 @@ func auditRole(t core.Target) string {
 		return v.ClientID
 	case core.AnthropicTarget:
 		// The service account is the identity the minted token acts as, which is what an audit record needs — the rule id says how it was reached.
+		return v.ServiceAccountID
+	case core.OpenAITarget:
 		return v.ServiceAccountID
 	default:
 		return ""

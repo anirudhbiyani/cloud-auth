@@ -39,6 +39,8 @@ const (
 	MechanismAzureFederatedCredential MechanismType = "azure_federated_credential"
 	// MechanismK8sServiceAccountFederation represents K8s SA to cloud identity mapping.
 	MechanismK8sServiceAccountFederation MechanismType = "k8s_service_account_federation"
+	// MechanismAnthropicFederation represents a Claude Platform federation rule: issuer + rule + service account.
+	MechanismAnthropicFederation MechanismType = "anthropic_federation"
 )
 
 // MechanismRef is a stable reference to a created mechanism instance.

@@ -34,6 +34,12 @@ func formatEnv(c *core.Credentials) string {
 		fmt.Fprintf(&b, "export AWS_ACCESS_KEY_ID=%s\n", plain.AccessKeyID)
 		fmt.Fprintf(&b, "export AWS_SECRET_ACCESS_KEY=%s\n", plain.SecretAccessKey)
 		fmt.Fprintf(&b, "export AWS_SESSION_TOKEN=%s\n", plain.SessionToken)
+	case core.Anthropic:
+		// The variable every Anthropic SDK reads as a bearer token.
+		fmt.Fprintf(&b, "export ANTHROPIC_AUTH_TOKEN=%s\n", plain.AccessToken)
+	case core.OpenAI:
+		// OpenAI SDKs send OPENAI_API_KEY as a bearer token, and a federated access token is exactly that.
+		fmt.Fprintf(&b, "export OPENAI_API_KEY=%s\n", plain.AccessToken)
 	default:
 		// GCP/Azure bearer token: no universal env var, expose a generic one.
 		fmt.Fprintf(&b, "export CLOUD_AUTH_ACCESS_TOKEN=%s\n", plain.AccessToken)

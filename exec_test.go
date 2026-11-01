@@ -69,3 +69,16 @@ func TestExecEnvironAppendsAfterBase(t *testing.T) {
 		t.Errorf("credentials not appended: %v", got)
 	}
 }
+
+// Platform tokens go in the variable that platform's SDK reads, not a generic one.
+func TestCredentialEnvForAIPlatforms(t *testing.T) {
+	for cloud, want := range map[core.Cloud]string{
+		core.Anthropic: "ANTHROPIC_AUTH_TOKEN=tok",
+		core.OpenAI:    "OPENAI_API_KEY=tok",
+	} {
+		got := credentialEnv(&core.Credentials{Cloud: cloud, AccessToken: "tok"})
+		if !reflect.DeepEqual(got, []string{want}) {
+			t.Errorf("%s: credentialEnv = %v, want [%s]", cloud, got, want)
+		}
+	}
+}
