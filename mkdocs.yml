@@ -1,0 +1,99 @@
+site_name: cloud-auth
+site_description: Cross-cloud workload identity federation, set up and run with zero static secrets.
+site_url: https://anirudhbiyani.com/cloud-auth/
+repo_url: https://github.com/anirudhbiyani/cloud-auth
+repo_name: anirudhbiyani/cloud-auth
+edit_uri: edit/main/docs/
+copyright: AGPL-3.0 · Anirudh Biyani
+
+docs_dir: docs
+exclude_docs: |
+  internal/**
+  _hooks/**
+
+hooks:
+  - docs/_hooks/readme_sections.py
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+  font:
+    text: Inter
+    code: JetBrains Mono
+  icon:
+    repo: fontawesome/brands/github
+    logo: material/cloud-key
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+validation:
+  links:
+    anchors: info
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Installation: getting-started/installation.md
+      - Quick start: getting-started/quickstart.md
+      - CLI reference: getting-started/cli.md
+      - Configuration: getting-started/configuration.md
+  - Runtime federation:
+      - Federation matrix: runtime/matrix.md
+      - doctor --explain: runtime/doctor.md
+      - AWS proof selection: runtime/aws-proof.md
+      - Anthropic and OpenAI: runtime/ai-platforms.md
+  - Control plane:
+      - Mechanism types: control-plane/mechanisms.md
+      - Validation: control-plane/validation.md
+      - Audit: control-plane/audit.md
+      - State management: control-plane/state.md
+  - Library: library.md
+  - Testing:
+      - Integration harness: testing/harness.md
+      - Test plan, open items: testing/test-plan.md
+  - Design:
+      - Architecture: design/architecture.md
+      - Baseline: design/baseline.md
+      - Decisions: design/decisions.md
+  - Contributing: contributing.md
+  - Changelog: changelog.md
