@@ -204,7 +204,8 @@ Common Options:
 
 Validate Options:
   --ref <id>              Mechanism reference ID
-  --include-token-test    Attempt actual token acquisition
+  --include-token-test    Also detect this machine's runtime, mint a proof and exchange
+                          it at the target (skipped when run off-workload)
   --timeout <duration>    Validation timeout (e.g., 30s, 1m)
 
 Delete Options:

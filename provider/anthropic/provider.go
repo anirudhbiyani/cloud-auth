@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
+	"github.com/anirudhbiyani/cloud-auth/broker"
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
@@ -260,7 +262,7 @@ func optFlag(flag, v string) string {
 }
 
 // Validate implements core.LifecycleProvider.
-func (p *Provider) Validate(ctx context.Context, ref core.MechanismRef, _ core.ValidateOptions) (*core.ValidationReport, error) {
+func (p *Provider) Validate(ctx context.Context, ref core.MechanismRef, opts core.ValidateOptions) (*core.ValidationReport, error) {
 	if err := p.requireClient(); err != nil {
 		return nil, err
 	}
@@ -311,6 +313,16 @@ func (p *Provider) Validate(ctx context.Context, ref core.MechanismRef, _ core.V
 				}
 				return sa.Name + " (" + sa.OrganizationRole + ")", nil
 			}},
+	}
+	// Anthropic verifies iss byte-for-byte, requires kid, and allows only 30 seconds of skew.
+	checks = append(checks,
+		core.NewOIDCDiscoveryValidator(ids[keyIssuerURL], nil),
+		core.NewClockSkewValidator(core.DiscoveryURL(ids[keyIssuerURL]), 30*time.Second, nil))
+	if opts.IncludeTokenTest {
+		checks = append(checks, broker.NewTokenTestValidator(core.AnthropicTarget{
+			FederationRuleID: ids[keyRule], OrganizationID: ids[keyOrg], ServiceAccountID: ids[keySA],
+			WorkspaceID: ids[keyWorkspace], TokenAudience: ids[keyAudience],
+		}, nil))
 	}
 	return core.RunValidation(ctx, ref, checks), nil
 }
