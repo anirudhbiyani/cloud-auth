@@ -42,14 +42,16 @@ func main() {
 }
 ```
 
-Categories from `core.CategoryOf`: `auth`, `validation`, `not_found`, `rate_limit`,
-`network`, `internal`. `core.IsRetryable` is true only for rate limits and transient
+Categories from `core.CategoryOf`: `auth`, `permission`, `validation`, `not_found`,
+`conflict`, `rate_limit`, `network`, `timeout`, `internal`. `core.IsRetryable` is true only for rate limits and transient
 network or server failures; a rejected assertion is never retried, because retrying
 a single-use token is how `jti_reused` happens.
 
-Control-plane errors are `*core.CloudAuthError` with an operation, a provider, and the
-underlying cause; `errors.As` gets you the structured form and `errors.Is` still works
-on the wrapped cause.
+Most control-plane errors are `*core.CloudAuthError` carrying a category, a provider,
+the underlying cause, and an operation where the caller set one; `errors.As` gets you
+the structured form and `errors.Is` still works on the wrapped cause. A few paths
+(state-record cleanup after delete, some Vault and Anthropic archive failures) return
+plain wrapped errors, so fall back to the message when `errors.As` fails.
 
 ## Redaction
 
@@ -72,7 +74,7 @@ func main() {
 	fmt.Println(creds)                       // redacted
 	fmt.Printf("%+v\n", creds)               // still redacted: Format ignores the verb
 	slog.Info("got credentials", "c", creds) // LogValue is redacted
-	b, _ := creds.MarshalJSON()              // redacted JSON, Expiration kept
+	b, _ := creds.MarshalJSON()              // a JSON string of the redacted form; the expiry appears inside it
 	fmt.Println(string(b))
 
 	plain := creds.Reveal() // the one explicit path to the bytes

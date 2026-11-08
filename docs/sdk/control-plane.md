@@ -23,7 +23,7 @@ func main() {
 	ctx := context.Background()
 
 	// Where mechanism references are recorded so `Delete` later knows what it owns.
-	store, err := core.NewFileStateStore("") // "" = ~/.cloud-auth/state.json
+	store, err := core.NewFileStateStore(core.DefaultStateStorePath()) // ~/.cloud-auth/state.json
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func main() {
 	}
 	fmt.Println(plan.Values["plan"])
 
-	// Real run. Re-running with the same spec is idempotent: it lands on the same resources.
+	// Real run. Re-running with the same spec converges on the same cloud resources (each run still records its own reference in the state store).
 	out, err := manager.Setup(ctx, spec, core.SetupOptions{})
 	if err != nil {
 		log.Fatal(err)
@@ -158,7 +158,7 @@ that `OwnedOnly` means something. Three implementations ship:
 | Memory | `core.NewMemoryStateStore()` | tests and ephemeral jobs |
 | Object store | `state.New(objects)` with `state.S3Objects` | shared state across a team or CI, with retry and conflict handling |
 
-Anything implementing `core.StateStore` (five methods) can be passed to
+Anything implementing `core.StateStore` (six methods: `Save`, `Get`, `List`, `Delete`, `Exists`, `UpdateOwnership`) can be passed to
 `core.WithStateStore`.
 
 ## Listing and reading back
@@ -176,7 +176,7 @@ import (
 
 func main() {
 	ctx := context.Background()
-	store, _ := core.NewFileStateStore("")
+	store, _ := core.NewFileStateStore(core.DefaultStateStorePath())
 	manager := core.NewManager(core.WithStateStore(store))
 
 	refs, err := manager.List(ctx, core.ListFilter{Provider: core.AWS})

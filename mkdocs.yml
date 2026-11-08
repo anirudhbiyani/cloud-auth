@@ -13,6 +13,7 @@ exclude_docs: |
 
 hooks:
   - docs/_hooks/readme_sections.py
+  - docs/_hooks/apidoc.py
 
 theme:
   name: material
@@ -96,6 +97,20 @@ nav:
       - Audit inventory: sdk/audit.md
       - Errors and redaction: sdk/errors.md
       - Extending: sdk/extending.md
+      - API reference:
+          - All packages: sdk/reference/index.md
+          - core: sdk/reference/core.md
+          - broker: sdk/reference/broker.md
+          - adapters: sdk/reference/adapters.md
+          - source: sdk/reference/source.md
+          - target: sdk/reference/target.md
+          - config: sdk/reference/config.md
+          - state: sdk/reference/state.md
+          - provider/aws: sdk/reference/provider-aws.md
+          - provider/gcp: sdk/reference/provider-gcp.md
+          - provider/azure: sdk/reference/provider-azure.md
+          - provider/vault: sdk/reference/provider-vault.md
+          - provider/anthropic: sdk/reference/provider-anthropic.md
   - Testing:
       - Integration harness: testing/harness.md
       - Test plan, open items: testing/test-plan.md

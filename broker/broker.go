@@ -27,7 +27,7 @@ func WithExchangerFor(f func(core.Cloud) (core.Exchanger, error)) Option {
 	return func(b *Broker) { b.exchangerFor = f }
 }
 
-// New builds a Broker with the default registry (AWS→GCP→Azure) and the default exchanger dispatcher.
+// New builds a Broker with the default registry (GitHub Actions→AWS→GCP→Azure) and the default exchanger dispatcher.
 func New(opts ...Option) *Broker {
 	b := &Broker{registry: source.Default(), exchangerFor: target.For}
 	for _, o := range opts {

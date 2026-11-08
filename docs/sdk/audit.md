@@ -23,7 +23,7 @@ import (
 func main() {
 	ctx := context.Background()
 
-	// Every control-plane provider is also an InventorySource; include the clouds you have credentials for.
+	// The AWS, GCP, Azure and Vault providers are also InventorySources (Anthropic is not yet); include the clouds you have credentials for.
 	sources := []core.InventorySource{awsprovider.New(), gcpprovider.New(), azureprovider.New()}
 
 	// Resolvers decide whether a trusted namespace is live, unregistered (claimable), or someone else's.
@@ -47,7 +47,7 @@ What a record tells you:
 
 - `Breadth` is how many identities the subject condition admits, from one exact
   subject up to "any token from this issuer". It is the first thing to sort by.
-- `Liveness.State` is `live`, `not_ours`, `unregistered`, or `unknown`. An
+- `Liveness.State` is `live-and-ours`, `live-but-not-ours`, `unregistered`, or `unknown`. An
   `unregistered` GitHub namespace is the critical case: anyone can register it and
   mint a token whose subject matches the trust exactly.
 - `RenameFragile` flags GitHub subjects in the name-based format that break on

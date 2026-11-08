@@ -79,6 +79,14 @@
         "client_id": {
           "description": "Azure: application (client) ID (required for Azure targets, together with tenant).",
           "type": "string"
+        },
+        "scope": {
+          "description": "Azure: resource scope for the access token, e.g. https://storage.azure.com/.default (required for Azure targets; there is no default).",
+          "type": "string"
+        },
+        "session_name": {
+          "description": "AWS: sts:RoleSessionName (optional; defaults to the proof's subject).",
+          "type": "string"
         }
       },
       "allOf": [
