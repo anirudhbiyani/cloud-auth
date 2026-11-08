@@ -22,10 +22,10 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: "1.27.3"
 
@@ -111,7 +111,7 @@ jobs:
       # change to the code. That is the intended behaviour.
       - name: Run govulncheck
         if: matrix.os == 'ubuntu-latest'
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
       # Gated on medium-or-higher severity AND confidence. Rationale: this
       # codebase is full of OAuth/RFC 8693 URN constants, IMDS header names, and

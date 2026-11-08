@@ -16,13 +16,13 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           # goreleaser needs the full history to resolve the previous tag.
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: "1.27.3"
 
@@ -33,7 +33,7 @@ jobs:
         run: go test -race ./...
 
       - name: Run goreleaser
-        uses: goreleaser/goreleaser-action@v7.2.3
+        uses: goreleaser/goreleaser-action@v7.3.0
         with:
           version: "~> v2"
           args: release --clean

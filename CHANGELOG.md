@@ -20,6 +20,9 @@ Breaking changes are called out explicitly.
 - Integration harness: `LAMBDA=1` deploys the verifier as a Lambda function (`tofu/aws/lambda`), giving the AWS SigV4 source path and the AWS → Azure negative test without an EC2 instance. The verifier speaks the Lambda runtime API itself (stdlib, no new dependency).
 - First live proof of all six first-class cross-cloud pairs (GKE/EKS/AKS → AWS/GCP/Azure) through the harness.
 
+### Changed
+- Dependencies upgraded (AWS SDK v2 1.47.8, azcore 1.24.0, x/net 0.62.0 and transitive). GitHub Actions bumped: checkout v7, setup-go v7, setup-python v7, upload-pages-artifact v5, deploy-pages v5, goreleaser-action v7.3.0, govulncheck v1.9.0, mkdocs-material 9.8.1. Go 1.27.3, golangci-lint v2.15.0 and gosec v2.30.0 were already the latest.
+
 ### Fixed (harness)
 - Stage2 preflight demanded `run_id` in tfvars although the driver passes it as `-var`, so stage2 could never start.
 - Service-account annotations were applied before the account existed, so no runtime got its federation wiring.
