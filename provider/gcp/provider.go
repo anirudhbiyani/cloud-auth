@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anirudhbiyani/cloud-auth/broker"
 	"github.com/anirudhbiyani/cloud-auth/core"
 	"github.com/anirudhbiyani/cloud-auth/internal/jwt"
 )
@@ -696,6 +697,17 @@ func (p *Provider) Validate(ctx context.Context, ref core.MechanismRef, opts cor
 			validators = append(validators, core.NewPermissionsValidator(
 				strings.Split(raw, ","),
 				core.WithGrantedPolicySource(p)))
+		}
+
+		// An aws-type provider records no issuer, and both checks report skipped for it rather than inventing one.
+		validators = append(validators,
+			core.NewOIDCDiscoveryValidator(expIssuer, nil),
+			core.NewClockSkewValidator(core.DiscoveryURL(expIssuer), 5*time.Minute, nil))
+
+		if opts.IncludeTokenTest && providerName != "" {
+			validators = append(validators, broker.NewTokenTestValidator(core.GCPTarget{
+				WorkloadIdentityPool: providerName, ImpersonateServiceAccount: saEmail, TokenAudience: expAudience,
+			}, nil))
 		}
 	}
 

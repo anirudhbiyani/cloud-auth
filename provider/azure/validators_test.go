@@ -267,7 +267,7 @@ func TestValidateBuildsItsChecksFromTheRef(t *testing.T) {
 			name: "application only",
 			ids:  map[string]string{"app_object_id": "obj-1"},
 			// No credential id recorded, so no credential check — and the report must not imply the credential was verified.
-			names: []string{"Application Exists"},
+			names: []string{"Application Exists", "OIDC provider configuration", "Clock skew"},
 		},
 		{
 			name: "application and credential",
@@ -275,12 +275,12 @@ func TestValidateBuildsItsChecksFromTheRef(t *testing.T) {
 				"app_object_id":           "obj-1",
 				"federated_credential_id": "fic-1",
 			},
-			names: []string{"Application Exists", "Federated Credential Exists"},
+			names: []string{"Application Exists", "Federated Credential Exists", "OIDC provider configuration", "Clock skew"},
 		},
 		{
 			name:  "managed identity",
 			ids:   map[string]string{"identity_name": "uami", "subscription_id": "s", "resource_group": "rg"},
-			names: []string{"Managed Identity Exists"},
+			names: []string{"Managed Identity Exists", "OIDC provider configuration", "Clock skew"},
 		},
 		{
 			name: "recorded intent adds the trust and breadth checks",
@@ -290,7 +290,7 @@ func TestValidateBuildsItsChecksFromTheRef(t *testing.T) {
 				"expected_subject":  "repo:acme/api:ref:refs/heads/main",
 				"expected_audience": "api://AzureADTokenExchange",
 			},
-			names: []string{"Application Exists", "Trust Policy Match", "Subject Breadth"},
+			names: []string{"Application Exists", "Trust Policy Match", "Subject Breadth", "OIDC provider configuration", "Clock skew"},
 		},
 		{
 			// A type this provider does not own contributes no validators.

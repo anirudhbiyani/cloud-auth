@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anirudhbiyani/cloud-auth/broker"
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
@@ -570,6 +571,17 @@ func (p *Provider) Validate(ctx context.Context, ref core.MechanismRef, opts cor
 			validators = append(validators, core.NewPermissionsValidator(
 				strings.Split(raw, ","),
 				core.WithGrantedPolicySource(p)))
+		}
+
+		// The issuer must actually serve keys, and this clock must agree with it; STS tolerates about five minutes of skew.
+		validators = append(validators,
+			core.NewOIDCDiscoveryValidator(expIssuer, nil),
+			core.NewClockSkewValidator(core.DiscoveryURL(expIssuer), 5*time.Minute, nil))
+
+		if opts.IncludeTokenTest {
+			validators = append(validators, broker.NewTokenTestValidator(core.AWSTarget{
+				RoleARN: ref.ResourceIDs["role_arn"], TokenAudience: expAudience,
+			}, nil))
 		}
 	}
 

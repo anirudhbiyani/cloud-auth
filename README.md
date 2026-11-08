@@ -655,9 +655,9 @@ Validation checks, and their **current** implementation status:
 | Check | Status |
 |---|---|
 | Resource existence | ✅ implemented |
-| OIDC provider configuration | ⬜ not implemented: no check fetches the issuer's discovery document |
-| Token acquisition | ⬜ not implemented: `--include-token-test` is accepted but currently has no effect |
-| Clock skew | ⬜ not a `validate` check; `doctor` compares a minted token's `exp` with the local clock |
+| OIDC provider configuration | ✅ implemented — fetches the issuer's `.well-known/openid-configuration`, requires its `issuer` field to equal the trust's issuer byte for byte, and fetches the JWKS it names (non-empty; keys without `kid` are flagged). Skipped for trusts with no OIDC issuer (SigV4) |
+| Token acquisition | ✅ implemented, opt-in via `--include-token-test` — detects the local source runtime, mints a proof for the recorded audience, and exchanges it at the target; credentials are discarded. **Skipped** when run from a machine that is not a workload; a refusal is a real finding. Run it from the workload or CI job the trust names |
+| Clock skew | ✅ implemented — compares the local clock with the `Date` header of the issuer's discovery endpoint and fails beyond what the target tolerates (30 s for Anthropic, 5 min for the clouds). Reports **skipped** when the remote is unreachable or sends no `Date` |
 | Trust policy configuration | ✅ implemented for **AWS, GCP and Azure** — reads the live trust object and checks the issuer, audience and subject still match what was configured, and flags a *totally* unscoped trust outright |
 | Permission policies | ✅ implemented for **AWS and GCP** — confirms the expected policies/roles are still attached. Azure role assignments are not yet verified |
 

@@ -57,8 +57,10 @@ func main() {
 		fmt.Println(" ", line)
 	}
 
-	// Validate reads the live resource and diffs it against what was set up.
-	report, err := manager.Validate(ctx, out.Ref, core.ValidateOptions{})
+	// Validate reads the live resource and diffs it against what was set up, fetches the issuer's
+	// discovery document and JWKS, and measures clock skew against it. IncludeTokenTest additionally
+	// detects this machine's runtime and performs a real exchange (skipped when run off-workload).
+	report, err := manager.Validate(ctx, out.Ref, core.ValidateOptions{IncludeTokenTest: true})
 	if err != nil {
 		log.Fatal(err)
 	}

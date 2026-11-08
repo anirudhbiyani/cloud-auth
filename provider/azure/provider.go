@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anirudhbiyani/cloud-auth/broker"
 	"github.com/anirudhbiyani/cloud-auth/core"
 )
 
@@ -757,6 +758,23 @@ func (p *Provider) Validate(ctx context.Context, ref core.MechanismRef, opts cor
 
 			// Breadth is scored unconditionally, unlike the match check above: it needs no recorded intent, only the live policy.
 			validators = append(validators, core.NewSubjectBreadthValidator(p))
+		}
+
+		// Entra fetches the issuer's keys at exchange time and tolerates about five minutes of skew.
+		validators = append(validators,
+			core.NewOIDCDiscoveryValidator(expIssuer, nil),
+			core.NewClockSkewValidator(core.DiscoveryURL(expIssuer), 5*time.Minute, nil))
+
+		if opts.IncludeTokenTest {
+			clientID := ref.ResourceIDs["app_id"]
+			if clientID == "" {
+				clientID = ref.ResourceIDs["client_id"]
+			}
+			// The token is discarded, so the scope only has to be one every tenant accepts; ARM is that scope.
+			validators = append(validators, broker.NewTokenTestValidator(core.AzureTarget{
+				Tenant: ref.ResourceIDs["tenant_id"], ClientID: clientID,
+				Scope: "https://management.azure.com/.default", TokenAudience: expAudience,
+			}, nil))
 		}
 	}
 

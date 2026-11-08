@@ -237,7 +237,7 @@ func TestLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("validate: %v", err)
 	}
-	if report.Summary.FailedChecks != 0 || report.Summary.PassedChecks != 3 {
+	if report.Summary.FailedChecks != 0 || report.Summary.PassedChecks != 5 {
 		t.Fatalf("validate: %+v", report.Checks)
 	}
 
