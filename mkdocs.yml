@@ -89,7 +89,13 @@ nav:
       - Validation: control-plane/validation.md
       - Audit: control-plane/audit.md
       - State management: control-plane/state.md
-  - Library: library.md
+  - SDK:
+      - Overview: sdk/index.md
+      - Runtime exchange: sdk/runtime.md
+      - Control plane: sdk/control-plane.md
+      - Audit inventory: sdk/audit.md
+      - Errors and redaction: sdk/errors.md
+      - Extending: sdk/extending.md
   - Testing:
       - Integration harness: testing/harness.md
       - Test plan, open items: testing/test-plan.md
