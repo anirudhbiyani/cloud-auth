@@ -157,7 +157,7 @@ by design** — cloud-auth returns `ErrNonFederatableSource` rather than attempt
 | **GitHub Actions** — `actions` | OIDC (runner token endpoint) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **AWS** — `eks-irsa` | OIDC (projected SA token) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **AWS** — `ec2`, `ecs`, `lambda` | OIDC via `sts:GetWebIdentityToken` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **AWS** — `ec2`, `ecs`, `lambda` | SigV4 `GetCallerIdentity` | ❌ | ✅ | ❌ | ❌ | ❌ |
+| **AWS** — `ec2`, `ecs`, `lambda` | SigV4 `GetCallerIdentity` *(legacy)* | ❌ | ✅ | ❌ | ❌ | ❌ |
 | **AWS** — `eks-pod-identity` | *none* | 🚫 | 🚫 | 🚫 | 🚫 | 🚫 |
 | **GCP** — `gce`, `gke`, `cloud-run`, `cloud-functions` | OIDC (metadata identity token) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Azure** — `aks-workload-identity` | OIDC (projected SA token) | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -491,8 +491,17 @@ target-side trust configuration applies:
 
 | Proof | Minted by | Accepted by |
 |---|---|---|
-| **OIDC** | `sts:GetWebIdentityToken` (AWS IAM outbound identity federation) | AWS, GCP, Azure |
-| **SigV4** | Signed `GetCallerIdentity` request | GCP |
+| **OIDC** *(standard)* | `sts:GetWebIdentityToken` (AWS IAM outbound identity federation) | AWS, GCP, Azure, Anthropic, OpenAI |
+| **SigV4** *(legacy)* | Signed `GetCallerIdentity` request | GCP |
+
+OIDC is the standard path: one proof format for every target, the same
+audience-pinned JWT every other source mints, and no target has to call AWS STS
+to verify it. SigV4 is the compatibility path for accounts that have not enabled
+outbound identity federation and for existing GCP pools built on an `aws`-type
+provider. The tool keeps it, but makes it visible: `auto` logs a warning the
+first time it falls back, `doctor` names the legacy path even when GCP accepts
+it, `setup --provider-type aws` prints a note, and `cloud-auth audit` counts
+SigV4 trusts as legacy.
 
 Outbound identity federation is **opt-in per AWS account**
 (`iam:EnableOutboundWebIdentityFederation`), and the calling principal needs

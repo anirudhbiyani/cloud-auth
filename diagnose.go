@@ -174,8 +174,13 @@ func diagnoseProofKind(p preflight) (diagnosis, bool) {
 		return diagnosis{}, false
 	}
 	targetCloud := p.target.Cloud()
-	if targetCloud == "" || targetCloud == core.GCP {
+	if targetCloud == "" {
 		return diagnosis{}, false
+	}
+	if targetCloud == core.GCP {
+		// Accepted, but legacy: say so, with the one change that moves the workload onto the standard path.
+		return diagnosis{true, "GCP accepts the SigV4 proof (legacy path, GCP-only).\n    Enable outbound identity federation on the AWS account " +
+			"(iam:EnableOutboundWebIdentityFederation) and switch the pool provider to oidc to use the standard OIDC proof."}, true
 	}
 
 	sourceCloud := core.Cloud("")

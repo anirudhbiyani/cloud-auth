@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -122,7 +123,12 @@ func (a *AWS) mintPrincipalProof(ctx context.Context, audience string) (*core.So
 	if !errors.As(err, &disabled) {
 		return nil, err
 	}
-	a.outbound.off.Store(true)
+	if !a.outbound.off.Swap(true) {
+		// Once per process: this is a security-relevant downgrade the operator should know about, not a routine branch.
+		slog.Warn("aws: outbound identity federation is disabled on this account; falling back to the legacy SigV4 proof, which only GCP accepts. " +
+			"Enable it (iam:EnableOutboundWebIdentityFederation) so this workload presents an OIDC token to every target, " +
+			"or pin CLOUD_AUTH_AWS_PROOF=sigv4 to make the legacy path explicit.")
+	}
 	return a.mintSigV4(ctx, audience)
 }
 

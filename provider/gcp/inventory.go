@@ -88,6 +88,7 @@ func trustRecordForProvider(pool *WorkloadIdentityPool, prov *WorkloadIdentityPo
 	case prov.AWS != nil:
 		// An aws-type provider trusts an AWS ACCOUNT, verified by a SigV4 GetCallerIdentity call rather than a JWT.
 		rec.Issuer = "aws:" + prov.AWS.AccountID
+		rec.LegacyProof = true
 	}
 	return rec
 }

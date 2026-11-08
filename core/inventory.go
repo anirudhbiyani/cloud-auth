@@ -31,6 +31,8 @@ type TrustRecord struct {
 	Liveness LivenessResult `json:"liveness"`
 	// RenameFragile marks a GitHub subject in the legacy format, which breaks the first time the repository is renamed or transferred.
 	RenameFragile bool `json:"rename_fragile"`
+	// LegacyProof marks a trust verified by a SigV4 GetCallerIdentity replay (a GCP aws-type provider) rather than an OIDC token; the standard path is outbound identity federation.
+	LegacyProof bool `json:"legacy_proof"`
 }
 
 // Severity is the worst thing this record says about itself.

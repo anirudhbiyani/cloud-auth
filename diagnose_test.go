@@ -280,3 +280,24 @@ func TestNoProofKindWarningForOIDC(t *testing.T) {
 		}
 	}
 }
+
+// GCP accepts SigV4, but doctor must still name it as the legacy path and point at the standard one.
+func TestDoctorNamesTheLegacyPathWhenGCPAcceptsSigV4(t *testing.T) {
+	target := core.GCPTarget{WorkloadIdentityPool: "//iam.googleapis.com/projects/1/locations/global/workloadIdentityPools/p/providers/x"}
+	p := preflight{
+		runtime: &core.Runtime{Cloud: core.AWS, SubRuntime: "ec2", Federatable: true},
+		target:  target,
+		token: &core.SourceToken{Kind: core.AWSSigV4, Value: "signed-request", Subject: "arn:aws:iam::1:role/instance",
+			Audience: target.Audience(), Expiry: time.Now().Add(time.Hour)},
+		now: time.Now(), skew: defaultClockSkew,
+	}
+	for _, d := range diagnose(p) {
+		if strings.Contains(d.message, "legacy path") {
+			if !d.ok || !strings.Contains(d.message, "EnableOutboundWebIdentityFederation") {
+				t.Fatalf("legacy diagnosis = %+v", d)
+			}
+			return
+		}
+	}
+	t.Fatal("doctor did not name the legacy SigV4 path for a GCP target")
+}

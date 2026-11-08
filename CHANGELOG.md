@@ -24,6 +24,9 @@ Breaking changes are called out explicitly.
 ### Changed
 - Dependencies upgraded (AWS SDK v2 1.47.8, azcore 1.24.0, x/net 0.62.0 and transitive). GitHub Actions bumped: checkout v7, setup-go v7, setup-python v7, upload-pages-artifact v5, deploy-pages v5, goreleaser-action v7.3.0, govulncheck v1.9.0, mkdocs-material 9.8.1. Go 1.27.3, golangci-lint v2.15.0 and gosec v2.30.0 were already the latest.
 
+### Changed
+- SigV4 `GetCallerIdentity` is now explicitly the legacy AWS proof; `sts:GetWebIdentityToken` (outbound identity federation) is the standard. Nothing is removed: `auto` still falls back when the account has outbound federation disabled, but it logs a warning once per process; `doctor` names the legacy path even when GCP accepts it; `setup --type gcp-wif --provider-type aws` prints a note recommending `oidc`; `cloud-auth audit` marks aws-type pool providers `legacy_proof` and counts them. Pin `CLOUD_AUTH_AWS_PROOF=sigv4` to keep the legacy path deliberately and silence the warning.
+
 ### Added (validation)
 - Three `validate` checks that the README had advertised but did not exist. **OIDC provider configuration** fetches the issuer's discovery document, requires its `issuer` to match the trust exactly, and fetches a non-empty JWKS (keys without `kid` are flagged). **Clock skew** compares the local clock with the `Date` header of the discovery endpoint and fails beyond the target's tolerance (30 s Anthropic, 5 min clouds); skipped without a remote time source. **Token acquisition** (`--include-token-test`, previously accepted and ignored) detects the local runtime, mints a proof, and exchanges it at the target built from the mechanism's recorded ids; skipped off-workload, failed on refusal. All four OIDC-capable providers (AWS, GCP, Azure, Anthropic) run the first two always and the third on request. `core.DefaultValidationHTTPClient` lets tests and embedders redirect the probes.
 
