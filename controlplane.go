@@ -625,7 +625,7 @@ func buildAzureSpec(opts *setupOpts, source core.Cloud) (*core.AzureFederatedCre
 		} else {
 			return nil, fmt.Errorf("--app-id or --app-name is required for azure-federated with identity-type=app")
 		}
-	case "managed-identity", "mi":
+	case "managed-identity", "managed_identity", "mi":
 		spec.IdentityType = "managed_identity"
 		if opts.identityName == "" {
 			return nil, fmt.Errorf("--identity-name is required for azure-federated with identity-type=managed-identity")
@@ -640,7 +640,7 @@ func buildAzureSpec(opts *setupOpts, source core.Cloud) (*core.AzureFederatedCre
 		spec.ResourceGroup = opts.resourceGroup
 		spec.SubscriptionID = opts.subscriptionID
 	default:
-		return nil, fmt.Errorf("--identity-type must be 'app' or 'managed-identity'")
+		return nil, fmt.Errorf("--identity-type must be 'app' (app_registration) or 'managed-identity' (managed_identity, mi)")
 	}
 
 	return spec, nil

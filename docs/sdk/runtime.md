@@ -228,7 +228,8 @@ func main() {
 ## Reuse the CLI's config file
 
 The YAML file `cloud-auth exec --config` reads is a library type too, so a service can
-share one config with its operators.
+share one config with its operators. It resolves AWS, GCP and Azure targets; Anthropic
+and OpenAI targets are built in code or passed by flags.
 
 ```go
 package main

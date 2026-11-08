@@ -97,7 +97,8 @@ VM's, so stage2 is unchanged.
 ```
 The Lambda is an AWS *source* with the same SigV4 proof as EC2. When present, its
 role name is what gcp-stage2's `aws_ec2_role_name` receives (the SigV4 provider
-trusts one role), and the EC2 rows of the matrix are replaced by Lambda rows.
+trusts one role), and Lambda rows (`aws-lambda-sigv4-to-gcp`,
+`aws-lambda-to-azure-gap`) are added to the matrix next to the EC2 rows.
 
 ## stage2 outputs — exact keys
 
@@ -149,7 +150,8 @@ Stage 2 for cloud X creates the trust that lets **other** clouds in. Naming is
   on the pool subject — do NOT require SA impersonation (that path is the opt-in
   fallback, not the default under test).
 - Grant `roles/storage.objectViewer` on `test_bucket` to the federated principal so
-  the verifier can prove the token works.
+  a GCS probe can prove the token works. Today the verifier ships one probe
+  (`sts-get-caller-identity`); for GCP targets it asserts a successful exchange only.
 
 ### `state/azure-stage2.json`  (Azure as TARGET)
 ```json
@@ -220,7 +222,8 @@ process only executes the cases matching the runtime it finds itself on
    shell (`./run-harness.sh`). It must not be added to any GitHub workflow: it
    needs privileged cloud credentials and creates billable infrastructure, and
    an automated trigger would risk both leaking those credentials and spending
-   money unattended. The repo's `ci.yml` runs unit tests only.
+   money unattended. The repo's `ci.yml` runs unit tests and a compile-only
+   `go vet -tags integration`.
 3. **Cost warning + confirmation.** `up.sh` prints an itemized cost estimate and
    requires an explicit confirmation (`--yes` for automation) before applying.
 4. **No credentials or tokens in logs or state committed to git.** Redact tokens in

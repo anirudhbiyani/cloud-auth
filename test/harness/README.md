@@ -29,7 +29,7 @@ Useful variations:
 ./scripts/existing.sh azure my-rg my-aks
 EKS_CONTEXT=<ctx> AKS_CONTEXT=<ctx> ./run-harness.sh --existing aws,azure
 GKE_CLUSTER=my-gke GKE_LOCATION=us-central1 GKE_CONTEXT=<ctx> ./run-harness.sh  # … GKE pod instead of a GCE VM
-LAMBDA=1 ./run-harness.sh                      # … and a Lambda instead of an EC2 for the SigV4 path
+LAMBDA=1 ./run-harness.sh                      # … plus a Lambda source; the GCP SigV4 provider trusts its role
 ./run-harness.sh --check                    # static checks only — no cloud, no cost
 ./run-harness.sh --clouds aws,gcp           # subset of clouds
 ./run-harness.sh --runtimes aws-ec2         # subset of source runtimes
@@ -129,9 +129,9 @@ complete run costs well under a dollar — **provided you tear it down.**
 
 These are deliberate, and worth preserving if you edit the scripts:
 
-1. **Teardown never depends on success.** `make cycle` runs `down` even when
-   `verify` fails, and the CI job's destroy step is `if: always()`. A failing
-   test must never strand infrastructure.
+1. **Teardown never depends on success.** `run-harness.sh` tears down from its
+   exit trap, so a failed `verify` or a Ctrl-C still destroys everything;
+   `make cycle` wraps it. A failing test must never strand infrastructure.
 2. **Destroy is resilient.** `down.sh` tolerates missing, half-applied, or
    un-initialized modules and keeps going after a per-module failure, so one
    stuck cloud can't strand the other two. It exits non-zero if anything failed.
@@ -142,7 +142,8 @@ These are deliberate, and worth preserving if you edit the scripts:
    It is not wired into any GitHub workflow and should not be: it needs
    privileged cloud credentials and creates billable infrastructure, so an
    automated trigger risks leaking credentials and spending money unattended.
-   The repo's `ci.yml` runs unit tests only and never touches a cloud.
+   The repo's `ci.yml` runs unit tests and a compile-only `go vet -tags
+   integration`, and never touches a cloud.
 5. **No credentials in output.** The verifier reports identities and outcomes,
    never raw tokens; a unit test enforces the redaction.
 6. **Preflight fails before spending.** Required tools are checked for *runnability*,

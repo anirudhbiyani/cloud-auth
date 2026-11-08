@@ -10,7 +10,7 @@ independently.
 | 1 | AWS Lambda as a source (SigV4 to GCP, negative to Azure) | implemented, unit-tested, never run live | AWS dev account, GCP dev project |
 | 2 | Anthropic control plane: `setup` / `validate` / `delete` of federation rules | fake-API tested only | Anthropic org with an `org:admin` login |
 | 3 | OpenAI runtime exchange | fake-API tested only | OpenAI org with a Workload Identity Provider |
-| 4 | GitHub Actions as a source, end to end | workflow exists, never triggered | repository secrets for one target role |
+| 4 | GitHub Actions as a source, end to end | workflow exists, never triggered | the `AWS_SMOKE_ROLE_ARN` repository variable, or the `role-arn` dispatch input |
 
 Items 2 and 3 share a sub-task: the harness verifier does not yet know the `anthropic`
 and `openai` target clouds. Adding them is a small change to `verifier/verify/plan.go`
@@ -45,8 +45,9 @@ LAMBDA=1 GOOGLE_PROJECT=<gcp-project> AWS_PROFILE=<profile> AWS_REGION=<region> 
 
 **Pass criteria**
 
-- `state/results-aws-lambda.json` has `aws-lambda-sigv4-to-gcp` with `status: pass` and a
-  probe that read the harness bucket object.
+- `state/results-aws-lambda.json` has `aws-lambda-sigv4-to-gcp` with `status: pass`. This
+  means the exchange succeeded; the verifier has no GCS probe yet, so adding one that
+  reads the harness bucket object is part of closing this item.
 - `aws-lambda-to-azure-gap` has `status: pass` with `expect: error` and the error names
   `ErrNoFirstClassPath`: the refusal is correct and actionable.
 - `harness fully destroyed` in the log; `aws lambda list-functions` and
@@ -159,8 +160,8 @@ already does `doctor` plus `exchange` from a runner; it has never been run.
 
 **Steps**
 
-1. Add the role ARN as the repository secret the workflow reads (see the workflow file
-   for the name).
+1. Set the repository variable `AWS_SMOKE_ROLE_ARN` to the role ARN, or pass it as the
+   `role-arn` input on `gh workflow run`.
 2. `gh workflow run federation-smoke.yml` and `gh run watch`.
 3. Read the job: `doctor` exits 0, `exchange` prints an assumed-role ARN.
 4. `cloud-auth delete` the role afterwards.

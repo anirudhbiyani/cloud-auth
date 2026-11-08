@@ -534,7 +534,7 @@ cloud-auth setup --type aws-oidc \
   --oidc-url <url>             # OIDC provider URL
   --audience <aud>             # Expected audience (default: sts.amazonaws.com)
   --subject <sub>              # Subject claim pattern
-  --source <provider>          # Source: github, gcp, azure, k8s, okta
+  --source <provider>          # Source: github (github-actions, github_oidc), gcp (google), azure, k8s (kubernetes), okta, vault
   --policy-arns <arns>         # Comma-separated policy ARNs
 ```
 
@@ -580,6 +580,7 @@ Creates an Azure federated identity credential for passwordless authentication.
 cloud-auth setup --type azure-federated \
   --tenant-id <id>             # Azure AD tenant ID
   --identity-type <type>       # app or managed-identity
+  --app-id <id>                # existing app registration (alternative to --app-name)
   --app-name <name>            # Application name (for app type)
   --identity-name <name>       # Managed identity name (for managed-identity)
   --resource-group <rg>        # Resource group (for managed-identity)
@@ -654,11 +655,11 @@ Validation checks, and their **current** implementation status:
 | Check | Status |
 |---|---|
 | Resource existence | ✅ implemented |
-| OIDC provider configuration | ✅ implemented — fetches the issuer's `.well-known/openid-configuration` |
-| Token acquisition | ✅ implemented (opt-in via `--include-token-test`) |
-| Clock skew | ✅ implemented — requires a remote time source; reports **skipped** without one |
+| OIDC provider configuration | ⬜ not implemented: no check fetches the issuer's discovery document |
+| Token acquisition | ⬜ not implemented: `--include-token-test` is accepted but currently has no effect |
+| Clock skew | ⬜ not a `validate` check; `doctor` compares a minted token's `exp` with the local clock |
 | Trust policy configuration | ✅ implemented for **AWS, GCP and Azure** — reads the live trust object and checks the issuer, audience and subject still match what was configured, and flags a *totally* unscoped trust outright |
-| Permission policies | ✅ implemented for **AWS, GCP and Azure** — confirms the expected policies/roles are still attached |
+| Permission policies | ✅ implemented for **AWS and GCP** — confirms the expected policies/roles are still attached. Azure role assignments are not yet verified |
 
 > **What "unscoped" means per cloud.** The trust check fails outright when a
 > trust admits any identity from its issuer: an AWS `sub: "*"` condition, a GCP
@@ -755,10 +756,12 @@ inventory short one provider is not an inventory of your estate.
 
 Two variables are needed because neither API has a tenant-wide listing:
 `GOOGLE_CLOUD_PROJECT` (a pool is project-scoped) and `AZURE_SUBSCRIPTION_ID`
-(user-assigned identities are subscription-scoped). **An unset one produces a
-gap row rather than silence** — otherwise a reader cannot tell "nothing
-federates there" from "that was never looked at", and only one of those is
-reassuring.
+(user-assigned identities are subscription-scoped). **Neither is silent when
+unset:** a missing `AZURE_SUBSCRIPTION_ID` produces a gap row, and a missing
+`GOOGLE_CLOUD_PROJECT` fails the GCP source outright, so the inventory is marked
+INCOMPLETE and any `--fail-on` gate fails. Otherwise a reader could not tell
+"nothing federates there" from "that was never looked at", and only one of those
+is reassuring.
 
 > **Not covered:** Vault's `aws`, `gcp` and `azure` auth methods. Those federate
 > by verifying a cloud's own signed metadata rather than a JWT against a JWKS — a
@@ -767,7 +770,8 @@ reassuring.
 > be worse than saying so here.
 >
 > Records are read live from the credentials you run it with, so this is one
-> operator's view. Point `--state` at a shared object for a team-wide picture.
+> operator's view. For a team-wide picture, run it with credentials that can read
+> every account.
 
 <!-- --8<-- [end:audit] -->
 <!-- --8<-- [start:breadth] -->
@@ -845,7 +849,8 @@ targets:
     session_name: cloud-auth
 ```
 
-A JSON Schema for editor completion and CI linting lives at
+The optional `scope` (Azure) and `session_name` (AWS) keys shown above are
+accepted by the loader. A JSON Schema for editor completion and CI linting lives at
 [`config/cloud-auth.schema.json`](config/cloud-auth.schema.json).
 
 <!-- --8<-- [end:runtimeconfig] -->
@@ -873,8 +878,8 @@ cloud-auth list --state s3://my-bucket/cloud-auth/state.json
 
 `FileStateStore` is careful — flock, reload-before-write, fsync of the file
 *and* its directory, atomic rename — and every one of those protections stops at
-the machine boundary. Two laptops cannot flock each other, and `cloud-auth
-audit` is only a team's inventory if the state is shared.
+the machine boundary. Two laptops cannot flock each other, and `list`,
+`describe`, `validate` and `delete` only see one inventory if the state is shared.
 
 The S3 backend uses **conditional writes** rather than a lock: `If-None-Match`
 to create, `If-Match` to update, and a re-read-and-retry when the tag no longer
@@ -1118,7 +1123,7 @@ cloud-auth/
 │   ├── specs.go               # Mechanism specifications
 │   ├── manager.go             # Default manager implementation
 │   ├── registry.go            # Provider registry
-│   ├── state.go               # State store implementations
+│   ├── state.go               # File state store
 │   ├── validation.go          # Validation framework
 │   └── errors.go              # Structured errors
 ├── provider/                  # Control-plane provider implementations
@@ -1126,15 +1131,16 @@ cloud-auth/
 │   ├── gcp/                   # GCP Workload Identity
 │   ├── azure/                 # Azure AD Federated Credentials
 │   └── vault/                 # HashiCorp Vault
+├── state/                     # S3 state store (conditional writes) + object-store abstraction
 ├── source/                    # Runtime: source-identity detection + minting
 │   └── aws_outbound.go        #   sts:GetWebIdentityToken OIDC proof (AWS → Azure)
 ├── target/                    # Runtime: target STS exchangers
 ├── adapters/                  # Runtime: SDK-native credential adapters
 ├── broker/                    # Runtime: detect→mint→exchange orchestrator
 ├── config/                    # Runtime: declarative federation config + JSON Schema
-├── internal/                  # imds, jwt, k8stoken, cache, audit
+├── internal/                  # imds, jwt, k8stoken, cache, audit, httpx, redact, statetest, apidoc
 ├── test/                      # Cloud integration harness (OpenTofu) + build-tagged tests
-├── docs/                      # BASELINE.md, DECISIONS.md; internal/ is planning history
+├── docs/                      # MkDocs site; design/ holds baseline + decisions; internal/ is planning history
 └── examples/                  # Example spec files
 ```
 
@@ -1153,10 +1159,14 @@ cloud-auth/
 Add new providers by implementing the `Provider` interface:
 
 ```go
-// TokenProvider for token acquisition
-type TokenProvider interface {
-    Provider
-    Token(ctx context.Context, req TokenRequest) (*TokenResponse, error)
+// Runtime extension points: a source that proves who the workload is,
+// and an exchanger that turns that proof into a target's credentials.
+type SourceProvider interface {
+    Detect(ctx context.Context) (*Runtime, error)
+    Mint(ctx context.Context, audience string) (*SourceToken, error)
+}
+type Exchanger interface {
+    Exchange(ctx context.Context, tok *SourceToken, target Target) (*Credentials, error)
 }
 
 // LifecycleProvider for full lifecycle management

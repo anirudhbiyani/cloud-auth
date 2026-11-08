@@ -39,7 +39,7 @@ func main() {
 	root := flag.String("root", ".", "module root")
 	out := flag.String("out", "docs/sdk/reference", "output directory")
 	flag.Parse()
-	if err := os.MkdirAll(*out, 0o755); err != nil {
+	if err := os.MkdirAll(*out, 0o750); err != nil {
 		log.Fatal(err)
 	}
 	var index bytes.Buffer
@@ -50,12 +50,12 @@ func main() {
 			log.Fatalf("%s: %v", p.dir, err)
 		}
 		name := strings.ReplaceAll(p.dir, "/", "-") + ".md"
-		if err := os.WriteFile(filepath.Join(*out, name), md, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(*out, name), md, 0o600); err != nil {
 			log.Fatal(err)
 		}
 		fmt.Fprintf(&index, "| [`%s`](%s) | %d | [%s](../%s) |\n", module+"/"+p.dir, name, n, strings.SplitN(p.examples, "#", 2)[0], p.examples)
 	}
-	if err := os.WriteFile(filepath.Join(*out, "index.md"), index.Bytes(), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(*out, "index.md"), index.Bytes(), 0o600); err != nil {
 		log.Fatal(err)
 	}
 }
