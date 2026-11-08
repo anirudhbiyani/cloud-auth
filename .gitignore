@@ -229,3 +229,4 @@ test/harness/state/*
 
 # Compiled CLI binary (build artifact)
 /cloud-auth
+site/

@@ -13,6 +13,7 @@
 </p>
 
 <p align="center">
+  <a href="https://anirudhbiyani.com/cloud-auth/"><strong>📚 Documentation site</strong></a> •
   <a href="#-features">Features</a> •
   <a href="#-why-cloud-auth">Why cloud-auth?</a> •
   <a href="#-quick-start">Quick Start</a> •
@@ -23,6 +24,7 @@
 
 ---
 
+<!-- --8<-- [start:intro] -->
 **cloud-auth** is a Go library and CLI tool that simplifies the setup, validation, and lifecycle management of cross-cloud authentication mechanisms. It enables workloads running in one cloud provider (or CI/CD platform) to securely access resources in another cloud without managing long-lived credentials.
 
 ```bash
@@ -35,6 +37,8 @@ cloud-auth setup --type aws-oidc \
   --source github
 ```
 
+<!-- --8<-- [end:intro] -->
+<!-- --8<-- [start:why] -->
 ## 🎯 Why cloud-auth?
 
 Setting up cross-cloud authentication typically requires:
@@ -53,6 +57,8 @@ Setting up cross-cloud authentication typically requires:
 | Vendor lock-in | Unified interface across AWS, GCP, Azure |
 | Security blind spots | Built-in security checks and best practices |
 
+<!-- --8<-- [end:why] -->
+<!-- --8<-- [start:features] -->
 ## ✨ Features
 
 ### 🔄 Complete Lifecycle Management
@@ -130,6 +136,8 @@ what is using it:
 > failing without error. `cloud-auth doctor` reports a case-only audience
 > mismatch explicitly for that reason.
 
+<!-- --8<-- [end:features] -->
+<!-- --8<-- [start:matrix] -->
 ### 🔀 Runtime Federation Matrix
 
 Which source runtimes can obtain credentials at which targets, and the proof
@@ -174,6 +182,8 @@ identity federation, an EC2/ECS/Lambda workload had no OIDC token of its own and
 that cell was a documented gap (`ErrNoFirstClassPath`); the `sts:GetWebIdentityToken`
 path closes it. See [AWS proof selection](#aws-proof-selection).
 
+<!-- --8<-- [end:matrix] -->
+<!-- --8<-- [start:security] -->
 ### 🔐 Security-First Design
 - **No secrets in output** - Secrets are routed to secure storage, never returned directly
 - **Ownership tracking** - Only delete resources cloud-auth created
@@ -185,6 +195,8 @@ path closes it. See [AWS proof selection](#aws-proof-selection).
 - **Go Library** - Embed in your applications and infrastructure tools
 - **Spec Files** - Declarative JSON/YAML configuration
 
+<!-- --8<-- [end:security] -->
+<!-- --8<-- [start:install] -->
 ## 📦 Installation
 
 ### CLI
@@ -210,6 +222,8 @@ go build -o cloud-auth .
 go get github.com/anirudhbiyani/cloud-auth
 ```
 
+<!-- --8<-- [end:install] -->
+<!-- --8<-- [start:quickstart] -->
 ## 🚀 Quick Start
 
 ### Example 1: GitHub Actions → AWS
@@ -266,8 +280,10 @@ cloud-auth setup --type k8s-federation \
   --policy-arns arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
 ```
 
+<!-- --8<-- [end:quickstart] -->
 ## 📖 Documentation
 
+<!-- --8<-- [start:cli] -->
 ### CLI Commands
 
 **Control-plane** — establish and manage the trust relationship:
@@ -296,6 +312,8 @@ exchanges it at the target cloud's STS:
 | `credential-process` | Emit the AWS `credential_process` JSON contract for zero-code SDK integration |
 | `config-validate` | Lint a declarative federation config file |
 
+<!-- --8<-- [end:cli] -->
+<!-- --8<-- [start:anthropic] -->
 ### Anthropic Claude Platform
 
 The Claude Platform's [Workload Identity Federation](https://platform.claude.com/docs/en/manage-claude/workload-identity-federation)
@@ -347,6 +365,8 @@ on these endpoints. The API lets an OAuth caller create only
 `workspace:developer` and `workspace:inference` rules, so an `org:admin` rule is
 still a Console action. See [`examples/anthropic-federation.json`](examples/anthropic-federation.json).
 
+<!-- --8<-- [end:anthropic] -->
+<!-- --8<-- [start:openai] -->
 ### OpenAI
 
 OpenAI's [workload identity federation](https://developers.openai.com/api/docs/guides/workload-identity-federation)
@@ -370,6 +390,8 @@ There is no control plane for OpenAI: providers and mappings are created in the
 dashboard (Organization Settings → Security → Workload Identity Provider) and
 OpenAI documents no API for them, so `setup`/`validate`/`delete` do not cover it.
 
+<!-- --8<-- [end:openai] -->
+<!-- --8<-- [start:doctor] -->
 ### `doctor --explain`: which claim actually diverged
 
 One AWS `AccessDenied` covers roughly fifteen distinct root causes. GCP's most
@@ -452,6 +474,8 @@ clean bill of health.
 id while a runtime target carries its *client* id, so `--explain` says so rather
 than guessing; use `cloud-auth validate --ref <mechanism>` there.
 
+<!-- --8<-- [end:doctor] -->
+<!-- --8<-- [start:awsproof] -->
 ### AWS proof selection
 
 On EC2, ECS and Lambda the AWS source can prove its identity two ways. Both
@@ -486,6 +510,8 @@ the library:
 EKS IRSA and Pod Identity are unaffected — they already carry a projected OIDC
 token and never ask STS to vend one.
 
+<!-- --8<-- [end:awsproof] -->
+<!-- --8<-- [start:mechanisms] -->
 ### Mechanism Types
 
 #### AWS Role Trust OIDC (`aws-oidc`)
@@ -597,6 +623,8 @@ binding them. Needs `ANTHROPIC_AUTH_TOKEN` with the `org:admin` scope.
 cloud-auth setup -f examples/anthropic-federation.json
 ```
 
+<!-- --8<-- [end:mechanisms] -->
+<!-- --8<-- [start:validation] -->
 ### Validation
 
 Validate a mechanism to ensure it's correctly configured:
@@ -647,6 +675,8 @@ Validation checks, and their **current** implementation status:
 > Every skipped check carries `Remediation` text telling you what to confirm by
 > hand.
 
+<!-- --8<-- [end:validation] -->
+<!-- --8<-- [start:audit] -->
 ### `cloud-auth audit`: which external identities can assume anything
 
 Nobody can answer that today. AWS IAM Access Analyzer surfaces federated
@@ -730,6 +760,8 @@ reassuring.
 > Records are read live from the credentials you run it with, so this is one
 > operator's view. Point `--state` at a shared object for a team-wide picture.
 
+<!-- --8<-- [end:audit] -->
+<!-- --8<-- [start:breadth] -->
 ### Subject breadth
 
 `repo:myorg/myrepo:*` pins real characters, so it is *scoped*. It also admits
@@ -769,6 +801,8 @@ both widened the trust and quietly enabled the widening. `setup` now says so.
 > roles that already existed. The pre-guardrail backlog is the population this
 > scoring exists to serve.
 
+<!-- --8<-- [end:breadth] -->
+<!-- --8<-- [start:runtimeconfig] -->
 ### Runtime Configuration File
 
 `exchange`, `exec` and `doctor` accept a declarative config via `--config`;
@@ -805,6 +839,8 @@ targets:
 A JSON Schema for editor completion and CI linting lives at
 [`config/cloud-auth.schema.json`](config/cloud-auth.schema.json).
 
+<!-- --8<-- [end:runtimeconfig] -->
+<!-- --8<-- [start:state] -->
 ### State Management
 
 cloud-auth tracks created resources in a state store — a local file by default
@@ -849,6 +885,8 @@ existed.
 > cover file-specific properties — temp files, permission bits, fsync — that have
 > no remote equivalent.
 
+<!-- --8<-- [end:state] -->
+<!-- --8<-- [start:library] -->
 ### Library Usage
 
 Use cloud-auth as a Go library for programmatic access:
@@ -917,8 +955,10 @@ func main() {
 }
 ```
 
+<!-- --8<-- [end:library] -->
 ## ⚙️ Configuration
 
+<!-- --8<-- [start:env] -->
 ### Environment Variables
 
 Configure cloud provider credentials using standard environment variables:
@@ -977,6 +1017,8 @@ credentials, but nothing obtains "GitHub credentials".
 An unrecognised value is rejected rather than silently defaulted — including a
 malformed `aws-`, which is an error and not a synonym for `aws`.
 
+<!-- --8<-- [end:env] -->
+<!-- --8<-- [start:options] -->
 ### Common Options
 
 | Option | Description |
@@ -986,6 +1028,8 @@ malformed `aws-`, which is an error and not a synonym for `aws`.
 | `--state <path>` | Custom state file path |
 | `-v, --verbose` | Diagnostic output on **stderr** |
 
+<!-- --8<-- [end:options] -->
+<!-- --8<-- [start:output] -->
 ## 📝 Output and audit
 
 **stdout carries results; stderr carries everything else.** A result is the thing
@@ -1026,6 +1070,8 @@ for long-term retention.
 
 Reads — `validate`, `list`, `describe`, `doctor` — do not emit records.
 
+<!-- --8<-- [end:output] -->
+<!-- --8<-- [start:architecture] -->
 ## 🏗️ Architecture
 
 ```
@@ -1106,6 +1152,8 @@ func init() {
 }
 ```
 
+<!-- --8<-- [end:architecture] -->
+<!-- --8<-- [start:contributing] -->
 ## 🤝 Contributing
 
 Contributions are welcome! Here's how to get started:
@@ -1154,6 +1202,8 @@ go build -o cloud-auth .
 golangci-lint run
 ```
 
+<!-- --8<-- [end:contributing] -->
+<!-- --8<-- [start:usecases] -->
 ## 📋 Use Cases
 
 | Use Case | Source | Target | Mechanism |
@@ -1164,6 +1214,7 @@ golangci-lint run
 | Cross-Cloud Backup | GCP Cloud Run | Azure Blob | `azure-federated` |
 | GitOps with ArgoCD | Kubernetes | Multiple Clouds | `k8s-federation` |
 
+<!-- --8<-- [end:usecases] -->
 ## 📄 License
 
 This project is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)** - see the [LICENSE](LICENSE) file for details.
