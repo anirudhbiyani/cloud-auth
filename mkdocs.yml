@@ -16,10 +16,12 @@ hooks:
 
 theme:
   name: material
+  # Left-pane navigation: no top tabs, every section is a collapsible group, and the
+  # page's own table of contents is folded into the same pane.
   features:
-    - navigation.tabs
-    - navigation.sections
     - navigation.top
+    - navigation.path
+    - toc.integrate
     - navigation.footer
     - search.suggest
     - search.highlight
