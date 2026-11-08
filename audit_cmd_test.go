@@ -181,3 +181,14 @@ func TestShortResource(t *testing.T) {
 		}
 	}
 }
+
+// Legacy SigV4 trusts are counted and named, so an account can see how far it is from the standard OIDC path.
+func TestAuditCountsLegacySigV4Trusts(t *testing.T) {
+	records := []core.TrustRecord{
+		{Cloud: core.GCP, Resource: "p/providers/aws", Issuer: "aws:123456789012", LegacyProof: true},
+		{Cloud: core.GCP, Resource: "p/providers/github", Issuer: "https://token.actions.githubusercontent.com"},
+	}
+	if got := countLegacyProof(records); got != 1 {
+		t.Fatalf("countLegacyProof = %d, want 1", got)
+	}
+}

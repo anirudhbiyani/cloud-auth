@@ -144,7 +144,7 @@ Setup Options (Flag-based):
     --project-number <num>  GCP project number
     --pool-id <id>          Workload Identity Pool ID
     --provider-id <id>      Provider ID within the pool
-    --provider-type <type>  Provider type (aws, oidc)
+    --provider-type <type>  Provider type: oidc (recommended) or aws (legacy SigV4 trust)
     --aws-account-id <id>   AWS account ID (for aws provider type)
     --oidc-url <url>        OIDC issuer URL (for oidc provider type)
     --service-account <sa>  GCP service account email to impersonate
@@ -402,7 +402,7 @@ func parseSetupOpts(args []string) (*setupOpts, error) {
 	fs.StringVar(&opts.projectNumber, "project-number", "", "GCP project number")
 	fs.StringVar(&opts.poolID, "pool-id", "", "GCP workload identity pool id")
 	fs.StringVar(&opts.providerID, "provider-id", "", "GCP pool provider id")
-	fs.StringVar(&opts.providerType, "provider-type", "", "GCP pool provider type")
+	fs.StringVar(&opts.providerType, "provider-type", "", "GCP pool provider type: oidc (recommended) or aws (legacy SigV4 trust)")
 	fs.StringVar(&opts.awsAccountID, "aws-account-id", "", "AWS account id for a GCP aws-type provider")
 	fs.StringVar(&opts.serviceAccount, "service-account", "", "GCP service account to impersonate")
 	fs.StringVar(&opts.tenantID, "tenant-id", "", "Azure tenant id")
@@ -542,7 +542,12 @@ func buildGCPSpec(opts *setupOpts, source core.Cloud) (*core.GCPWorkloadIdentity
 		return nil, fmt.Errorf("--service-account is required for gcp-wif")
 	}
 	if opts.providerType == "" {
-		return nil, fmt.Errorf("--provider-type is required for gcp-wif (aws or oidc)")
+		return nil, fmt.Errorf("--provider-type is required for gcp-wif (oidc, or aws for the legacy SigV4 trust)")
+	}
+	if opts.providerType == "aws" {
+		fmt.Fprintln(os.Stderr, "note: --provider-type aws creates a legacy SigV4 trust that only AWS workloads without outbound "+
+			"identity federation need. Prefer --provider-type oidc with the account's STS issuer once "+
+			"iam:EnableOutboundWebIdentityFederation is on; `cloud-auth audit` flags SigV4 trusts as legacy.")
 	}
 
 	spec := &core.GCPWorkloadIdentityPoolSpec{

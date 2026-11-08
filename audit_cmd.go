@@ -192,6 +192,22 @@ func writeAuditTable(w io.Writer, records []core.TrustRecord, failures []error) 
 			"time their repository is renamed or transferred. That enforcement applies to any\n"+
 			"renamed or transferred repository, not only to new ones.\n", renameFragile)
 	}
+
+	if legacy := countLegacyProof(records); legacy > 0 {
+		fmt.Fprintf(w, "\n%d trust(s) accept the legacy SigV4 GetCallerIdentity proof (GCP aws-type providers).\n"+
+			"Once the AWS account enables outbound identity federation, replace each with an oidc\n"+
+			"provider trusting the account's STS issuer, so every target verifies the same OIDC token.\n", legacy)
+	}
+}
+
+func countLegacyProof(records []core.TrustRecord) int {
+	var n int
+	for _, r := range records {
+		if r.LegacyProof {
+			n++
+		}
+	}
+	return n
 }
 
 func countRenameFragile(records []core.TrustRecord) int {

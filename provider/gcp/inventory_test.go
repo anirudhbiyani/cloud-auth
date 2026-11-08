@@ -89,6 +89,10 @@ func TestGCPListTrustRecords(t *testing.T) {
 	if aws.Issuer != "aws:123456789012" {
 		t.Errorf("aws-type provider Issuer = %q; it trusts an account, not an OIDC issuer", aws.Issuer)
 	}
+	// SigV4 is the legacy proof; the record says so, and the OIDC provider's does not.
+	if !aws.LegacyProof || gh.LegacyProof {
+		t.Errorf("LegacyProof: aws=%v gh=%v, want true/false", aws.LegacyProof, gh.LegacyProof)
+	}
 }
 
 // A provider with no attribute condition admits every identity its issuer will mint.
