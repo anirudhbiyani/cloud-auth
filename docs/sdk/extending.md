@@ -130,7 +130,17 @@ A provider that can also enumerate its trusts implements `core.InventorySource`
 
 ## Where the design constraints are written down
 
-The non-obvious rules an extension must respect are in
-[Decisions](../design/decisions.md): audience pinning before transmit, fresh proof per
-exchange, no default Azure scope, refusing non-federatable runtimes rather than
-attempting them, and the shared-issuer subject-scope requirement.
+The non-obvious rules an extension must respect are enforced in code, and each has a
+test that pins it:
+
+| Rule | Where |
+|---|---|
+| A proof is checked against the target's audience before it is transmitted | `target/te.go` `checkAudienceBinding` |
+| Every `Exchange` mints a fresh proof; the source proof is never cached | `broker/broker.go`, pinned by `TestEveryExchangeMintsAFreshProof` |
+| Azure targets have no default scope | `core/target.go` `AzureTarget.Validate` |
+| Non-federatable runtimes are refused with `ErrNonFederatableSource`, never attempted | `core/federation_interfaces.go`, `source/aws.go`, `source/azure.go` |
+| A trust on a shared issuer must scope its subject | `core/specs.go` `validateSubjectScope` |
+
+[Decisions](../design/decisions.md) records the product-level choices (which systems
+are deliberately not sources or targets); the [federation matrix](../runtime/matrix.md)
+explains the refused runtimes.

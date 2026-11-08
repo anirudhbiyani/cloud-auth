@@ -230,3 +230,5 @@ test/harness/state/*
 # Compiled CLI binary (build artifact)
 /cloud-auth
 site/
+# Generated API reference (internal/apidoc); the docs build writes it.
+docs/sdk/reference/

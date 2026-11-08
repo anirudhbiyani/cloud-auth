@@ -51,8 +51,8 @@ The target types mirror the CLI flags:
 
 | Target | Type | Required fields |
 |---|---|---|
-| AWS | `core.AWSTarget` | `RoleARN`; optional `SessionName`, `TokenAudience` |
-| GCP | `core.GCPTarget` | `WorkloadIdentityPool` (full provider resource name); optional `ImpersonateServiceAccount`, `TokenAudience` |
+| AWS | `core.AWSTarget` | `RoleARN`; optional `SessionName`, `DurationSeconds` (900 to 43200), `TokenAudience` |
+| GCP | `core.GCPTarget` | `WorkloadIdentityPool` (provider resource name, with or without the `//iam.googleapis.com/` prefix); optional `ImpersonateServiceAccount`, `TokenAudience` |
 | Azure | `core.AzureTarget` | `Tenant`, `ClientID`, `Scope` (no default, on purpose); optional `TokenAudience` |
 | Anthropic | `core.AnthropicTarget` | `FederationRuleID`, `OrganizationID`, `ServiceAccountID`, `TokenAudience` (no default); optional `WorkspaceID` |
 | OpenAI | `core.OpenAITarget` | `IdentityProviderID`, `ServiceAccountID`; `TokenAudience` defaults to `https://api.openai.com/v1` |
@@ -200,7 +200,7 @@ each one exactly once. The broker already mints a new proof on every `Exchange`.
 
 ## Restrict which runtime may be detected
 
-Detection probes AWS, then GCP, then Azure, then GitHub Actions. A workload that must
+Detection probes GitHub Actions, then AWS, then GCP, then Azure. A workload that must
 only ever authenticate *as* one specific runtime pins it with a selector, so a
 misconfigured pod cannot quietly pick up the node's identity instead of its own.
 

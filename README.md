@@ -91,7 +91,7 @@ client (`--dry-run` works, a real run does not) · — not applicable.
 | **Azure** | ✅ | ✅ | ✅ | ✅ | Federated Credentials |
 | **Vault** | ✅ | ✅ | ✅ | ✅ | JWT Auth |
 | **GitHub OIDC** | — | — | — | — | Token source only |
-| **Kubernetes** | — | — | — | — | Token source only (`--type k8s-federation`, AWS target) |
+| **Kubernetes** | — | — | — | — | Token source only (`--type k8s-federation`; AWS, GCP or Azure target) |
 
 > **How far each ✅ has been verified.** AWS is exercised against live AWS in the
 > integration harness. The GCP, Azure and Vault clients are covered by unit tests
@@ -157,7 +157,7 @@ by design** — cloud-auth returns `ErrNonFederatableSource` rather than attempt
 | **GitHub Actions** — `actions` | OIDC (runner token endpoint) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **AWS** — `eks-irsa` | OIDC (projected SA token) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **AWS** — `ec2`, `ecs`, `lambda` | OIDC via `sts:GetWebIdentityToken` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **AWS** — `ec2`, `ecs`, `lambda` | SigV4 `GetCallerIdentity` | ✅ | ✅ | ❌ | ❌ | ❌ |
+| **AWS** — `ec2`, `ecs`, `lambda` | SigV4 `GetCallerIdentity` | ❌ | ✅ | ❌ | ❌ | ❌ |
 | **AWS** — `eks-pod-identity` | *none* | 🚫 | 🚫 | 🚫 | 🚫 | 🚫 |
 | **GCP** — `gce`, `gke`, `cloud-run`, `cloud-functions` | OIDC (metadata identity token) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Azure** — `aks-workload-identity` | OIDC (projected SA token) | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -261,8 +261,14 @@ cloud-auth setup --type gcp-wif \
   --provider-type aws \
   --aws-account-id 987654321098 \
   --service-account my-sa@my-gcp-project.iam.gserviceaccount.com \
+  --attribute-condition 'attribute.aws_role == "arn:aws:sts::987654321098:assumed-role/my-role"' \
+  --attribute-scope 'aws_role/arn:aws:sts::987654321098:assumed-role/my-role' \
   --source aws
 ```
+
+Both scoping flags are required: without the condition the provider accepts every
+identity the issuer mints for, and without the scope every identity in the pool may
+impersonate the service account.
 
 ### Example 3: Kubernetes → AWS (IRSA)
 
@@ -308,7 +314,7 @@ exchanges it at the target cloud's STS:
 | `doctor` | Detect the runtime and preflight a target; explains exactly why an exchange would be refused. `--explain` adds a claim-by-claim diff against the target's live trust; `--format json` for CI |
 | `exchange` | Obtain short-lived target credentials (`--format env\|json\|credential-process`) |
 | `exec` | Mint + exchange, then run a command with the credentials injected (`... -- <cmd>`) |
-| `init` | Print the target-side trust scaffold (Terraform/OpenTofu + CLI). Print-only; never applies changes |
+| `init` | Print the target-side trust scaffold (Terraform + CLI). Print-only; never applies changes |
 | `credential-process` | Emit the AWS `credential_process` JSON contract for zero-code SDK integration |
 | `config-validate` | Lint a declarative federation config file |
 
@@ -350,8 +356,9 @@ attribute to a cache.
 > Also worth knowing: `ANTHROPIC_API_KEY` sits *above* federation in the SDKs'
 > credential precedence, so a leftover key silently shadows it.
 
-`exec` and `env` hand the minted token to the child as `ANTHROPIC_AUTH_TOKEN`,
-which every Anthropic SDK reads as a bearer token.
+`exec` hands the minted token to the child as `ANTHROPIC_AUTH_TOKEN`, which every
+Anthropic SDK reads as a bearer token; `exchange --format env` prints the same
+variable as an `export` line.
 
 **The rule itself can be managed by cloud-auth.** `setup -f` with an
 `anthropic_federation` spec registers the issuer, creates (or reuses) the
@@ -485,7 +492,7 @@ target-side trust configuration applies:
 | Proof | Minted by | Accepted by |
 |---|---|---|
 | **OIDC** | `sts:GetWebIdentityToken` (AWS IAM outbound identity federation) | AWS, GCP, Azure |
-| **SigV4** | Signed `GetCallerIdentity` request | AWS, GCP |
+| **SigV4** | Signed `GetCallerIdentity` request | GCP |
 
 Outbound identity federation is **opt-in per AWS account**
 (`iam:EnableOutboundWebIdentityFederation`), and the calling principal needs
@@ -507,8 +514,10 @@ the library:
 > source starts presenting an OIDC JWT, and a pool with no `oidc` provider will
 > begin refusing the exchange.
 
-EKS IRSA and Pod Identity are unaffected — they already carry a projected OIDC
-token and never ask STS to vend one.
+EKS IRSA is unaffected: it already carries a projected OIDC token and never asks
+STS to vend one. EKS Pod Identity is unaffected too, but only because it is
+refused outright (`ErrNonFederatableSource`): it vends AWS-internal credentials
+with no externally verifiable token.
 
 <!-- --8<-- [end:awsproof] -->
 <!-- --8<-- [start:mechanisms] -->
@@ -993,16 +1002,23 @@ AZURE_SUBSCRIPTION_ID      # Subscription ID
 ```bash
 VAULT_ADDR                 # Vault server address
 VAULT_TOKEN                # Vault token
+VAULT_NAMESPACE            # Vault Enterprise namespace (optional)
 ```
 
 #### cloud-auth runtime
 
+```bash
+CLOUD_AUTH_AWS_PROOF       # auto | oidc | sigv4 (see AWS proof selection); read by the
+                           # AWS source directly, no config-file equivalent
+```
+
 These override the config file (env > file):
 
 ```bash
-CLOUD_AUTH_AWS_PROOF       # auto | oidc | sigv4 (see AWS proof selection)
 CLOUD_AUTH_SOURCE_DETECT   # auto, a cloud, or a cloud and sub-runtime
-CLOUD_AUTH_REFRESH_BUFFER  # credential refresh lead time, e.g. 5m
+CLOUD_AUTH_REFRESH_BUFFER  # credential refresh lead time, e.g. 5m; parsed and validated,
+                           # consumed by library users via adapters (the CLI commands
+                           # do not cache credentials)
 ```
 
 `source.detect` accepts `auto`, one of `github` / `aws` / `gcp` / `azure`, or a
@@ -1022,12 +1038,16 @@ malformed `aws-`, which is an error and not a synonym for `aws`.
 
 <!-- --8<-- [end:env] -->
 <!-- --8<-- [start:options] -->
-### Common Options
+### Common control-plane options
+
+These apply to `setup`, `validate`, `delete` and `list`. `audit` accepts `--verbose`
+only; the runtime commands (`doctor`, `exchange`, `exec`, `credential-process`) have
+none of them.
 
 | Option | Description |
 |--------|-------------|
-| `--dry-run` | Preview changes without applying them |
-| `--force` | Overwrite existing resources |
+| `--dry-run` | Preview changes without applying them (`setup`, `delete`) |
+| `--force` | `setup`: proceed despite subject-breadth warnings. `delete`: delete even resources cloud-auth does not own |
 | `--state <path>` | Custom state file path |
 | `-v, --verbose` | Diagnostic output on **stderr** |
 
