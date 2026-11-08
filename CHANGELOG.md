@@ -11,6 +11,7 @@ Breaking changes are called out explicitly.
 ## [Unreleased]
 
 ### Added
+- SDK section of the documentation site: runtime exchange and the AWS/GCP/Azure SDK adapters, control plane, audit inventory, error taxonomy and redaction, and the three extension interfaces. Every Go snippet is a complete program and is compile-checked.
 - Documentation site at https://anirudhbiyani.com/cloud-auth/ (MkDocs Material, deployed by `.github/workflows/docs.yml`). Pages pull their text from README.md by section markers, so the README stays the single source. Includes the integration harness guide and a test plan for the remaining unproven items.
 - OpenAI as a federation target: `--to openai --identity-provider <id> --service-account-id <id>` performs the RFC 8693 token exchange at auth.openai.com and hands the token to the child as `OPENAI_API_KEY`. Audience defaults to `https://api.openai.com/v1`.
 - Anthropic control plane: `setup -f` with an `anthropic_federation` spec registers the issuer, creates or reuses the service account, and creates the federation rule through the Admin API; `validate` diffs the live rule, `delete` archives in dependency order and keeps shared parents. Requires an `org:admin` OAuth token in `ANTHROPIC_AUTH_TOKEN`.

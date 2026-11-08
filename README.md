@@ -889,7 +889,10 @@ existed.
 <!-- --8<-- [start:library] -->
 ### Library Usage
 
-Use cloud-auth as a Go library for programmatic access:
+Use cloud-auth as a Go library for programmatic access. The full SDK guide, with
+compilable examples for the runtime exchange, the SDK adapters, the control plane,
+audit, errors, and extension points, is at
+[anirudhbiyani.com/cloud-auth/sdk](https://anirudhbiyani.com/cloud-auth/sdk/).
 
 ```go
 package main
