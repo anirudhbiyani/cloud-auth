@@ -514,8 +514,8 @@ the library:
 
 | Value | Behaviour |
 |---|---|
-| `auto` *(default)* | Prefer OIDC; fall back to SigV4 only when the account has **not** enabled outbound federation. An `AccessDenied` does **not** fall back — the feature is on and this principal is not permitted, which is a policy you need to see. |
-| `oidc` | Require the STS-vended JWT; fail if the account has not enabled it. |
+| `auto` *(default)* | Prefer OIDC; fall back to SigV4 when this principal cannot mint one: the account has not enabled outbound federation, **or** the role lacks `sts:GetWebIdentityToken` (IAM answers `AccessDenied` for that even when the feature is off, so the two are indistinguishable from the workload). The fallback logs a warning once per process. Any other STS error is surfaced. |
+| `oidc` | Require the STS-vended JWT; fail if the account has not enabled it or this role may not call it. Pin this when a silent downgrade to SigV4 is worse than an outage. |
 | `sigv4` | Require the SigV4 proof. GCP-only. |
 
 > **Pin `sigv4` if your GCP workload identity pool has only an `aws` provider.**

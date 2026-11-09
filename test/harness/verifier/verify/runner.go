@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/anirudhbiyani/cloud-auth/core"
@@ -26,6 +27,8 @@ const DefaultCaseTimeout = 60 * time.Second
 // Runner executes cases against an injected Exchanger.
 type Runner struct {
 	Exchanger Exchanger
+	// NewExchanger, when set, builds a fresh Exchanger per case so a case's aws_proof pin (applied through the environment) is honoured; the default broker reads CLOUD_AUTH_AWS_PROOF when it constructs the AWS source.
+	NewExchanger func() Exchanger
 	// Probes is the probe registry; nil means "no probes registered", which makes every requested probe an "unimplemented" soft result.
 	Probes map[string]Probe
 	// Scrubber redacts credential material from every recorded string.
@@ -111,7 +114,7 @@ func (r *Runner) RunCase(ctx context.Context, c Case) CaseResult {
 	defer cancel()
 
 	start := time.Now()
-	creds, rt, exErr := r.Exchanger.Exchange(cctx, target)
+	creds, rt, exErr := r.exchangerFor(c).Exchange(cctx, target)
 	res.DurationMS = time.Since(start).Milliseconds()
 
 	// Register secrets the moment they exist, before anything is recorded.
@@ -304,4 +307,20 @@ func (id *Identity) scrub(s *Scrubber) {
 	id.ClientID = s.Scrub(id.ClientID)
 	id.Audience = s.Scrub(id.Audience)
 	id.STSRequestID = s.Scrub(id.STSRequestID)
+}
+
+// awsProofEnv mirrors source.AWSProofEnv without importing the source package into the verifier core.
+const awsProofEnv = "CLOUD_AUTH_AWS_PROOF"
+
+// exchangerFor applies the case's AWS proof pin and returns the exchanger to use for it.
+func (r *Runner) exchangerFor(c Case) Exchanger {
+	if r.NewExchanger == nil {
+		return r.Exchanger
+	}
+	if c.AWSProof != "" {
+		_ = os.Setenv(awsProofEnv, c.AWSProof)
+	} else {
+		_ = os.Unsetenv(awsProofEnv)
+	}
+	return r.NewExchanger()
 }

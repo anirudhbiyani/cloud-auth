@@ -24,6 +24,10 @@ Breaking changes are called out explicitly.
 ### Changed
 - Dependencies upgraded (AWS SDK v2 1.47.8, azcore 1.24.0, x/net 0.62.0 and transitive). GitHub Actions bumped: checkout v7, setup-go v7, setup-python v7, upload-pages-artifact v5, deploy-pages v5, goreleaser-action v7.3.0, govulncheck v1.9.0, mkdocs-material 9.8.1. Go 1.27.3, golangci-lint v2.15.0 and gosec v2.30.0 were already the latest.
 
+### Fixed
+- `CLOUD_AUTH_AWS_PROOF=auto` never fell back to SigV4 in the common case. IAM authorizes `sts:GetWebIdentityToken` before the outbound-federation feature check, so a role without that permission receives `AccessDenied` even in an account where the feature is disabled, and `auto` treated `AccessDenied` as "do not fall back". Found by the first live Lambda harness run. `auto` now falls back on `AccessDenied` as well, with a once-per-process warning naming both possible causes; other STS errors are still surfaced; `oidc` still refuses.
+- Harness: SigV4 matrix rows pin `aws_proof: sigv4` so they test the SigV4 trust they name regardless of account state; the verifier rebuilds its exchanger per case to honour the pin.
+
 ### Changed
 - SigV4 `GetCallerIdentity` is now explicitly the legacy AWS proof; `sts:GetWebIdentityToken` (outbound identity federation) is the standard. Nothing is removed: `auto` still falls back when the account has outbound federation disabled, but it logs a warning once per process; `doctor` names the legacy path even when GCP accepts it; `setup --type gcp-wif --provider-type aws` prints a note recommending `oidc`; `cloud-auth audit` marks aws-type pool providers `legacy_proof` and counts them. Pin `CLOUD_AUTH_AWS_PROOF=sigv4` to keep the legacy path deliberately and silence the warning.
 
