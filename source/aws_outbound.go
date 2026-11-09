@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	ststypes "github.com/aws/aws-sdk-go-v2/service/sts/types"
+	"github.com/aws/smithy-go"
 
 	"github.com/anirudhbiyani/cloud-auth/core"
 	"github.com/anirudhbiyani/cloud-auth/internal/jwt"
@@ -118,16 +120,25 @@ func (a *AWS) mintPrincipalProof(ctx context.Context, audience string) (*core.So
 	if err == nil {
 		return tok, nil
 	}
-	// Fall back only on the account-level "not enabled" answer.
+	// Fall back when THIS principal cannot mint an OIDC token, for either of the two reasons STS gives.
+	// IAM authorizes sts:GetWebIdentityToken before the feature check, so a role without the permission gets AccessDenied even in an account where outbound federation is disabled; a live Lambda in exactly that state is how this was found. Any other STS failure (throttling, network, malformed response) is surfaced as is.
 	var disabled *ststypes.OutboundWebIdentityFederationDisabledException
-	if !errors.As(err, &disabled) {
+	switch {
+	case errors.As(err, &disabled):
+		if !a.outbound.off.Swap(true) {
+			slog.Warn("aws: outbound identity federation is disabled on this account; falling back to the legacy SigV4 proof, which only GCP accepts. " +
+				"Enable it (iam:EnableOutboundWebIdentityFederation) so this workload presents an OIDC token to every target, " +
+				"or pin CLOUD_AUTH_AWS_PROOF=sigv4 to make the legacy path explicit.")
+		}
+	case isAccessDenied(err):
+		if !a.outbound.off.Swap(true) {
+			slog.Warn("aws: this principal is not permitted to call sts:GetWebIdentityToken (AccessDenied); falling back to the legacy SigV4 proof, which only GCP accepts. " +
+				"Either outbound identity federation is disabled on the account, or the role lacks the sts:GetWebIdentityToken permission; " +
+				"fix whichever applies so this workload presents an OIDC token to every target, pin CLOUD_AUTH_AWS_PROOF=oidc to refuse instead, " +
+				"or pin CLOUD_AUTH_AWS_PROOF=sigv4 to make the legacy path explicit.")
+		}
+	default:
 		return nil, err
-	}
-	if !a.outbound.off.Swap(true) {
-		// Once per process: this is a security-relevant downgrade the operator should know about, not a routine branch.
-		slog.Warn("aws: outbound identity federation is disabled on this account; falling back to the legacy SigV4 proof, which only GCP accepts. " +
-			"Enable it (iam:EnableOutboundWebIdentityFederation) so this workload presents an OIDC token to every target, " +
-			"or pin CLOUD_AUTH_AWS_PROOF=sigv4 to make the legacy path explicit.")
 	}
 	return a.mintSigV4(ctx, audience)
 }
@@ -209,4 +220,13 @@ func (a *AWS) webIdentityAPI(ctx context.Context) (webIdentityTokenAPI, error) {
 		a.outbound.api = sts.NewFromConfig(cfg, func(o *sts.Options) { o.Region = region })
 	})
 	return a.outbound.api, a.outbound.err
+}
+
+// isAccessDenied recognises IAM's refusal of sts:GetWebIdentityToken, which STS reports as the AccessDenied error code.
+func isAccessDenied(err error) bool {
+	var ae smithy.APIError
+	if errors.As(err, &ae) {
+		return ae.ErrorCode() == "AccessDenied" || ae.ErrorCode() == "AccessDeniedException"
+	}
+	return strings.Contains(err.Error(), "AccessDenied")
 }

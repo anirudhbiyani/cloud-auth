@@ -86,6 +86,8 @@ type Case struct {
 	Target TargetSpec `json:"target"`
 	// Probe optionally names a post-exchange check that the credentials really work.
 	Probe string `json:"probe,omitempty"`
+	// AWSProof pins the AWS source proof for this case ("sigv4" or "oidc"); empty leaves auto. A SigV4 trust must be tested with SigV4 whatever the account's outbound-federation state.
+	AWSProof string `json:"aws_proof,omitempty"`
 }
 
 // TargetSpec is the JSON form of core.Target.
@@ -223,6 +225,11 @@ func (c Case) Validate() error {
 	}
 	if CanonicalRuntime(c.SourceRuntime) == "" {
 		return fmt.Errorf("unknown source_runtime %q", c.SourceRuntime)
+	}
+	switch c.AWSProof {
+	case "", "auto", "oidc", "sigv4":
+	default:
+		return fmt.Errorf("aws_proof %q: want auto, oidc, or sigv4", c.AWSProof)
 	}
 	switch c.Expect {
 	case ExpectSuccess:

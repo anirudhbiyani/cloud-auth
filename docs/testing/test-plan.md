@@ -53,6 +53,12 @@ LAMBDA=1 GOOGLE_PROJECT=<gcp-project> AWS_PROFILE=<profile> AWS_REGION=<region> 
 - `harness fully destroyed` in the log; `aws lambda list-functions` and
   `aws iam list-roles` show nothing prefixed `cloud-auth-test`.
 
+**What the first run found (2026-11-09).** Both Lambda rows failed with `AccessDenied` on
+`sts:GetWebIdentityToken`: the account has outbound federation disabled, but IAM refuses the
+call for a role without the permission before the feature check, so cloud-auth's `auto` never
+reached its SigV4 fallback. Fixed in cloud-auth (`auto` now falls back on `AccessDenied` too)
+and in the harness (SigV4 rows pin `aws_proof: sigv4`). Re-run to close.
+
 **Likely failure to watch for.** The Lambda's CloudWatch log (tail is appended to
 `state/results-aws-lambda.log`) saying `no supported runtime detected` means detection
 did not see `AWS_LAMBDA_FUNCTION_NAME`; that is a cloud-auth bug, not a harness one.

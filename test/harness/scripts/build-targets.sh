@@ -84,7 +84,7 @@ fi
 # 7. AWS EC2 (SigV4) -> GCP
 if [[ -n "$(g "$AWS1" ec2_instance_id)" && -n "$(g "$GCP2" provider_for_aws_sigv4)" ]]; then
   add "$(jq -n --arg p "$(g "$GCP2" provider_for_aws_sigv4)" --arg a "$(g "$GCP2" audience_for_aws_sigv4)" '{
-    name:"aws-ec2-sigv4-to-gcp", expect:"success", source_runtime:"aws-ec2",
+    name:"aws-ec2-sigv4-to-gcp", expect:"success", aws_proof:"sigv4", source_runtime:"aws-ec2",
     target:{cloud:"gcp", workload_identity_pool:$p, audience:$a}}')"
 fi
 
@@ -92,7 +92,7 @@ fi
 # RS256 OIDC). cloud-auth must refuse with actionable guidance, not fail obscurely.
 if [[ -n "$(g "$AWS1" ec2_instance_id)" && -n "$(g "$AZ2" client_id_for_gcp_source)" ]]; then
   add "$(jq -n --arg t "$(g "$AZ2" tenant_id)" --arg c "$(g "$AZ2" client_id_for_gcp_source)" --arg a "$(g "$AZ2" audience)" '{
-    name:"aws-ec2-to-azure-gap", expect:"error", expect_error:"ErrNoFirstClassPath",
+    name:"aws-ec2-to-azure-gap", expect:"error", expect_error:"ErrNoFirstClassPath", aws_proof:"sigv4",
     source_runtime:"aws-ec2",
     target:{cloud:"azure", tenant:$t, client_id:$c, audience:$a, scope:"https://management.azure.com/.default"}}')"
 fi
@@ -100,10 +100,10 @@ fi
 # 7b/8b. AWS Lambda: same SigV4 proof as EC2, no instance. Success to GCP, documented gap to Azure.
 if [[ -n "$(g "$AWSL" lambda_function_name)" ]]; then
   [[ -n "$(g "$GCP2" provider_for_aws_sigv4)" ]] && add "$(jq -n --arg p "$(g "$GCP2" provider_for_aws_sigv4)" --arg a "$(g "$GCP2" audience_for_aws_sigv4)" '{
-    name:"aws-lambda-sigv4-to-gcp", expect:"success", source_runtime:"aws-lambda",
+    name:"aws-lambda-sigv4-to-gcp", expect:"success", aws_proof:"sigv4", source_runtime:"aws-lambda",
     target:{cloud:"gcp", workload_identity_pool:$p, audience:$a}}')"
   [[ -n "$(g "$AZ2" client_id_for_gcp_source)" ]] && add "$(jq -n --arg t "$(g "$AZ2" tenant_id)" --arg c "$(g "$AZ2" client_id_for_gcp_source)" --arg a "$(g "$AZ2" audience)" '{
-    name:"aws-lambda-to-azure-gap", expect:"error", expect_error:"ErrNoFirstClassPath", source_runtime:"aws-lambda",
+    name:"aws-lambda-to-azure-gap", expect:"error", expect_error:"ErrNoFirstClassPath", aws_proof:"sigv4", source_runtime:"aws-lambda",
     target:{cloud:"azure", tenant:$t, client_id:$c, audience:$a, scope:"https://management.azure.com/.default"}}')"
 fi
 

@@ -116,12 +116,13 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, getenv fu
 	}
 
 	runner := &verify.Runner{
-		Exchanger:   newExchanger(),
-		Probes:      verify.DefaultProbes(),
-		Scrubber:    verify.NewScrubber(),
-		Skew:        opts.skew,
-		Timeout:     opts.timeout,
-		StrictProbe: opts.probeStrict,
+		Exchanger:    newExchanger(),
+		NewExchanger: newExchanger,
+		Probes:       verify.DefaultProbes(),
+		Scrubber:     verify.NewScrubber(),
+		Skew:         opts.skew,
+		Timeout:      opts.timeout,
+		StrictProbe:  opts.probeStrict,
 	}
 
 	started := time.Now()

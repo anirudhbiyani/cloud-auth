@@ -154,15 +154,32 @@ func TestOutboundAutoFallsBackToSigV4AndRemembers(t *testing.T) {
 	}
 }
 
+// IAM authorizes before the feature check, so a role without sts:GetWebIdentityToken sees AccessDenied even when outbound federation is disabled. That is the common case, and auto must fall back for it; a live Lambda proved it.
+func TestOutboundAutoFallsBackOnAccessDenied(t *testing.T) {
+	f := &fakeSTS{err: errors.New("api error AccessDenied: User is not authorized to perform: sts:GetWebIdentityToken")}
+	a := NewAWS(ec2Env(), WithAWSWebIdentityTokenAPI(f),
+		WithAWSCredentials(awscreds.NewStaticCredentialsProvider("AKIAEXAMPLE", "secret", "")))
+
+	tok, err := a.Mint(context.Background(), "sts.googleapis.com")
+	if err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+	if tok.Kind != core.AWSSigV4 {
+		t.Errorf("proof kind = %v, want SigV4 after AccessDenied", tok.Kind)
+	}
+	if _, err := a.Mint(context.Background(), "sts.googleapis.com"); err != nil || f.calls != 1 {
+		t.Errorf("second mint: err=%v calls=%d; the verdict should be cached like the disabled one", err, f.calls)
+	}
+}
+
 // Any other STS failure is surfaced, not papered over with a different proof.
-func TestOutboundAutoDoesNotFallBackOnAccessDenied(t *testing.T) {
-	sentinel := errors.New("AccessDenied: not authorized to perform sts:GetWebIdentityToken")
+func TestOutboundAutoSurfacesOtherSTSErrors(t *testing.T) {
+	sentinel := errors.New("ThrottlingException: Rate exceeded")
 	f := &fakeSTS{err: sentinel}
 	a := NewAWS(ec2Env(), WithAWSWebIdentityTokenAPI(f))
 
-	_, err := a.Mint(context.Background(), "sts.googleapis.com")
-	if !errors.Is(err, sentinel) {
-		t.Errorf("err = %v, want the STS error surfaced; a silent switch to SigV4 hides a policy gap", err)
+	if _, err := a.Mint(context.Background(), "sts.googleapis.com"); !errors.Is(err, sentinel) {
+		t.Errorf("err = %v, want the STS error surfaced", err)
 	}
 }
 

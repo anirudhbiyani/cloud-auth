@@ -167,6 +167,12 @@ Stage 2 for cloud X creates the trust that lets **other** clouds in. Naming is
   subject, audience = `audience`. **Issuer/subject/audience match is
   case-sensitive** — emit them exactly as stage 1 reported them.
 
+`aws_proof` (optional, `sigv4` | `oidc` | `auto`) pins the AWS source proof for one
+case. The SigV4 rows set it, so they test the SigV4 trust they name regardless of
+whether the account has outbound identity federation enabled or the role may call
+`sts:GetWebIdentityToken`; the verifier applies it through `CLOUD_AUTH_AWS_PROOF`
+and rebuilds its exchanger per case.
+
 ## The pair matrix under test
 
 | # | Source runtime | Target | Mechanism | Needs |
@@ -197,7 +203,8 @@ read tofu state.
       "expect": "success",
       "source_runtime": "gcp-gce",
       "target": { "cloud": "aws", "role": "arn:aws:iam::123:role/...", "audience": "sts.amazonaws.com" },
-      "probe": "sts-get-caller-identity"
+      "probe": "sts-get-caller-identity",
+      "aws_proof": "sigv4"
     },
     {
       "name": "aws-ec2-to-azure-gap",
