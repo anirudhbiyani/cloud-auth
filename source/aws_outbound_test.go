@@ -214,6 +214,10 @@ func TestOutboundProofSigV4SkipsSTSEntirely(t *testing.T) {
 	if f.calls != 0 {
 		t.Errorf("GetWebIdentityToken called %d times under AWSProofSigV4, want 0", f.calls)
 	}
+	// Regression: signing eu-west-1 against the global endpoint made GCP STS reject the proof ("Credential should be scoped to a valid region").
+	if !strings.Contains(tok.Value, `"url":"https://sts.eu-west-1.amazonaws.com/`) || !strings.Contains(tok.Value, "/eu-west-1/sts/aws4_request") {
+		t.Errorf("proof endpoint and credential scope must both be eu-west-1: %s", tok.Value)
+	}
 }
 
 // EKS IRSA already has a projected OIDC token; the outbound path must not intercept it.
