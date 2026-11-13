@@ -9,7 +9,7 @@ pages that follow are complete, compilable programs.
 go get github.com/anirudhbiyani/cloud-auth@latest
 ```
 
-Module path `github.com/anirudhbiyani/cloud-auth`, Go 1.27.3 or newer. API reference on
+Module path `github.com/anirudhbiyani/cloud-auth`, Go 1.27.4 or newer. API reference on
 [pkg.go.dev](https://pkg.go.dev/github.com/anirudhbiyani/cloud-auth).
 
 ## Two halves, one module
