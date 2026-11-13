@@ -12,9 +12,9 @@ independently.
 | 3 | OpenAI runtime exchange | fake-API tested only | OpenAI org with a Workload Identity Provider |
 | 4 | GitHub Actions as a source, end to end | workflow exists, never triggered | the `AWS_SMOKE_ROLE_ARN` repository variable, or the `role-arn` dispatch input |
 
-Items 2 and 3 share a sub-task: the harness verifier does not yet know the `anthropic`
-and `openai` target clouds. Adding them is a small change to `verifier/verify/plan.go`
-(two cases in the target switch) and is step 0 for both.
+Items 2 and 3 can ride the harness: the verifier knows the `anthropic` and `openai`
+target clouds, so once the trust exists a hand-written state file turns each into a row of
+the pair matrix (see the last section).
 
 ---
 
@@ -46,8 +46,8 @@ LAMBDA=1 GOOGLE_PROJECT=<gcp-project> AWS_PROFILE=<profile> AWS_REGION=<region> 
 **Pass criteria**
 
 - `state/results-aws-lambda.json` has `aws-lambda-sigv4-to-gcp` with `status: pass`. This
-  means the exchange succeeded; the verifier has no GCS probe yet, so adding one that
-  reads the harness bucket object is part of closing this item.
+  means the exchange succeeded and, with the `gcs-get-object` probe, that the token read
+  the harness bucket object.
 - `aws-lambda-to-azure-gap` has `status: pass` with `expect: error` and the error names
   `ErrNoFirstClassPath`: the refusal is correct and actionable.
 - `harness fully destroyed` in the log; `aws lambda list-functions` and
@@ -71,9 +71,9 @@ exposed two more bugs, both fixed in cloud-auth:
 
 **Result: closed.** Final run, Lambda in a region other than `us-east-1`:
 `aws-lambda-sigv4-to-gcp` pass, `aws-lambda-to-azure-gap` pass (`ErrNoFirstClassPath`),
-`harness fully destroyed`, no `cloud-auth-test` Lambda functions or IAM roles left. Still
-open from the pass criteria: the verifier has no GCS probe, so "pass" proves the token
-exchange, not a read of the bucket.
+`harness fully destroyed`, no `cloud-auth-test` Lambda functions or IAM roles left. That
+run proved the token exchange only. The verifier has since gained a `gcs-get-object` probe
+on every GCP success row; it has not yet been run live.
 
 **Likely failure to watch for.** The Lambda's CloudWatch log (tail is appended to
 `state/results-aws-lambda.log`) saying `no supported runtime detected` means detection
@@ -192,20 +192,24 @@ already does `doctor` plus `exchange` from a runner; it has never been run.
 
 ---
 
-## Adding the AI targets to the harness verifier (step 0 for items 2 and 3)
+## Running items 2 and 3 through the harness
 
-The verifier's `TargetSpec` has fields for AWS, GCP, and Azure only. Two additions make
-items 2 and 3 repeatable instead of manual:
+The verifier accepts `anthropic` and `openai` targets and probes each with a model-list
+call. Neither platform has a tofu provider, so set the trust up by hand as described
+above, then describe it in a state file; `build-targets.sh` adds one row per file.
 
-- `TargetSpec` gains `federation_rule_id`, `organization_id`, `service_account_id`,
-  `workspace_id` (Anthropic) and `identity_provider_id` (OpenAI); `Target()` returns
-  `core.AnthropicTarget` / `core.OpenAITarget`.
-- A probe per platform: `GET /v1/models` with the bearer token, pass on 200.
-- `build-targets.sh` reads `state/anthropic.json` and `state/openai.json`, hand-written
-  since neither has a tofu provider, and emits one case per source runtime.
+```bash
+# test/harness/state/anthropic.json
+{"source_runtime":"gcp-gke","audience":"<aud>","federation_rule_id":"fdrl_...",
+ "organization_id":"<uuid>","service_account_id":"svac_...","workspace_id":"wrkspc_..."}
 
-With that in place, items 2 and 3 become two more rows in the pair matrix and run
-on every harness cycle. Estimated size: about 80 lines of Go and 20 of shell.
+# test/harness/state/openai.json
+{"source_runtime":"gcp-gke","audience":"https://api.openai.com/v1",
+ "identity_provider_id":"<provider-id>","service_account_id":"<sa-id>"}
+```
+
+`source_runtime` is the one runtime whose token the rule or mapping accepts. The files
+hold ids only, no secrets, and survive `down.sh`. Not yet run live.
 
 ---
 

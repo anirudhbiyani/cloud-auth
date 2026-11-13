@@ -107,6 +107,25 @@ if [[ -n "$(g "$AWSL" lambda_function_name)" ]]; then
     target:{cloud:"azure", tenant:$t, client_id:$c, audience:$a, scope:"https://management.azure.com/.default"}}')"
 fi
 
+# Every GCP success row also reads the probe object from the test bucket, so "pass" means the token works, not just that it was issued.
+if [[ -n "$(g "$GCP2" test_bucket)" ]]; then
+  cases="$(jq -c --arg b "$(g "$GCP2" test_bucket)" 'map(if .target.cloud=="gcp" and .expect=="success"
+    then .probe="gcs-get-object" | .target.bucket=$b else . end)' <<<"$cases")"
+fi
+
+# 9/10. Anthropic and OpenAI: neither has a tofu provider, so the trust is set up by hand (docs/testing/test-plan.md)
+# and described in a hand-written state/anthropic.json / state/openai.json:
+#   {"source_runtime":"gcp-gke","audience":"...","federation_rule_id":"fdrl_...","organization_id":"...","service_account_id":"svac_...","workspace_id":"wrkspc_..."}
+#   {"source_runtime":"gcp-gke","audience":"https://api.openai.com/v1","identity_provider_id":"...","service_account_id":"..."}
+# ponytail: one source runtime per file; make it an array when a second source is federated.
+for ai in anthropic openai; do
+  f="$STATE_DIR/$ai.json"
+  [[ -f "$f" ]] || continue
+  add "$(jq -c --arg ai "$ai" '{
+    name:"\(.source_runtime)-to-\($ai)", expect:"success", source_runtime:.source_runtime,
+    target:(del(.source_runtime) + {cloud:$ai}), probe:"\($ai)-list-models"}' "$f")"
+done
+
 jq -n --arg r "$RUN_ID" --argjson c "$cases" '{run_id:$r, cases:$c}' > "$STATE_DIR/targets.json"
 ok "state/targets.json — $(jq '.cases|length' "$STATE_DIR/targets.json") case(s)"
 jq -r '.cases[] | "     \(.name)  [\(.expect)]  \(.source_runtime) -> \(.target.cloud)"' "$STATE_DIR/targets.json"

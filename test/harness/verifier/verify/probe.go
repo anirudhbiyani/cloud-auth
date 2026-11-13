@@ -22,7 +22,15 @@ import (
 const (
 	// ProbeSTSGetCallerIdentity proves AWS credentials work by calling sts:GetCallerIdentity with them and reporting the resolved ARN.
 	ProbeSTSGetCallerIdentity = "sts-get-caller-identity"
+	// ProbeGCSGetObject proves a GCP token works by reading the harness probe object from target.bucket.
+	ProbeGCSGetObject = "gcs-get-object"
+	// ProbeAnthropicListModels and ProbeOpenAIListModels prove a minted token works by listing models.
+	ProbeAnthropicListModels = "anthropic-list-models"
+	ProbeOpenAIListModels    = "openai-list-models"
 )
+
+// gcsProbeObject is the object tofu/gcp/stage2 writes into the test bucket.
+const gcsProbeObject = "cloud-auth-probe.txt"
 
 // probeSTSEndpoint is the global STS endpoint the AWS probe signs against.
 const probeSTSEndpoint = "https://sts.amazonaws.com/"
@@ -34,6 +42,52 @@ const probeHTTPTimeout = 15 * time.Second
 func DefaultProbes() map[string]Probe {
 	return map[string]Probe{
 		ProbeSTSGetCallerIdentity: STSGetCallerIdentityProbe(nil),
+		ProbeGCSGetObject: BearerGetProbe(nil, core.GCP, func(c Case) (string, error) {
+			if c.Target.Bucket == "" {
+				return "", fmt.Errorf("%s probe needs target.bucket", ProbeGCSGetObject)
+			}
+			return "https://storage.googleapis.com/storage/v1/b/" + url.PathEscape(c.Target.Bucket) + "/o/" + gcsProbeObject, nil
+		}, nil),
+		ProbeAnthropicListModels: BearerGetProbe(nil, core.Anthropic, func(Case) (string, error) {
+			return "https://api.anthropic.com/v1/models?limit=1", nil
+		}, http.Header{"Anthropic-Version": {"2023-06-01"}}),
+		ProbeOpenAIListModels: BearerGetProbe(nil, core.OpenAI, func(Case) (string, error) {
+			return "https://api.openai.com/v1/models", nil
+		}, nil),
+	}
+}
+
+// BearerGetProbe returns a probe that GETs a URL with the exchanged bearer token and passes on 200.
+func BearerGetProbe(client *http.Client, cloud core.Cloud, urlFor func(Case) (string, error), extra http.Header) Probe {
+	if client == nil {
+		client = &http.Client{Timeout: probeHTTPTimeout}
+	}
+	return func(ctx context.Context, creds *core.Credentials, c Case) (string, error) {
+		if creds == nil || creds.Cloud != cloud {
+			return "", fmt.Errorf("probe needs %s credentials, got cloud %q", cloud, credCloud(creds))
+		}
+		u, err := urlFor(c)
+		if err != nil {
+			return "", err
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			return "", err
+		}
+		for k, v := range extra {
+			req.Header[k] = v
+		}
+		req.Header.Set("Authorization", "Bearer "+creds.AccessToken)
+		resp, err := client.Do(req) // #nosec G704 -- probe URLs are fixed API hosts; only the bucket name comes from the harness's own plan.
+		if err != nil {
+			return "", err
+		}
+		defer func() { _ = resp.Body.Close() }()
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<12))
+		if resp.StatusCode != http.StatusOK {
+			return "", fmt.Errorf("GET %s returned %d: %s", req.URL.Host+req.URL.Path, resp.StatusCode, string(raw))
+		}
+		return fmt.Sprintf("GET %s -> 200", req.URL.Host+req.URL.Path), nil
 	}
 }
 
