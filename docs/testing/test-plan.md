@@ -1,13 +1,13 @@
 # Test plan: open items
 
-Everything cloud-auth claims has been proven live against real clouds, except the four
-items below. This is the plan to close them. Each item lists what it needs, the exact
+Everything cloud-auth claims has been proven live against real clouds, except items 2 to 4
+below (item 1 was closed on 2026-11-13). This is the plan to close them. Each item lists what it needs, the exact
 steps, what "pass" means, and what it costs, so any one of them can be picked up
 independently.
 
 | # | Item | Status today | Needs |
 |---|---|---|---|
-| 1 | AWS Lambda as a source (SigV4 to GCP, negative to Azure) | implemented, unit-tested, never run live | AWS dev account, GCP dev project |
+| 1 | AWS Lambda as a source (SigV4 to GCP, negative to Azure) | **closed 2026-11-13**: both rows pass live | nothing |
 | 2 | Anthropic control plane: `setup` / `validate` / `delete` of federation rules | fake-API tested only | Anthropic org with an `org:admin` login |
 | 3 | OpenAI runtime exchange | fake-API tested only | OpenAI org with a Workload Identity Provider |
 | 4 | GitHub Actions as a source, end to end | workflow exists, never triggered | the `AWS_SMOKE_ROLE_ARN` repository variable, or the `role-arn` dispatch input |
@@ -57,7 +57,23 @@ LAMBDA=1 GOOGLE_PROJECT=<gcp-project> AWS_PROFILE=<profile> AWS_REGION=<region> 
 `sts:GetWebIdentityToken`: the account has outbound federation disabled, but IAM refuses the
 call for a role without the permission before the feature check, so cloud-auth's `auto` never
 reached its SigV4 fallback. Fixed in cloud-auth (`auto` now falls back on `AccessDenied` too)
-and in the harness (SigV4 rows pin `aws_proof: sigv4`). Re-run to close.
+and in the harness (SigV4 rows pin `aws_proof: sigv4`).
+
+**What the re-run found (2026-11-13).** With the fallback working, the SigV4 to GCP row
+exposed two more bugs, both fixed in cloud-auth:
+
+- The proof was signed with the Lambda's region but addressed to the global
+  `sts.amazonaws.com` endpoint, which only accepts a `us-east-1` scope. GCP STS answered
+  `Credential should be scoped to a valid region`. The proof now targets
+  `sts.<region>.amazonaws.com`.
+- GCP STS URL-decodes the AWS proof twice. Unescaped, every `+` in the session token became
+  a space and AWS answered `InvalidClientTokenId`. The proof is now query-escaped first.
+
+**Result: closed.** Final run, Lambda in a region other than `us-east-1`:
+`aws-lambda-sigv4-to-gcp` pass, `aws-lambda-to-azure-gap` pass (`ErrNoFirstClassPath`),
+`harness fully destroyed`, no `cloud-auth-test` Lambda functions or IAM roles left. Still
+open from the pass criteria: the verifier has no GCS probe, so "pass" proves the token
+exchange, not a read of the bucket.
 
 **Likely failure to watch for.** The Lambda's CloudWatch log (tail is appended to
 `state/results-aws-lambda.log`) saying `no supported runtime detected` means detection
