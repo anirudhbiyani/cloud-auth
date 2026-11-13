@@ -108,6 +108,18 @@ type TargetSpec struct {
 	Tenant   string `json:"tenant,omitempty"`
 	ClientID string `json:"client_id,omitempty"`
 	Scope    string `json:"scope,omitempty"`
+
+	// Anthropic (service_account_id is shared with OpenAI)
+	FederationRuleID string `json:"federation_rule_id,omitempty"`
+	OrganizationID   string `json:"organization_id,omitempty"`
+	ServiceAccountID string `json:"service_account_id,omitempty"`
+	WorkspaceID      string `json:"workspace_id,omitempty"`
+
+	// OpenAI
+	IdentityProviderID string `json:"identity_provider_id,omitempty"`
+
+	// Bucket is the GCS bucket the gcs-get-object probe reads; not part of the target binding.
+	Bucket string `json:"bucket,omitempty"`
 }
 
 // pool returns the workload identity pool/provider under whichever key it came.
@@ -141,6 +153,20 @@ func (s TargetSpec) Target() (core.Target, error) {
 			ClientID:      s.ClientID,
 			TokenAudience: s.Audience,
 			Scope:         s.Scope,
+		}, nil
+	case core.Anthropic:
+		return core.AnthropicTarget{
+			FederationRuleID: s.FederationRuleID,
+			OrganizationID:   s.OrganizationID,
+			ServiceAccountID: s.ServiceAccountID,
+			WorkspaceID:      s.WorkspaceID,
+			TokenAudience:    s.Audience,
+		}, nil
+	case core.OpenAI:
+		return core.OpenAITarget{
+			IdentityProviderID: s.IdentityProviderID,
+			ServiceAccountID:   s.ServiceAccountID,
+			TokenAudience:      s.Audience,
 		}, nil
 	default:
 		return nil, fmt.Errorf("verify: unsupported target cloud %q", cloud)
@@ -275,6 +301,13 @@ func (s TargetSpec) validate() error {
 		if s.ClientID == "" {
 			return errors.New("azure target requires client_id")
 		}
+	case core.Anthropic, core.OpenAI:
+		// The core targets already know their required ids; reuse that.
+		t, err := s.Target()
+		if err != nil {
+			return err
+		}
+		return t.Validate()
 	}
 	return nil
 }

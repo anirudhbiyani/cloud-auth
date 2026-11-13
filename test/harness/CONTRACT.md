@@ -150,8 +150,9 @@ Stage 2 for cloud X creates the trust that lets **other** clouds in. Naming is
   on the pool subject — do NOT require SA impersonation (that path is the opt-in
   fallback, not the default under test).
 - Grant `roles/storage.objectViewer` on `test_bucket` to the federated principal so
-  a GCS probe can prove the token works. Today the verifier ships one probe
-  (`sts-get-caller-identity`); for GCP targets it asserts a successful exchange only.
+  a GCS probe can prove the token works. The verifier ships four probes:
+  `sts-get-caller-identity` (AWS), `gcs-get-object` (GCP, reads `cloud-auth-probe.txt`
+  from `target.bucket`), `anthropic-list-models` and `openai-list-models`.
 
 ### `state/azure-stage2.json`  (Azure as TARGET)
 ```json
