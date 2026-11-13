@@ -155,7 +155,7 @@ These are deliberate, and worth preserving if you edit the scripts:
 
 - [OpenTofu](https://opentofu.org/docs/intro/install/) ≥ 1.6 (`tofu`)
 - `jq`, plus the CLI for each cloud you enable: `aws`, `gcloud`, `az`, `kubectl`
-- Go 1.27.3 (to build the verifier)
+- Go 1.27.4 (to build the verifier)
 - Credentials with enough privilege to create the resources in each
   `tofu/<cloud>/README.md`, and to create IAM/trust objects
 

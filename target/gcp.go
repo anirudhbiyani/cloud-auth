@@ -84,12 +84,17 @@ func (e *GCPExchanger) Exchange(ctx context.Context, tok *core.SourceToken, targ
 	if err := checkAudienceBinding(tok, audience); err != nil {
 		return nil, fmt.Errorf("gcp: %w", err)
 	}
+	subject := tok.Reveal()
+	if tok.Kind == core.AWSSigV4 {
+		// GCP STS URL-decodes the AWS proof a second time, so it must be escaped before form encoding; unescaped, every '+' in the session token turns into a space and AWS answers InvalidClientTokenId.
+		subject = url.QueryEscape(subject)
+	}
 	form := url.Values{
 		"grant_type":           {grantTypeTokenExch},
 		"audience":             {audience},
 		"scope":                {gcpScope},
 		"requested_token_type": {requestedTokenAccess},
-		"subject_token":        {tok.Reveal()},
+		"subject_token":        {subject},
 		"subject_token_type":   {subjectTokenType(tok.Kind)},
 	}
 	body, status, err := doWithRetry(ctx, e.httpClient, e.maxRetries, e.backoff, func() (*http.Request, error) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -39,20 +40,25 @@ func TestGCPExchangeDirectAccessOIDC(t *testing.T) {
 }
 
 func TestGCPExchangeSigV4SubjectType(t *testing.T) {
-	var gotSubjectType string
+	var gotSubjectType, gotSubject string
 	sts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotSubjectType = r.FormValue("subject_token_type")
+		gotSubject = r.FormValue("subject_token")
 		w.Write([]byte(`{"access_token":"tok","expires_in":3600}`))
 	}))
 	defer sts.Close()
 
-	sigv4 := &core.SourceToken{Kind: core.AWSSigV4, Value: `{"url":"x"}`, Audience: gcpTarget().Audience()}
+	sigv4 := &core.SourceToken{Kind: core.AWSSigV4, Value: `{"url":"x","t":"a+b/c="}`, Audience: gcpTarget().Audience()}
 	e := NewGCPExchanger(WithGCPSTSEndpoint(sts.URL), WithGCPHTTPClient(sts.Client()))
 	if _, err := e.Exchange(context.Background(), sigv4, gcpTarget()); err != nil {
 		t.Fatalf("Exchange: %v", err)
 	}
 	if gotSubjectType != "urn:ietf:params:aws:token-type:aws4_request" {
 		t.Errorf("subject_token_type = %q, want aws4_request for SigV4", gotSubjectType)
+	}
+	// Regression: GCP decodes the proof twice, so after one form decode it must still be query-escaped (a bare '+' in the session token became a space).
+	if want := url.QueryEscape(sigv4.Value); gotSubject != want {
+		t.Errorf("subject_token = %q, want query-escaped %q", gotSubject, want)
 	}
 }
 

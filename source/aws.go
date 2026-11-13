@@ -180,7 +180,13 @@ func (a *AWS) mintSigV4(ctx context.Context, audience string) (*core.SourceToken
 		return nil, err
 	}
 	_ = src // recorded on the token below
-	reqURL := a.stsEndpoint + "/?Action=GetCallerIdentity&Version=2011-06-15"
+	// The credential scope's region must match the endpoint: the global endpoint only accepts us-east-1, so sign against the regional one.
+	// ponytail: commercial partition only; aws-cn/aws-us-gov need their own DNS suffix when someone asks.
+	endpoint := a.stsEndpoint
+	if endpoint == DefaultSTSEndpoint && region != defaultSigningRegion {
+		endpoint = "https://sts." + region + ".amazonaws.com"
+	}
+	reqURL := endpoint + "/?Action=GetCallerIdentity&Version=2011-06-15"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, nil)
 	if err != nil {
 		return nil, err
